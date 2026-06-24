@@ -3,7 +3,7 @@
 This file is the first repository document a coding agent must read.
 It defines development behavior for building.
 
-## 1. Authority order
+## Authority order
 
 Use this order whenever instructions, docs, source material, or tool output conflict:
 
@@ -14,13 +14,13 @@ Use this order whenever instructions, docs, source material, or tool output conf
 
 When sources conflict, preserve runtime safety and truthfulness, stop the conflicting path, record the conflict in the active spec/plan/closeout, and repair the documentation or code before continuing.
 
-## 2. Superpowers workflow requirement
+## Superpowers workflow requirement
 
 This project is designed for `obra/superpowers`. Use installed Superpowers skills exactly as they apply. User/project instructions define what to build; Superpowers defines the execution discipline unless a higher-priority instruction explicitly overrides it.
 
 Superpowers is a mandatory development flow for any feature, refactor, bug fix, or architecture change.
 
-## 3. Source-layout rules
+## Source-layout rules
 
 Use `docs/development/architecture/source-layout.md` for the package map and ownership rules.
 
@@ -35,7 +35,7 @@ Core rules:
 - Files changing together should live together. Split by responsibility and invariants, not by fashionable layers.
 - A source file crossing about 800 lines or three distinct runtime responsibilities triggers a source-layout review. A file crossing about 1,500 lines requires a split plan or a documented deep-module rationale in the closeout.
 
-## 4. Documentation maintenance
+## Documentation maintenance
 
 Documentation is code-adjacent behavior control for coding agents. Keep it explicit, current, and non-contradictory.
 
@@ -46,7 +46,19 @@ When docs change:
 - Link historical documents to the current canonical source when preserving history.
 - Record architecture-significant decisions as ADRs under `docs/development/decisions/` using the template.
 
-## 5. Failure response
+
+## Engineering Rules
+
+- Treat fixes as root-cause engineering work, not symptom suppression.
+- Do not introduce tactical patches, brittle special cases, or temporary workarounds unless the user explicitly asks for a short-lived mitigation.
+- Before changing code, identify the failure mode, underlying cause, and durable system boundary for the fix.
+- Prefer simple designs that remove the class of problem over handling only the observed example.
+- Validate normal flows, boundary conditions, failure paths, and relevant edge cases.
+- If validation exposes a weakness, redesign and revalidate within project constraints.
+- Do not present unverified assumptions as completed work. Document residual risk.
+- If the same helper, mapper, or conversion logic appears in more than one production file, move it to a shared utility, composable, or exported helper unless there is a clear documented reason not to. Before creating a helper, search for an existing one.
+
+## Failure response
 
 When a bug, failed gate, unclear invariant, or inconsistent artifact appears:
 
@@ -61,7 +73,7 @@ When a bug, failed gate, unclear invariant, or inconsistent artifact appears:
 
 If three attempts fail or every fix reveals a new shared-state/coupling problem, stop and reassess architecture before further fixes.
 
-## 15. Completion checklist
+## Completion checklist
 
 Before saying work is complete:
 
