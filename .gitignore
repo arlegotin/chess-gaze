@@ -1,0 +1,35 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local virtual environments and uv cache
+.venv/
+.uv-cache/
+
+# Build and packaging outputs
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local experiment artifacts and large generated files
+data/
+artifacts/
+models/
+runs/
+*.ckpt
+*.onnx
+*.pt
+*.pth
