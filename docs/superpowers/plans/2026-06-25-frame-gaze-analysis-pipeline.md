@@ -19,7 +19,11 @@
 - Accept initial optional arguments `--output-root`, `--models-root`, and `--config`.
 - Analyze one input video per command invocation; no batch mode.
 - Reject missing, unreadable, unsupported, model-missing, checksum-mismatched, or license-unapproved inputs before creating a run directory.
+- Repo owner granted license/use approval for UniGaze `unigaze_h14_joint` under MG-NC-RAI-2.0 on 2026-06-25; implementation must record that approval in registry or config metadata.
 - Never download model assets during analysis.
+- `HF_TOKEN` may be read from `.env` only by explicit setup/prefetch tooling for Hugging Face model asset downloads.
+- `HF_TOKEN` must never be required by `chess-gaze analyze`, logged, persisted into artifacts, or transmitted during analysis.
+- No other secret or credential is required to start implementation.
 - Do not send video frames, crops, metadata, or model inputs to a remote service.
 - Preserve every decoded source frame; no sampling, skipping, dropping, deduplication, tracking, temporal smoothing, interpolation, or across-frame averaging.
 - Raw frames are lossless PNG by default.
@@ -56,6 +60,7 @@
 - Create `src/chess_gaze/image_io.py` for RGB/BGR boundaries, image encoding, hashing, and atomic writes.
 - Create `src/chess_gaze/model_assets.py` for committed registry loading and local asset validation.
 - Create `src/chess_gaze/model_registry.json` as the committed model registry authority.
+- Create `.env.example` documenting `HF_TOKEN` as the only supported secret-like setup variable.
 - Create `src/chess_gaze/video_decode.py` for PyAV source inspection and frame iteration.
 - Create `src/chess_gaze/calibration.py` for constants, camera assumptions, landmark indices, and derived setup summaries.
 - Create `src/chess_gaze/face_observation.py` for MediaPipe adapter, candidate capture, and selection.
@@ -500,6 +505,7 @@ Expected: commit succeeds.
 ### Task 4: Configuration and Model Asset Gate
 
 **Files:**
+- Create: `.env.example`
 - Create: `src/chess_gaze/configuration.py`
 - Create: `src/chess_gaze/model_assets.py`
 - Create: `src/chess_gaze/model_registry.json`
@@ -510,8 +516,10 @@ Expected: commit succeeds.
 - Consumes: `CliErrorCode` from `errors`
 - Produces: `AnalysisConfig`
 - Produces: `load_config(path: Path | None) -> AnalysisConfig`
+- Produces: `load_env_file(path: Path = Path(".env")) -> dict[str, str]`
 - Produces: `load_model_registry(path: Path) -> ModelRegistry`
 - Produces: `validate_required_assets(registry: ModelRegistry, models_root: Path, approved_licenses: set[str]) -> list[ResolvedModelAsset]`
+- Produces: `prefetch_model_asset(model_id: str, registry: ModelRegistry, models_root: Path, hf_token: str | None) -> ResolvedModelAsset`
 
 - [ ] **Step 1: Write failing config and model asset tests**
 
@@ -523,7 +531,10 @@ Create tests that assert:
 - missing required assets raise `MODEL_ASSET_MISSING`;
 - checksum mismatch raises `MODEL_ASSET_CHECKSUM_MISMATCH`;
 - unapproved `MG-NC-RAI-2.0` raises `MODEL_LICENSE_NOT_APPROVED`;
+- UniGaze `unigaze_h14_joint` registry metadata records `license_approved=true`, `license_approved_by="repo_owner"`, and `license_approved_at="2026-06-25"`;
 - fixture assets with matching checksums resolve to local paths.
+- `.env` parsing reads `HF_TOKEN` without logging it;
+- `prefetch_model_asset` accepts `HF_TOKEN` for setup-time downloads but the analysis validation path does not require it.
 
 Use tiny fixture files in `tmp_path` with SHA-256 computed inside the test:
 
@@ -552,9 +563,19 @@ Create `src/chess_gaze/model_registry.json` with registry entries for:
 - `mediapipe-face-landmarker`
 - `unigaze-h14-joint`
 
-The committed registry must include model IDs, task names, expected relative paths, license names, approval requirement, input/output contract, source URLs, and a checksum field. If the real local model files are not present during implementation, keep analysis preflight failing for real runs and use test fixture registries for passing automated tests. Do not add guessed production checksums.
+The committed registry must include model IDs, task names, expected relative paths, license names, approval requirement, approval metadata, input/output contract, source URLs, and a checksum field. For UniGaze `unigaze_h14_joint`, record the repo owner's 2026-06-25 MG-NC-RAI-2.0 intended-use approval explicitly. If the real local model files are not present during implementation, keep analysis preflight failing for real runs and use test fixture registries for passing automated tests. Do not add guessed production checksums.
 
 Implement a separate local `models/manifest.json` reader only as installed-path evidence. It must never create or override committed registry entries.
+
+Create `.env.example` with:
+
+```dotenv
+# Optional setup-time token for explicit Hugging Face model prefetch only.
+# chess-gaze analyze must run from local verified model files and must not use this.
+HF_TOKEN=
+```
+
+Do not add any other required secret variable.
 
 - [ ] **Step 4: Run asset tests and verify GREEN**
 
@@ -571,7 +592,7 @@ Expected: all asset tests pass.
 Run:
 
 ```sh
-git add src/chess_gaze/configuration.py src/chess_gaze/model_assets.py src/chess_gaze/model_registry.json tests/chess_gaze/test_configuration.py tests/chess_gaze/test_model_assets.py
+git add .env.example src/chess_gaze/configuration.py src/chess_gaze/model_assets.py src/chess_gaze/model_registry.json tests/chess_gaze/test_configuration.py tests/chess_gaze/test_model_assets.py
 git commit -m "feat: add model asset gate"
 ```
 
@@ -1339,8 +1360,11 @@ uv run chess-gaze analyze artifacts/input/test_1.mp4
 Document:
 
 - model binaries stay under ignored `models/`;
+- optional setup-time `HF_TOKEN` can live in ignored `.env`;
 - `src/chess_gaze/model_registry.json` is the trust root;
+- UniGaze `unigaze_h14_joint` license/use approval was granted by the repo owner on 2026-06-25 and is recorded as metadata, not as a secret;
 - analysis does not download models;
+- analysis does not require or read `HF_TOKEN` for network access;
 - real-model smoke requires local assets and license approval.
 
 - [ ] **Step 8: Write closeout**

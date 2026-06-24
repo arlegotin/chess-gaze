@@ -97,6 +97,23 @@ uv run chess-gaze analyze <video_path> \
 
 No batch mode is required in this spec.
 
+## Secrets and Environment
+
+`.env` is a local ignored secrets file. `HF_TOKEN` may be read from `.env` or
+the process environment only by explicit setup/prefetch tooling that downloads
+model assets into `models/` before analysis. The analysis command itself must
+not require, read for network access, log, persist, or transmit `HF_TOKEN`.
+
+`HF_TOKEN` is not a substitute for the local-model policy. Any model fetched with
+the token must still be checksum-verified, recorded in the ignored local
+`models/manifest.json`, matched against the committed model registry, and loaded
+from local disk during `chess-gaze analyze`.
+
+No other secret or credential is required by this spec. The repo owner granted
+license/use approval for UniGaze `unigaze_h14_joint` under MG-NC-RAI-2.0 on
+2026-06-25. This approval is a local policy decision and must be recorded as
+configuration or registry metadata, not treated as a secret.
+
 ## Output Layout
 
 Use one immutable run directory per analysis attempt. The output path must inherit
@@ -230,9 +247,15 @@ entries and record local verification results. Analysis must fail before frame
 processing if any required model file is missing, has a checksum mismatch, or is
 not license-approved for the intended use.
 
+For UniGaze `unigaze_h14_joint`, intended-use approval has been granted by the
+repo owner for this implementation. The committed registry should record that
+approval explicitly with the model ID, license name, approver, and approval date.
+
 The analysis command must not use a code path that downloads UniGaze weights on
 first use. Weights must be prefetched intentionally, checksum-verified, and
 loaded from the local `models/unigaze/unigaze_h14_joint.safetensors` path.
+That prefetch step may use `HF_TOKEN` from `.env`; the subsequent analysis step
+must work without network access.
 
 ## Library Findings and Sources
 
@@ -281,8 +304,9 @@ High-impact findings verified on 2026-06-24 and updated on 2026-06-25:
   `https://huggingface.co/UniGaze/UniGaze-models`.
 - UniGaze's README and Hugging Face model card state the model is licensed under
   ModelGo Attribution-NonCommercial-ResponsibleAI License v2.0. The first
-  implementation must therefore be license-gated and must not assume commercial
-  permissibility. Sources: `https://github.com/ut-vision/UniGaze` and
+  implementation must therefore keep a license gate and must not assume
+  commercial permissibility beyond the repo owner's 2026-06-25 approval for this
+  project. Sources: `https://github.com/ut-vision/UniGaze` and
   `https://huggingface.co/UniGaze/UniGaze-models`.
 - L2CS-Net is an older practical gaze estimator and remains a possible future
   comparison baseline, but it is not the first implementation's primary gaze
@@ -1142,10 +1166,11 @@ modify input videos.
 - Model binaries can live in local ignored `models/`, but expected IDs, URLs,
   checksums, licenses, and input/output contracts must be in a committed model
   registry. The ignored `models/manifest.json` is not authoritative.
-- UniGaze's non-commercial responsible-AI license is acceptable only if the repo
-  owner approves the intended use before implementation. If not approved, the
-  implementation must stop for a new model-selection decision rather than
-  silently falling back to L2CS-Net.
+- The repo owner granted intended-use approval for UniGaze's non-commercial
+  responsible-AI license on 2026-06-25. The implementation must record that
+  approval in the committed model registry or config metadata. If future use
+  changes materially, the implementation must stop for a new model-selection or
+  license decision rather than silently falling back to L2CS-Net.
 - H14 runtime performance on local hardware is unverified. If it is too slow or
   too memory-heavy, the next decision must compare UniGaze B/L/H variants and
   any other current models using the same evidence rules.
