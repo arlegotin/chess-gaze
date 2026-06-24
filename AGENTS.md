@@ -58,6 +58,48 @@ When docs change:
 - Do not present unverified assumptions as completed work. Document residual risk.
 - If the same helper, mapper, or conversion logic appears in more than one production file, move it to a shared utility, composable, or exported helper unless there is a clear documented reason not to. Before creating a helper, search for an existing one.
 
+## Model and Library Selection
+
+Any task that selects an external model, ML checkpoint, inference library, or
+core technical dependency must perform current primary-source research before
+selection. A citation is not enough. The active spec or ADR must compare viable
+candidates against the actual task requirements, license, checkpoint or package
+availability, maintenance status, runtime constraints, reproducibility, published
+metrics or direct evidence, known limitations, and integration risk.
+
+Evidence hierarchy for model and library claims:
+
+1. Official model cards, papers, repositories, release notes, package metadata,
+   licenses, and checkpoint manifests.
+2. Reproduced benchmarks or independent evaluations with task and data
+   conditions that match this repo.
+3. Maintainer issues and discussions for operational risks only.
+4. Blog posts, tutorials, community summaries, and LLM memory are
+   non-authoritative unless corroborated by higher-ranked evidence.
+
+User-provided candidates must be included explicitly in the comparison matrix.
+They are not automatically selected, but they may not be ignored, renamed away,
+or rejected without sourced evidence. If a candidate cannot be verified, record
+it as unverified and ask before final selection.
+
+When model quality is uncertain, say so. Avoid unqualified claims such as
+"best", "SOTA", "modern", or "stronger" unless the matrix supports that claim
+for this repo's task, data, runtime, and licensing constraints.
+
+Do not choose a model, checkpoint, or core dependency primarily because it is
+familiar, easy to install, or convenient to wrap when the active task says
+quality, fidelity, or accuracy is the primary objective.
+
+Specs and ADRs that make model or library decisions must preserve:
+
+- the selected candidate and rejected serious alternatives;
+- primary-source URLs and verification date;
+- license and intended-use constraints;
+- local asset, checksum, and no-auto-download policy;
+- runtime platform assumptions and known incompatibilities;
+- model input/output contract and any unavailable fields, such as confidence;
+- residual uncertainty and how implementation must resolve it before shipping.
+
 ## Failure response
 
 When a bug, failed gate, unclear invariant, or inconsistent artifact appears:
