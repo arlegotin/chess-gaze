@@ -222,6 +222,73 @@ def test_recommended_gaze_invalid_when_estimators_disagree() -> None:
     assert recommended.target_square is None
 
 
+def test_recommended_gaze_uses_unigaze_when_head_pose_blocks_geometric_gaze() -> None:
+    left = GazeAngles(
+        valid=False,
+        yaw_radians=None,
+        pitch_radians=None,
+        reason_invalid=ErrorCode.HEAD_POSE_INVALID,
+    )
+    right = GazeAngles(
+        valid=False,
+        yaw_radians=None,
+        pitch_radians=None,
+        reason_invalid=ErrorCode.HEAD_POSE_INVALID,
+    )
+    face = FaceModelGaze(
+        valid=True,
+        method="unigaze_h14_joint",
+        pitch_radians=-0.12,
+        yaw_radians=0.03,
+        unit_vector=pitch_yaw_to_unit_vector(pitch_radians=-0.12, yaw_radians=0.03),
+        confidence=None,
+        confidence_source="not_provided_by_unigaze",
+        reason_invalid=None,
+    )
+
+    recommended = synthesize_recommended_gaze(
+        left,
+        right,
+        face,
+        thresholds=GazeThresholds(max_pairwise_angle_delta_radians=0.35),
+    )
+
+    assert recommended.gaze.valid is True
+    assert recommended.gaze.reason_invalid is None
+    assert recommended.gaze.pitch_radians == pytest.approx(-0.12)
+    assert recommended.gaze.yaw_radians == pytest.approx(0.03)
+    assert recommended.method == "appearance_only_unigaze_h14_joint"
+
+
+def test_recommended_gaze_rejects_large_unigaze_geometric_disagreement() -> None:
+    left = GazeAngles(
+        valid=True, yaw_radians=0.08, pitch_radians=-0.04, reason_invalid=None
+    )
+    right = GazeAngles(
+        valid=True, yaw_radians=0.10, pitch_radians=-0.05, reason_invalid=None
+    )
+    face = FaceModelGaze(
+        valid=True,
+        method="unigaze_h14_joint",
+        pitch_radians=0.65,
+        yaw_radians=-0.80,
+        unit_vector=pitch_yaw_to_unit_vector(pitch_radians=0.65, yaw_radians=-0.80),
+        confidence=None,
+        confidence_source="not_provided_by_unigaze",
+        reason_invalid=None,
+    )
+
+    recommended = synthesize_recommended_gaze(
+        left,
+        right,
+        face,
+        thresholds=GazeThresholds(max_pairwise_angle_delta_radians=0.35),
+    )
+
+    assert recommended.gaze.valid is False
+    assert recommended.gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+
+
 def test_recommended_gaze_averages_agreeing_estimators() -> None:
     left = GazeAngles(
         valid=True, yaw_radians=0.10, pitch_radians=-0.01, reason_invalid=None
