@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from chess_gaze.frame_records import FrameRecord
+from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 
 
 def _frame_record_payload(frame_id: str) -> dict[str, Any]:
@@ -66,6 +66,79 @@ def _frame_record_payload(frame_id: str) -> dict[str, Any]:
     }
 
 
+def _observed_frame_record(frame_id: str) -> FrameRecord:
+    face_box = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=100.0,
+        y_min=50.0,
+        x_max=180.0,
+        y_max=170.0,
+    )
+    left_eye_box = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=115.0,
+        y_min=90.0,
+        x_max=140.0,
+        y_max=115.0,
+    )
+    right_eye_box = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=145.0,
+        y_min=90.0,
+        x_max=170.0,
+        y_max=115.0,
+    )
+    iris_landmarks_left = [
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=120.0, y=100.0),
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=130.0, y=100.0),
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=125.0, y=95.0),
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=125.0, y=105.0),
+    ]
+    iris_landmarks_right = [
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=150.0, y=100.0),
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=160.0, y=100.0),
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=155.0, y=95.0),
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=155.0, y=105.0),
+    ]
+
+    payload = _frame_record_payload(frame_id)
+    payload["status"] = "OK"
+    payload["face"] = {
+        "present": True,
+        "bounding_box": face_box.model_dump(),
+        "landmarks": [
+            Point2D(space=CoordinateSpace.IMAGE_PX, x=110.0, y=70.0).model_dump(),
+            Point2D(space=CoordinateSpace.IMAGE_PX, x=170.0, y=70.0).model_dump(),
+            Point2D(space=CoordinateSpace.IMAGE_PX, x=140.0, y=155.0).model_dump(),
+        ],
+        "reason_invalid": None,
+    }
+    payload["left_eye"] = {
+        "present": True,
+        "bounding_box": left_eye_box.model_dump(),
+        "pupil_center": Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=125.0,
+            y=100.0,
+        ).model_dump(),
+        "iris_landmarks": [point.model_dump() for point in iris_landmarks_left],
+        "reason_invalid": None,
+    }
+    payload["right_eye"] = {
+        "present": True,
+        "bounding_box": right_eye_box.model_dump(),
+        "pupil_center": Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=155.0,
+            y=100.0,
+        ).model_dump(),
+        "iris_landmarks": [point.model_dump() for point in iris_landmarks_right],
+        "reason_invalid": None,
+    }
+    payload["errors"] = []
+    return FrameRecord.model_validate(payload)
+
+
 def test_default_calibration_persists_named_constants() -> None:
     from chess_gaze.calibration import default_calibration
 
@@ -112,5 +185,105 @@ def test_derive_setup_constants_does_not_rewrite_frame_fields() -> None:
 
     assert [record.model_dump() for record in records] == before
     assert derived is not None
-    assert derived.mirror_policy == "unknown"
-    assert derived.measurement_usage == "qa_and_future_reconstruction_only"
+    assert derived.mirror_policy.value == "unknown"
+    assert derived.mirror_policy.contributing_frame_count == 0
+    assert derived.mirror_policy.usage == "future_use"
+
+
+def test_derive_setup_constants_returns_provenance_records() -> None:
+    from chess_gaze.calibration import derive_setup_constants
+
+    derived = derive_setup_constants([_observed_frame_record("f000000003")])
+
+    assert derived.selected_face_bbox_size_image_px.value == {
+        "median_width_px": 80.0,
+        "median_height_px": 120.0,
+        "median_area_px2": 9600.0,
+    }
+    assert derived.selected_face_bbox_size_image_px.unit == "image_px"
+    assert derived.selected_face_bbox_size_image_px.coordinate_space == "image_px"
+    assert (
+        derived.selected_face_bbox_size_image_px.derivation_method
+        == "median selected-face bounding box width, height, and area from "
+        "face.bounding_box where face.present is true"
+    )
+    assert derived.selected_face_bbox_size_image_px.contributing_frame_count == 1
+    assert derived.selected_face_bbox_size_image_px.uncertainty == "low"
+    assert derived.selected_face_bbox_size_image_px.usage == "measurement"
+
+    assert derived.inter_pupil_distance_image_px.value == 30.0
+    assert derived.inter_pupil_distance_image_px.unit == "image_px"
+    assert derived.inter_pupil_distance_image_px.coordinate_space == "image_px"
+    assert (
+        derived.inter_pupil_distance_image_px.derivation_method
+        == "median Euclidean distance between left and right pupil centers "
+        "when both eyes are present"
+    )
+    assert derived.inter_pupil_distance_image_px.contributing_frame_count == 1
+    assert derived.inter_pupil_distance_image_px.uncertainty == "low"
+    assert derived.inter_pupil_distance_image_px.usage == "measurement"
+
+    assert derived.left_iris_diameter_image_px.value == 10.0
+    assert derived.left_iris_diameter_image_px.unit == "image_px"
+    assert derived.left_iris_diameter_image_px.coordinate_space == "image_px"
+    assert (
+        derived.left_iris_diameter_image_px.derivation_method
+        == "median maximum pairwise iris landmark distance per frame for the left eye"
+    )
+    assert derived.left_iris_diameter_image_px.contributing_frame_count == 1
+    assert derived.left_iris_diameter_image_px.uncertainty == "medium"
+    assert derived.left_iris_diameter_image_px.usage == "measurement"
+
+    assert derived.right_iris_diameter_image_px.value == 10.0
+    assert derived.facecam_roi_image_px.value == {
+        "x_min": 100.0,
+        "y_min": 50.0,
+        "x_max": 180.0,
+        "y_max": 170.0,
+    }
+    assert derived.facecam_roi_image_px.unit == "image_px"
+    assert derived.facecam_roi_image_px.coordinate_space == "image_px"
+    assert (
+        derived.facecam_roi_image_px.derivation_method
+        == "bounding box union over observed selected-face boxes; derived ROI "
+        "for QA only"
+    )
+    assert derived.facecam_roi_image_px.contributing_frame_count == 1
+    assert derived.facecam_roi_image_px.uncertainty == "medium"
+    assert derived.facecam_roi_image_px.usage == "qa_only"
+
+    assert (
+        derived.estimated_camera_intrinsics_policy.value
+        == "estimate_with_explicit_uncertainty"
+    )
+    assert derived.estimated_camera_intrinsics_policy.unit is None
+    assert derived.estimated_camera_intrinsics_policy.coordinate_space is None
+    assert (
+        derived.estimated_camera_intrinsics_policy.derivation_method
+        == "policy placeholder derived from calibration defaults; does not "
+        "authorize metric camera_3d_m translation"
+    )
+    assert derived.estimated_camera_intrinsics_policy.contributing_frame_count == 0
+    assert derived.estimated_camera_intrinsics_policy.uncertainty == "high"
+    assert derived.estimated_camera_intrinsics_policy.usage == "future_use"
+
+
+def test_derive_setup_constants_returns_null_provenance_without_evidence() -> None:
+    from chess_gaze.calibration import derive_setup_constants
+
+    derived = derive_setup_constants(
+        [FrameRecord.model_validate(_frame_record_payload("f000000004"))]
+    )
+
+    assert derived.selected_face_bbox_size_image_px.value is None
+    assert derived.selected_face_bbox_size_image_px.contributing_frame_count == 0
+    assert derived.inter_pupil_distance_image_px.value is None
+    assert derived.inter_pupil_distance_image_px.contributing_frame_count == 0
+    assert derived.left_iris_diameter_image_px.value is None
+    assert derived.left_iris_diameter_image_px.contributing_frame_count == 0
+    assert derived.right_iris_diameter_image_px.value is None
+    assert derived.right_iris_diameter_image_px.contributing_frame_count == 0
+    assert derived.facecam_roi_image_px.value is None
+    assert derived.facecam_roi_image_px.contributing_frame_count == 0
+    assert derived.mirror_policy.value == "unknown"
+    assert derived.mirror_policy.contributing_frame_count == 0
