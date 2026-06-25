@@ -161,6 +161,14 @@ def _rgb_jpeg(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB"))
 
 
+def _assert_region_changed(
+    rendered: np.ndarray, frame: np.ndarray, area: np.ndarray
+) -> None:
+    diff = np.abs(rendered.astype(np.int16) - frame.astype(np.int16))
+    changed = np.any(diff > 8, axis=2)
+    assert bool(np.any(changed & area))
+
+
 def _nonzero_near(image: np.ndarray, *, x: int, y: int, radius: int = 4) -> int:
     y_min = max(0, y - radius)
     y_max = min(image.shape[0], y + radius + 1)
@@ -205,6 +213,25 @@ def test_render_processed_frame_writes_failure_jpeg_with_status_and_error_text(
     rendered = _rgb_jpeg(output_path)
     assert rendered.shape == frame.shape
     assert int(np.count_nonzero(rendered[:45, :175])) > 0
+
+
+def test_valid_head_pose_with_missing_angles_still_writes_status_jpeg(
+    tmp_path: Path,
+) -> None:
+    frame = np.zeros((120, 180, 3), dtype=np.uint8)
+    payload = _failure_payload()
+    payload["head_pose"] = {
+        "valid": True,
+        "yaw_radians": None,
+        "pitch_radians": None,
+        "roll_radians": None,
+        "reason_invalid": None,
+    }
+    record = FrameRecord.model_validate(payload)
+
+    digest = render_processed_frame(frame, record, tmp_path / "partial-head.jpg", 95)
+
+    assert digest == sha256((tmp_path / "partial-head.jpg").read_bytes()).hexdigest()
 
 
 def test_left_and_right_iris_centers_are_rendered_independently(
@@ -259,3 +286,36 @@ def test_multiple_face_candidate_status_is_drawn_from_current_error_schema(
 
     rendered = _rgb_jpeg(output_path)
     assert int(np.count_nonzero(rendered[:45, :210])) > 0
+
+
+def test_render_processed_frame_maps_normalized_coordinates(
+    tmp_path: Path,
+) -> None:
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    payload = _failure_payload()
+    payload["status"] = "OK"
+    payload["face"] = {
+        "present": True,
+        "bounding_box": BBox(
+            space=CoordinateSpace.NORMALIZED,
+            x_min=0.25,
+            y_min=0.20,
+            x_max=0.75,
+            y_max=0.80,
+        ).model_dump(),
+        "landmarks": [
+            Point2D(space=CoordinateSpace.NORMALIZED, x=0.50, y=0.50).model_dump()
+        ],
+        "reason_invalid": None,
+    }
+    record = FrameRecord.model_validate(payload)
+
+    render_processed_frame(frame, record, tmp_path / "normalized.jpg", 100)
+
+    rendered = _rgb_jpeg(tmp_path / "normalized.jpg")
+    bbox_area = np.zeros(frame.shape[:2], dtype=bool)
+    bbox_area[16:24, 46:54] = True
+    landmark_area = np.zeros(frame.shape[:2], dtype=bool)
+    landmark_area[46:54, 96:104] = True
+    _assert_region_changed(rendered, frame, bbox_area)
+    _assert_region_changed(rendered, frame, landmark_area)

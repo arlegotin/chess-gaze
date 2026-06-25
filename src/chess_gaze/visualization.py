@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from chess_gaze.errors import FrameStatus
-from chess_gaze.frame_records import EyeRecord, FrameRecord, GazeAngles
+from chess_gaze.frame_records import EyeRecord, FrameRecord, GazeAngles, HeadPoseRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.image_io import save_bgr_jpeg
 
@@ -185,12 +185,7 @@ def _draw_gaze_vector(
 
 
 def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
-    if (
-        not record.head_pose.valid
-        or record.head_pose.yaw_radians is None
-        or record.head_pose.pitch_radians is None
-        or record.head_pose.roll_radians is None
-    ):
+    if not _has_complete_head_pose(record.head_pose):
         return
 
     origin = _nose_or_face_center(record)
@@ -206,6 +201,11 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
         length = max(24.0, min(x_max - x_min, y_max - y_min) * 0.35)
 
     roll = record.head_pose.roll_radians
+    yaw = record.head_pose.yaw_radians
+    pitch = record.head_pose.pitch_radians
+    assert roll is not None
+    assert yaw is not None
+    assert pitch is not None
     x_end = _clip_pixel(
         start[0] + round(math.cos(roll) * length),
         start[1] + round(math.sin(roll) * length),
@@ -217,8 +217,8 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
         image,
     )
     z_end = _clip_pixel(
-        start[0] + round(record.head_pose.yaw_radians * length),
-        start[1] - round(record.head_pose.pitch_radians * length),
+        start[0] + round(yaw * length),
+        start[1] - round(pitch * length),
         image,
     )
     cv2.arrowedLine(image, start, x_end, _HEAD_X_COLOR, 2, line_type=cv2.LINE_AA)
@@ -233,7 +233,7 @@ def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
         f"idx={record.frame_index} t={record.timestamp_seconds:.3f}s",
     ]
 
-    if record.head_pose.valid:
+    if _has_complete_head_pose(record.head_pose):
         lines.append(
             "head "
             f"yaw={record.head_pose.yaw_radians:.3f} "
@@ -266,6 +266,15 @@ def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
             color=status_color if index == 0 else _TEXT_COLOR,
             scale=0.45,
         )
+
+
+def _has_complete_head_pose(head_pose: HeadPoseRecord) -> bool:
+    return (
+        head_pose.valid
+        and head_pose.yaw_radians is not None
+        and head_pose.pitch_radians is not None
+        and head_pose.roll_radians is not None
+    )
 
 
 def _draw_text(
