@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Private Python project scaffold for future stream-analysis work."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13.4",
+]
 
 [project.scripts]
 chess-gaze = "chess_gaze.cli:main"
