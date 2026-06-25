@@ -483,34 +483,43 @@ def _select_region_refined_face(
     if not full_frame_selection.present:
         return full_frame_selection
 
-    for region_selection in region_selections:
-        if region_selection.region.name == DETECTION_REGION_FULL_FRAME:
-            continue
-        if _region_selection_refines_full_frame(
-            region_selection, full_frame_selection
-        ):
-            return region_selection.selection
+    scored_refinements = [
+        (score, region_selection.selection)
+        for region_selection in region_selections
+        if region_selection.region.name != DETECTION_REGION_FULL_FRAME
+        for score in (_region_refinement_score(region_selection, full_frame_selection),)
+        if score is not None
+    ]
+    if scored_refinements:
+        return max(
+            scored_refinements,
+            key=lambda item: (item[0], _primary_selection_area(item[1])),
+        )[1]
 
     return full_frame_selection
 
 
-def _region_selection_refines_full_frame(
+def _region_refinement_score(
     region_selection: _RegionSelection, full_frame_selection: FaceSelection
-) -> bool:
+) -> float | None:
     fallback = _primary_candidate(region_selection.selection)
     full_primary = _primary_candidate(full_frame_selection)
     if fallback is None or full_primary is None:
-        return False
+        return None
     if _candidate_is_near_region_seam(fallback, region_selection.region):
-        return False
-    if not _overlaps_any_full_frame_candidate(fallback, full_frame_selection):
-        return False
+        return None
+
+    max_iou = _max_iou_with_full_frame_candidates(fallback, full_frame_selection)
+    if max_iou < REGION_REFINEMENT_MIN_IOU:
+        return None
+
+    area = _bbox_area(fallback.bounding_box_image_px)
     if _selection_has_multiple_candidates(full_frame_selection):
-        return True
+        return area * max_iou
     if _bbox_area(fallback.bounding_box_image_px) > _bbox_area(
         full_primary.bounding_box_image_px
     ):
-        return True
+        return area * max_iou
 
     top_shift_px = (
         full_primary.bounding_box_image_px.y_min - fallback.bounding_box_image_px.y_min
@@ -520,7 +529,16 @@ def _region_selection_refines_full_frame(
         _bbox_height(full_primary.bounding_box_image_px)
         * REGION_REFINEMENT_TOP_SHIFT_FRACTION,
     )
-    return top_shift_px >= top_shift_threshold_px
+    if top_shift_px < top_shift_threshold_px:
+        return None
+    return area * max_iou
+
+
+def _primary_selection_area(selection: FaceSelection) -> float:
+    candidate = _primary_candidate(selection)
+    if candidate is None:
+        return 0.0
+    return _bbox_area(candidate.bounding_box_image_px)
 
 
 def _selection_has_multiple_candidates(selection: FaceSelection) -> bool:
@@ -555,13 +573,15 @@ def _candidate_is_near_region_seam(
     return False
 
 
-def _overlaps_any_full_frame_candidate(
+def _max_iou_with_full_frame_candidates(
     fallback: FaceCandidate, full_frame_selection: FaceSelection
-) -> bool:
-    return any(
-        _bbox_iou(fallback.bounding_box_image_px, candidate.bounding_box_image_px)
-        >= REGION_REFINEMENT_MIN_IOU
-        for candidate in full_frame_selection.candidates
+) -> float:
+    return max(
+        (
+            _bbox_iou(fallback.bounding_box_image_px, candidate.bounding_box_image_px)
+            for candidate in full_frame_selection.candidates
+        ),
+        default=0.0,
     )
 
 
