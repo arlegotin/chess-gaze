@@ -4,7 +4,7 @@
 
 **Goal:** Repair the `mix_2` face-observation failures reported in `artifacts/output/mix_2/runs/20260625T203626Z-f401b16f` without masking real detector uncertainty in visualization.
 
-**Architecture:** Keep the durable fix at `MediaPipeFaceObserver`. Expand deterministic image-mode detection regions enough to cover small picture-in-picture webcam panes, then arbitrate candidates by face-likeness and layout evidence before downstream eyes, head pose, gaze, and rendering consume one selected full-image coordinate set.
+**Architecture:** Keep the durable fix at `MediaPipeFaceObserver`. Expand deterministic image-mode detection regions enough to cover small picture-in-picture webcam panes, then arbitrate candidates by face-likeness, cross-region consensus, seam clipping, and layout evidence before downstream eyes, head pose, gaze, and rendering consume one selected full-image coordinate set. Frame status remains the durable boundary for warning-only diagnostics such as multiple face candidates and gaze-estimator disagreement.
 
 **Tech Stack:** Python 3.12, MediaPipe Face Landmarker IMAGE mode, OpenCV drawing, Pydantic frame records, pytest, uv.
 
@@ -31,7 +31,7 @@
 - Consumes: `MediaPipeFaceObserver.observe(rgb_frame, frame_id=...) -> FaceObservation`
 - Produces: a selected `FaceSelection` whose `FaceCandidate` coordinates are in full source-image pixels.
 
-- [ ] **Step 1: Write failing unit tests**
+- [x] **Step 1: Write failing unit tests**
 
 Add focused synthetic tests that simulate the `mix_2` failure modes:
 
@@ -48,7 +48,7 @@ uv run pytest tests/chess_gaze/test_face_observation.py -q
 
 Expected before implementation: the new tests fail because the observer either selects the area-largest wrong half-frame candidate, returns a bad full-frame candidate early, or never tries smaller upper/right regions.
 
-- [ ] **Step 2: Implement minimal production fix**
+- [x] **Step 2: Implement minimal production fix**
 
 Modify `MediaPipeFaceObserver.observe()` so it evaluates all deterministic regions for a frame before final selection. Region list must remain deterministic and finite. Add regions that match the observed split-screen layout classes:
 
@@ -66,7 +66,7 @@ Select from region results with a bounded scoring rule that:
 - uses focused-region results when full and half-frame regions miss visible small faces;
 - rejects seam-clipped candidates.
 
-- [ ] **Step 3: Verify focused unit tests**
+- [x] **Step 3: Verify focused unit tests**
 
 Run:
 
@@ -76,7 +76,7 @@ uv run pytest tests/chess_gaze/test_face_observation.py -q
 
 Expected after implementation: all face-observation tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add tests/chess_gaze/test_face_observation.py src/chess_gaze/face_observation.py docs/superpowers/plans/2026-06-25-mix-2-face-observation-quality-repair.md
@@ -93,7 +93,7 @@ git commit -m "fix: improve face observation region arbitration"
 - Consumes: `artifacts/input/mix_2.mp4`
 - Produces: a fresh run under `artifacts/output/mix_2/runs/`
 
-- [ ] **Step 1: Write failing real-video regression**
+- [x] **Step 1: Write failing real-video regression**
 
 Add a bounded `mix_2.mp4` real-video test for the reported frames. For each frame, assert `MediaPipeFaceObserver.observe()` returns a present face and that the selected bounding box center falls inside the manually observed face region for that scene:
 
@@ -111,7 +111,7 @@ uv run pytest tests/chess_gaze/test_face_observation_real_video.py::test_mediapi
 
 Expected before implementation: the new test fails for the reported misses and wrong-location frames.
 
-- [ ] **Step 2: Regenerate `mix_2`**
+- [x] **Step 2: Regenerate `mix_2`**
 
 Run:
 
@@ -121,7 +121,7 @@ uv run chess-gaze analyze artifacts/input/mix_2.mp4
 
 Expected: complete run with `540` raw frames, `540` processed frames, and `540` frame records.
 
-- [ ] **Step 3: Visual and numeric verification**
+- [x] **Step 3: Visual and numeric verification**
 
 Inspect the fresh processed frames against the old run for each reported issue:
 
@@ -135,7 +135,7 @@ Inspect the fresh processed frames against the old run for each reported issue:
 
 Confirm that face boxes and landmarks are anchored to the visible face regions and that frame-record boxes are numerically within the expected region for each scene.
 
-- [ ] **Step 4: Run broad gates**
+- [x] **Step 4: Run broad gates**
 
 Run:
 
@@ -148,13 +148,13 @@ uv run mypy
 
 Expected: all gates pass, or exact failures are recorded in the closeout.
 
-- [ ] **Step 5: Request final review, write closeout, and commit**
+- [x] **Step 5: Request final review, write closeout, and commit**
 
 Request subagent code review on the branch diff. Write root cause, durable surface changed, regression tests, visual evidence, current primary-source research, and remaining limitations in the closeout.
 
 Commit:
 
 ```sh
-git add tests/chess_gaze/test_face_observation_real_video.py docs/superpowers/closeouts/2026-06-25-mix-2-face-observation-quality-repair.md
-git commit -m "test: cover mix 2 visible face recoveries"
+git add src/chess_gaze/face_observation.py src/chess_gaze/frame_observation.py tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_real_video.py tests/chess_gaze/test_frame_observation.py docs/superpowers/plans/2026-06-25-mix-2-face-observation-quality-repair.md docs/superpowers/closeouts/2026-06-25-mix-2-face-observation-quality-repair.md
+git commit -m "fix: harden mix 2 face recovery"
 ```

@@ -16,6 +16,7 @@ from chess_gaze.face_observation import (
     FaceSelection,
 )
 from chess_gaze.frame_observation import ModelBackedFrameObserver
+from chess_gaze.frame_records import ErrorRecord
 from chess_gaze.gaze_observation import (
     CropTransformRecord,
     FaceModelGaze,
@@ -109,7 +110,9 @@ class _DisagreeingGazeModel:
         )
 
 
-def _face_observation(candidate: FaceCandidate) -> FaceObservation:
+def _face_observation(
+    candidate: FaceCandidate, *, errors: tuple[ErrorRecord, ...] = ()
+) -> FaceObservation:
     return FaceObservation(
         frame_id="f000000000",
         image_width_px=64,
@@ -130,7 +133,7 @@ def _face_observation(candidate: FaceCandidate) -> FaceObservation:
             selection_score_source="test",
             reason_invalid=None,
             candidates=(candidate,),
-            errors=(),
+            errors=errors,
         ),
     )
 
@@ -414,4 +417,104 @@ def test_model_backed_frame_observer_marks_gaze_disagreement_as_warning(
     assert record.status is FrameStatus.WARNING
     assert [error.code for error in record.errors] == [
         ErrorCode.GAZE_ESTIMATORS_DISAGREE
+    ]
+
+
+def test_model_backed_frame_observer_marks_multiple_face_candidates_as_warning(
+    tmp_path: Path,
+) -> None:
+    run_layout = RunLayout(
+        run_dir=tmp_path,
+        raw_frames_dir=tmp_path / "raw_frames",
+        processed_frames_dir=tmp_path / "processed_frames",
+        crops_dir=tmp_path / "crops",
+        face_crops_dir=tmp_path / "crops" / "face",
+        eyes_crops_dir=tmp_path / "crops" / "eyes",
+        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
+        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
+        records_dir=tmp_path / "records",
+    )
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(
+            _face_observation(
+                candidate,
+                errors=(
+                    ErrorRecord(
+                        code=ErrorCode.MULTIPLE_FACE_CANDIDATES,
+                        message="Multiple face candidates were detected.",
+                    ),
+                ),
+            )
+        ),
+        gaze_model=_FakeGazeModel(),
+        calibration=default_calibration(),
+        run_layout=run_layout,
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    record = observer(_observer_frame())
+
+    assert record.face.present is True
+    assert record.left_eye.present is True
+    assert record.right_eye.present is True
+    assert record.head_pose.valid is True
+    assert record.appearance_gaze.valid is True
+    assert record.recommended_gaze.valid is True
+    assert record.status is FrameStatus.WARNING
+    assert [error.code for error in record.errors] == [
+        ErrorCode.MULTIPLE_FACE_CANDIDATES
+    ]
+
+
+def test_model_backed_observer_marks_multiple_candidates_and_gaze_disagreement_warning(
+    tmp_path: Path,
+) -> None:
+    run_layout = RunLayout(
+        run_dir=tmp_path,
+        raw_frames_dir=tmp_path / "raw_frames",
+        processed_frames_dir=tmp_path / "processed_frames",
+        crops_dir=tmp_path / "crops",
+        face_crops_dir=tmp_path / "crops" / "face",
+        eyes_crops_dir=tmp_path / "crops" / "eyes",
+        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
+        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
+        records_dir=tmp_path / "records",
+    )
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(
+            _face_observation(
+                candidate,
+                errors=(
+                    ErrorRecord(
+                        code=ErrorCode.MULTIPLE_FACE_CANDIDATES,
+                        message="Multiple face candidates were detected.",
+                    ),
+                ),
+            )
+        ),
+        gaze_model=_DisagreeingGazeModel(),
+        calibration=default_calibration(),
+        run_layout=run_layout,
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    record = observer(_observer_frame())
+
+    assert record.face.present is True
+    assert record.left_eye.present is True
+    assert record.right_eye.present is True
+    assert record.head_pose.valid is True
+    assert record.appearance_gaze.valid is True
+    assert record.recommended_gaze.valid is False
+    assert record.recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+    assert record.status is FrameStatus.WARNING
+    assert [error.code for error in record.errors] == [
+        ErrorCode.MULTIPLE_FACE_CANDIDATES,
+        ErrorCode.GAZE_ESTIMATORS_DISAGREE,
     ]

@@ -36,6 +36,7 @@ REGION_SEAM_MARGIN_FRACTION = 0.02
 REGION_SEAM_MARGIN_MIN_PX = 4.0
 LARGE_FULL_FRAME_AREA_FRACTION = 0.055
 LARGE_FRAME_MIN_SHORT_SIDE_PX = 360
+REGION_CONSENSUS_MIN_IOU = 0.50
 PLAUSIBLE_FACE_AREA_MIN_FRACTION = 0.006
 PLAUSIBLE_FACE_AREA_MAX_FRACTION = 0.045
 REFINEMENT_MAX_AREA_RATIO_FOR_LARGE_FULL_FRAME = 0.45
@@ -208,44 +209,7 @@ class MediaPipeFaceObserver:
                 selection=full_frame_selection,
             )
 
-        for region in regions[1:3]:
-            selection = self._observe_region(
-                frame,
-                mp,
-                region=region,
-                frame_id=observation_frame_id,
-                image_width_px=int(image_width_px),
-                image_height_px=int(image_height_px),
-            )
-            region_selections.append(
-                _RegionSelection(region=region, selection=selection)
-            )
-            if (
-                not full_frame_selection.present
-                and selection.present
-                and not _selection_has_multiple_candidates(selection)
-            ):
-                return FaceObservation(
-                    frame_id=observation_frame_id,
-                    image_width_px=int(image_width_px),
-                    image_height_px=int(image_height_px),
-                    face_landmarker_options=self.face_landmarker_options,
-                    selection=selection,
-                )
-
-        basic_selection = _select_region_refined_face(
-            region_selections, full_frame_selection
-        )
-        if _should_accept_basic_selection(basic_selection, full_frame_selection):
-            return FaceObservation(
-                frame_id=observation_frame_id,
-                image_width_px=int(image_width_px),
-                image_height_px=int(image_height_px),
-                face_landmarker_options=self.face_landmarker_options,
-                selection=basic_selection,
-            )
-
-        for region in regions[3:]:
+        for region in regions[1:]:
             selection = self._observe_region(
                 frame,
                 mp,
@@ -553,7 +517,11 @@ def _select_region_refined_face(
         (score, region_selection.selection)
         for region_selection in region_selections
         if region_selection.region.name != DETECTION_REGION_FULL_FRAME
-        for score in (_region_refinement_score(region_selection, full_frame_selection),)
+        for score in (
+            _region_refinement_score(
+                region_selection, full_frame_selection, region_selections
+            ),
+        )
         if score is not None
     ]
     if scored_refinements:
@@ -585,18 +553,10 @@ def _select_fallback_face(
     )[1]
 
 
-def _should_accept_basic_selection(
-    selection: FaceSelection,
-    full_frame_selection: FaceSelection,
-) -> bool:
-    if full_frame_selection.present:
-        return selection is not full_frame_selection
-
-    return selection.present and not _selection_has_multiple_candidates(selection)
-
-
 def _region_refinement_score(
-    region_selection: _RegionSelection, full_frame_selection: FaceSelection
+    region_selection: _RegionSelection,
+    full_frame_selection: FaceSelection,
+    region_selections: Sequence[_RegionSelection],
 ) -> float | None:
     fallback = _primary_candidate(region_selection.selection)
     full_primary = _primary_candidate(full_frame_selection)
@@ -606,7 +566,10 @@ def _region_refinement_score(
         return None
 
     large_full_frame_refinement_score = _large_full_frame_refinement_score(
-        fallback, full_primary, region_selection.region
+        fallback,
+        full_primary,
+        region_selection.region,
+        region_selections,
     )
     if large_full_frame_refinement_score is not None:
         return large_full_frame_refinement_score
@@ -649,6 +612,7 @@ def _large_full_frame_refinement_score(
     fallback: FaceCandidate,
     full_primary: FaceCandidate,
     region: _DetectionRegion,
+    region_selections: Sequence[_RegionSelection],
 ) -> float | None:
     if not _large_full_frame_candidate(full_primary):
         return None
@@ -658,6 +622,22 @@ def _large_full_frame_refinement_score(
     ):
         return None
     if not _candidate_area_is_plausible(fallback):
+        return None
+    if (
+        _max_iou_with_other_region_candidates(fallback, region, region_selections)
+        < REGION_CONSENSUS_MIN_IOU
+    ):
+        return None
+    if _candidate_geometry_score(fallback, region) <= _candidate_geometry_score(
+        full_primary,
+        _DetectionRegion(
+            name=DETECTION_REGION_FULL_FRAME,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=full_primary.image_width_px,
+            y_max_px=full_primary.image_height_px,
+        ),
+    ):
         return None
     return _candidate_geometry_score(fallback, region)
 
@@ -701,6 +681,29 @@ def _large_full_frame_candidate(candidate: FaceCandidate) -> bool:
     )
 
 
+def _max_iou_with_other_region_candidates(
+    candidate: FaceCandidate,
+    region: _DetectionRegion,
+    region_selections: Sequence[_RegionSelection],
+) -> float:
+    return max(
+        (
+            _bbox_iou(
+                candidate.bounding_box_image_px,
+                other_candidate.bounding_box_image_px,
+            )
+            for region_selection in region_selections
+            if region_selection.region.name
+            not in {
+                DETECTION_REGION_FULL_FRAME,
+                region.name,
+            }
+            for other_candidate in region_selection.selection.candidates
+        ),
+        default=0.0,
+    )
+
+
 def _primary_selection_area(selection: FaceSelection) -> float:
     candidate = _primary_candidate(selection)
     if candidate is None:
@@ -733,10 +736,25 @@ def _candidate_is_near_region_seam(
         region.width_px * REGION_SEAM_MARGIN_FRACTION,
     )
     bbox = candidate.bounding_box_image_px
-    if region.name == DETECTION_REGION_LEFT_HALF:
-        return bbox.x_max >= region.x_max_px - seam_margin_px
-    if region.name == DETECTION_REGION_RIGHT_HALF:
-        return bbox.x_min <= region.x_min_px + seam_margin_px
+    if region.x_min_px > 0 and bbox.x_min <= region.x_min_px + seam_margin_px:
+        return True
+    if (
+        region.x_max_px < candidate.image_width_px
+        and bbox.x_max >= region.x_max_px - seam_margin_px
+    ):
+        return True
+
+    vertical_seam_margin_px = max(
+        REGION_SEAM_MARGIN_MIN_PX,
+        region.height_px * REGION_SEAM_MARGIN_FRACTION,
+    )
+    if region.y_min_px > 0 and bbox.y_min <= region.y_min_px + vertical_seam_margin_px:
+        return True
+    if (
+        region.y_max_px < candidate.image_height_px
+        and bbox.y_max >= region.y_max_px - vertical_seam_margin_px
+    ):
+        return True
     return False
 
 
