@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "av>=17.1.0",
+    "mediapipe>=0.10.35",
     "numpy>=2.5.0",
     "opencv-python-headless>=4.13.0.92",
     "pillow>=12.2.0",
@@ -20,6 +21,11 @@ dev = [
     "mypy>=1.10",
     "pytest>=8.0",
     "ruff>=0.6",
+]
+
+[tool.uv]
+override-dependencies = [
+    "opencv-contrib-python; sys_platform == 'never'",
 ]
 
 [build-system]
