@@ -85,6 +85,18 @@ def test_gaze_valid_requires_pitch_and_yaw() -> None:
         GazeAngles(valid=True, yaw_radians=None, pitch_radians=0.1, reason_invalid=None)
 
 
+def test_gaze_angles_reject_enum_strings_in_direct_validation() -> None:
+    invalid_reason: Any = "GAZE_MODEL_FAILED"
+
+    with pytest.raises(ValidationError):
+        GazeAngles(
+            valid=False,
+            yaw_radians=None,
+            pitch_radians=None,
+            reason_invalid=invalid_reason,
+        )
+
+
 def test_frame_record_accepts_valid_artifact_payload(
     valid_frame_record_dict: dict[str, Any],
 ) -> None:
@@ -99,6 +111,25 @@ def test_frame_record_rejects_unknown_fields(
     valid_frame_record_dict: dict[str, Any],
 ) -> None:
     valid_frame_record_dict["unknown"] = "rejected"
+
+    with pytest.raises(ValidationError):
+        FrameRecord.model_validate(valid_frame_record_dict)
+
+
+def test_frame_record_rejects_near_miss_enum_strings(
+    valid_frame_record_dict: dict[str, Any],
+) -> None:
+    valid_frame_record_dict["status"] = "NOT_A_STATUS"
+    valid_frame_record_dict["recommended_gaze"]["reason_invalid"] = "GAZE_MODEL_FAILED "
+
+    with pytest.raises(ValidationError):
+        FrameRecord.model_validate(valid_frame_record_dict)
+
+
+def test_frame_record_rejects_invalid_nested_enum_string(
+    valid_frame_record_dict: dict[str, Any],
+) -> None:
+    valid_frame_record_dict["recommended_gaze"]["reason_invalid"] = "NOT_A_REASON"
 
     with pytest.raises(ValidationError):
         FrameRecord.model_validate(valid_frame_record_dict)

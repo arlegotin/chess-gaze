@@ -1,9 +1,51 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
+
+
+def _coerce_error_code_field(payload: dict[str, Any], field_name: str) -> None:
+    value = payload.get(field_name)
+    if isinstance(value, str):
+        try:
+            payload[field_name] = ErrorCode(value)
+        except ValueError:
+            return
+
+
+def _coerce_error_code_record(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    coerced = dict(payload)
+    _coerce_error_code_field(coerced, "reason_invalid")
+    return coerced
+
+
+def _coerce_error_list(payload: Any) -> Any:
+    if not isinstance(payload, list):
+        return payload
+
+    coerced_errors: list[Any] = []
+    for error_payload in payload:
+        if not isinstance(error_payload, dict):
+            coerced_errors.append(error_payload)
+            continue
+
+        coerced_error = dict(error_payload)
+        value = coerced_error.get("code")
+        if isinstance(value, str):
+            try:
+                coerced_error["code"] = ErrorCode(value)
+            except ValueError:
+                pass
+        coerced_errors.append(coerced_error)
+
+    return coerced_errors
 
 
 class GazeAngles(StrictSchemaModel):
@@ -78,6 +120,35 @@ class FrameRecord(StrictSchemaModel):
     appearance_gaze: GazeAngles
     recommended_gaze: GazeAngles
     errors: list[ErrorRecord]
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_artifact_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        coerced = dict(data)
+
+        status = coerced.get("status")
+        if isinstance(status, str):
+            try:
+                coerced["status"] = FrameStatus(status)
+            except ValueError:
+                pass
+
+        for field_name in (
+            "face",
+            "left_eye",
+            "right_eye",
+            "head_pose",
+            "geometric_gaze",
+            "appearance_gaze",
+            "recommended_gaze",
+        ):
+            coerced[field_name] = _coerce_error_code_record(coerced.get(field_name))
+
+        coerced["errors"] = _coerce_error_list(coerced.get("errors"))
+        return coerced
 
 
 class VideoManifest(StrictSchemaModel):
