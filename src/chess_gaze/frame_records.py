@@ -3,13 +3,13 @@ from __future__ import annotations
 from pydantic import model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
-from chess_gaze.geometry import BBox, Point2D, StrictSchemaModel
+from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
 
 
 class GazeAngles(StrictSchemaModel):
     valid: bool
-    yaw_radians: float | None
-    pitch_radians: float | None
+    yaw_radians: RotationRadians | None
+    pitch_radians: RotationRadians | None
     reason_invalid: ErrorCode | None
 
     @model_validator(mode="after")
@@ -21,9 +21,9 @@ class GazeAngles(StrictSchemaModel):
 
 class HeadPoseRecord(StrictSchemaModel):
     valid: bool
-    yaw_radians: float | None
-    pitch_radians: float | None
-    roll_radians: float | None
+    yaw_radians: RotationRadians | None
+    pitch_radians: RotationRadians | None
+    roll_radians: RotationRadians | None
     reason_invalid: ErrorCode | None
 
 

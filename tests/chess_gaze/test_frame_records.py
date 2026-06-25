@@ -85,6 +85,16 @@ def test_gaze_valid_requires_pitch_and_yaw() -> None:
         GazeAngles(valid=True, yaw_radians=None, pitch_radians=0.1, reason_invalid=None)
 
 
+def test_frame_record_accepts_valid_artifact_payload(
+    valid_frame_record_dict: dict[str, Any],
+) -> None:
+    record = FrameRecord.model_validate(valid_frame_record_dict)
+
+    assert record.status.value == "ERROR"
+    assert record.face.reason_invalid == ErrorCode.FACE_NOT_FOUND
+    assert record.left_eye.reason_invalid == ErrorCode.LEFT_EYE_NOT_FOUND
+
+
 def test_frame_record_rejects_unknown_fields(
     valid_frame_record_dict: dict[str, Any],
 ) -> None:
@@ -109,6 +119,15 @@ def test_frame_record_rejects_present_eye_without_landmarks(
 ) -> None:
     valid_frame_record_dict["left_eye"]["present"] = True
     valid_frame_record_dict["left_eye"]["reason_invalid"] = None
+
+    with pytest.raises(ValidationError):
+        FrameRecord.model_validate(valid_frame_record_dict)
+
+
+def test_frame_record_rejects_infinite_head_pose_angle(
+    valid_frame_record_dict: dict[str, Any],
+) -> None:
+    valid_frame_record_dict["head_pose"]["yaw_radians"] = math.inf
 
     with pytest.raises(ValidationError):
         FrameRecord.model_validate(valid_frame_record_dict)

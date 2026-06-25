@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import math
-from enum import StrEnum
+from enum import Enum, StrEnum
+from typing import Annotated, Any, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, model_validator
 
 
 class CoordinateSpace(StrEnum):
@@ -11,11 +12,55 @@ class CoordinateSpace(StrEnum):
     NORMALIZED = "NORMALIZED"
 
 
-RotationRadians = float
+def validate_finite_float(value: float) -> float:
+    if not math.isfinite(value):
+        raise ValueError("value must be finite")
+    return value
+
+
+RotationRadians = Annotated[float, AfterValidator(validate_finite_float)]
+
+
+def enum_type_from_annotation(annotation: Any) -> type[Enum] | None:
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        return annotation
+
+    origin = get_origin(annotation)
+    if origin is None:
+        return None
+
+    for candidate in get_args(annotation):
+        enum_type = enum_type_from_annotation(candidate)
+        if enum_type is not None:
+            return enum_type
+
+    return None
 
 
 class StrictSchemaModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        coerced = dict(data)
+        for field_name, model_field in cls.model_fields.items():
+            if field_name not in coerced:
+                continue
+
+            enum_type = enum_type_from_annotation(model_field.annotation)
+            if enum_type is None or not isinstance(coerced[field_name], str):
+                continue
+
+            try:
+                coerced[field_name] = enum_type(coerced[field_name])
+            except ValueError:
+                continue
+
+        return coerced
 
     @model_validator(mode="after")
     def reject_non_finite_floats(self) -> StrictSchemaModel:
