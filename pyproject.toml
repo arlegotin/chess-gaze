@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+chess-gaze = "chess_gaze.cli:main"
+
 [dependency-groups]
 dev = [
     "mypy>=1.10",
