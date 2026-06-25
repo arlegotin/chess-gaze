@@ -7,15 +7,15 @@ Updated: 2026-06-25
 ## Status
 
 This is the active design spec for the first real runtime feature in
-`chess-gaze`. It intentionally stops before an implementation plan. The next
-step, after user review, is a separate Superpowers implementation plan.
+`chess-gaze`. The executable Superpowers implementation plan is
+`docs/superpowers/plans/2026-06-25-frame-gaze-analysis-pipeline.md`.
 
 2026-06-25 correction: the initial model choice did not meet the project's
 accuracy-first standard because it selected L2CS-Net without a current,
 candidate-complete comparison against UniGaze. This revision makes UniGaze
 `unigaze_h14_joint` the primary learned gaze model, records license/runtime
 caveats explicitly, and tightens other dependency and artifact decisions found
-during the follow-up audit. No implementation plan has been written yet.
+during the follow-up audit.
 
 ## Goal
 
@@ -52,10 +52,19 @@ uv run mypy
 ```
 
 `artifacts/`, `models/`, and common checkpoint formats are gitignored. The two
-local sample videos exist under `artifacts/input/`, but they are ignored local
-inputs, not committed test fixtures.
+local verification videos exist under `artifacts/input/`, but they are ignored
+local inputs, not committed test fixtures.
 
-Observed sample media:
+These two local verification videos are mandatory real-data verification inputs
+for this spec. They are not illustrative examples. Every subsystem that can be
+exercised with a real video must be checked against
+`artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4` as soon as that
+subsystem is executable, before later tasks build on it. Synthetic fixtures,
+fakes, and unit tests may define deterministic contracts, but they do not
+replace required real-data verification for any subsystem that can consume real
+video data.
+
+Observed mandatory verification media:
 
 | Video | Resolution | FPS | Duration | Frames | Video codec | Notes |
 | --- | ---: | ---: | ---: | ---: | --- | --- |
@@ -96,6 +105,23 @@ uv run chess-gaze analyze <video_path> \
 ```
 
 No batch mode is required in this spec.
+
+## Secrets and Environment
+
+`.env` is a local ignored secrets file. `HF_TOKEN` may be read from `.env` or
+the process environment only by explicit setup/prefetch tooling that downloads
+model assets into `models/` before analysis. The analysis command itself must
+not require, read for network access, log, persist, or transmit `HF_TOKEN`.
+
+`HF_TOKEN` is not a substitute for the local-model policy. Any model fetched with
+the token must still be checksum-verified, recorded in the ignored local
+`models/manifest.json`, matched against the committed model registry, and loaded
+from local disk during `chess-gaze analyze`.
+
+No other secret or credential is required by this spec. The repo owner granted
+license/use approval for UniGaze `unigaze_h14_joint` under MG-NC-RAI-2.0 on
+2026-06-25. This approval is a local policy decision and must be recorded as
+configuration or registry metadata, not treated as a secret.
 
 ## Output Layout
 
@@ -230,9 +256,15 @@ entries and record local verification results. Analysis must fail before frame
 processing if any required model file is missing, has a checksum mismatch, or is
 not license-approved for the intended use.
 
+For UniGaze `unigaze_h14_joint`, intended-use approval has been granted by the
+repo owner for this implementation. The committed registry should record that
+approval explicitly with the model ID, license name, approver, and approval date.
+
 The analysis command must not use a code path that downloads UniGaze weights on
 first use. Weights must be prefetched intentionally, checksum-verified, and
 loaded from the local `models/unigaze/unigaze_h14_joint.safetensors` path.
+That prefetch step may use `HF_TOKEN` from `.env`; the subsequent analysis step
+must work without network access.
 
 ## Library Findings and Sources
 
@@ -281,8 +313,9 @@ High-impact findings verified on 2026-06-24 and updated on 2026-06-25:
   `https://huggingface.co/UniGaze/UniGaze-models`.
 - UniGaze's README and Hugging Face model card state the model is licensed under
   ModelGo Attribution-NonCommercial-ResponsibleAI License v2.0. The first
-  implementation must therefore be license-gated and must not assume commercial
-  permissibility. Sources: `https://github.com/ut-vision/UniGaze` and
+  implementation must therefore keep a license gate and must not assume
+  commercial permissibility beyond the repo owner's 2026-06-25 approval for this
+  project. Sources: `https://github.com/ut-vision/UniGaze` and
   `https://huggingface.co/UniGaze/UniGaze-models`.
 - L2CS-Net is an older practical gaze estimator and remains a possible future
   comparison baseline, but it is not the first implementation's primary gaze
@@ -1028,14 +1061,20 @@ uv run mypy
 
 Real-model smoke targets:
 
-- On the two local sample videos, `FACE_NOT_FOUND` should be no more than 1
+- On the two local verification videos, `FACE_NOT_FOUND` should be no more than 1
   percent of decoded frames unless manual visualization review proves the face is
   absent or fully hidden in those frames. Until labeled expected-output frames
   exist, this is a smoke warning and triage target, not an automated hard gate.
-- On the two local sample videos, frames with both eyes visibly open in the
+- On the two local verification videos, frames with both eyes visibly open in the
   processed visualization should have both iris centers marked. Misses must be
   listed in `qa_summary.json` representative failures. Until labeled frames
   exist, this is manual QA evidence, not a deterministic pass/fail threshold.
+
+Real-data verification is mandatory for acceptance. If either local video or a
+required local model asset is unavailable, the exact missing path, affected
+subsystem, blocked verification, and next unblock action must be recorded in
+the closeout. Theoretical progress, synthetic-only tests, or skipped smoke
+checks must not be described as complete real-data verification.
 
 ## Testing Strategy
 
@@ -1055,12 +1094,14 @@ Required automated tests:
 | Integration | Run with fake/model-stub observers to prove the artifact contract without heavyweight ML dependencies. |
 | Integration | Verify atomic temp-then-rename writes and partial-run status when a write failure is injected. |
 | Integration | Verify exactly one `cv2` provider is importable after dependency sync. |
-| Smoke | Run real analysis on `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4` when model assets are present locally. |
-| Manual QA | Inspect deterministic processed-frame samples from each local test video. |
+| Smoke | Run real analysis on `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4`, or record the exact blocker when required local model assets are absent. |
+| Manual QA | Inspect deterministic processed-frame samples from each local verification video. |
 
-Tests must not require committing ignored video files or model weights. Real
-model smoke tests may be opt-in if model assets are absent, but the absence must
-be reported clearly rather than hidden.
+Tests must not require committing ignored video files or model weights. When
+ignored assets are unavailable, tests may skip with explicit messages, but the
+skip is a recorded blocker for the affected real-data requirement, not a pass.
+Video-only checks must still run when `test_1.mp4` and `test_2.mp4` are
+present, even if model assets are absent.
 
 ## Best Practices and Mistakes to Avoid
 
@@ -1142,10 +1183,11 @@ modify input videos.
 - Model binaries can live in local ignored `models/`, but expected IDs, URLs,
   checksums, licenses, and input/output contracts must be in a committed model
   registry. The ignored `models/manifest.json` is not authoritative.
-- UniGaze's non-commercial responsible-AI license is acceptable only if the repo
-  owner approves the intended use before implementation. If not approved, the
-  implementation must stop for a new model-selection decision rather than
-  silently falling back to L2CS-Net.
+- The repo owner granted intended-use approval for UniGaze's non-commercial
+  responsible-AI license on 2026-06-25. The implementation must record that
+  approval in the committed model registry or config metadata. If future use
+  changes materially, the implementation must stop for a new model-selection or
+  license decision rather than silently falling back to L2CS-Net.
 - H14 runtime performance on local hardware is unverified. If it is too slow or
   too memory-heavy, the next decision must compare UniGaze B/L/H variants and
   any other current models using the same evidence rules.

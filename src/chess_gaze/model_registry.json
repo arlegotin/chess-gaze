@@ -1,0 +1,40 @@
+{
+  "models": [
+    {
+      "model_id": "mediapipe-face-landmarker",
+      "task_name": "face_landmarks",
+      "expected_relative_path": "mediapipe/face_landmarker.task",
+      "checksum_sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+      "source_url": "https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker",
+      "license": "Google AI Edge Terms",
+      "requires_license_approval": false,
+      "license_approved": true,
+      "license_approved_by": "repo_owner",
+      "license_approved_at": "2026-06-25",
+      "input_contract": {
+        "running_mode": "IMAGE"
+      },
+      "output_contract": {
+        "landmarks": "478 3D face landmarks"
+      }
+    },
+    {
+      "model_id": "unigaze-h14-joint",
+      "task_name": "gaze_estimation",
+      "expected_relative_path": "unigaze/unigaze_h14_joint.safetensors",
+      "checksum_sha256": "a336e7234738e9a9517fc6af7a9bc69cee16958388ad648d48c0f6b0df42ac8f",
+      "source_url": "https://huggingface.co/UniGaze/UniGaze-models",
+      "license": "MG-NC-RAI-2.0",
+      "requires_license_approval": true,
+      "license_approved": true,
+      "license_approved_by": "repo_owner",
+      "license_approved_at": "2026-06-25",
+      "input_contract": {
+        "input_size_px": 224
+      },
+      "output_contract": {
+        "order": "pitch_yaw_radians"
+      }
+    }
+  ]
+}
