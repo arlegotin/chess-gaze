@@ -49,7 +49,7 @@ class DecodedFrame:
 
 
 class VideoDecodeError(RuntimeError):
-    def __init__(self, code: CliErrorCode | str, message: str) -> None:
+    def __init__(self, code: CliErrorCode, message: str) -> None:
         super().__init__(message)
         self.code = code
 
@@ -110,7 +110,7 @@ def _open_video_container(path: Path) -> av.container.InputContainer:
         return av.open(str(path))
     except (FileNotFoundError, av.FFmpegError) as exc:
         raise VideoDecodeError(
-            _unsupported_video_code(),
+            CliErrorCode.UNSUPPORTED_VIDEO,
             f"Unsupported video input: {path}",
         ) from exc
 
@@ -120,17 +120,10 @@ def _video_stream_or_raise(
 ) -> av.video.stream.VideoStream:
     if not container.streams.video:
         raise VideoDecodeError(
-            _unsupported_video_code(),
+            CliErrorCode.UNSUPPORTED_VIDEO,
             f"Unsupported video input: {path}",
         )
     return container.streams.video[0]
-
-
-def _unsupported_video_code() -> CliErrorCode | str:
-    unsupported: object = getattr(CliErrorCode, "UNSUPPORTED_VIDEO", None)
-    if isinstance(unsupported, str):
-        return unsupported
-    return "UNSUPPORTED_VIDEO"
 
 
 def _ffmpeg_versions() -> dict[str, str]:

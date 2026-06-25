@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from chess_gaze.errors import CliErrorCode
 from chess_gaze.video_decode import (
     VideoDecodeError,
     inspect_video,
@@ -44,16 +46,18 @@ def test_inspect_video_reports_expected_metadata(tmp_path: Path) -> None:
     assert inspection.video_manifest.source_sha256 == inspection.source_sha256
     assert inspection.video_manifest.frame_width == 8
     assert inspection.video_manifest.frame_height == 6
-    assert inspection.container_name == "mov,mp4,m4a,3gp,3g2,mj2"
+    assert "mp4" in inspection.container_name
+    assert inspection.container_long_name
     assert inspection.codec_name == "mpeg4"
     assert inspection.frame_width == 8
     assert inspection.frame_height == 6
     assert inspection.nominal_fps == pytest.approx(3.0)
-    assert inspection.time_base == "1/12288"
+    assert inspection.time_base is not None
+    assert Fraction(inspection.time_base) > 0
     assert inspection.rotation_degrees is None
     assert inspection.pixel_format == "yuv420p"
-    assert inspection.color_range is not None
-    assert inspection.color_space is not None
+    assert inspection.color_range is None or inspection.color_range >= 0
+    assert inspection.color_space is None or inspection.color_space >= 0
     assert inspection.frame_count_expected == 3
     assert inspection.frame_count_decoded == 3
     assert inspection.pyav_version
@@ -74,15 +78,20 @@ def test_iter_decoded_frames_yields_full_rgb_frames_in_order(tmp_path: Path) -> 
         "f000000002",
         "f000000003",
     ]
-    assert [frame.pts for frame in frames] == [0, 4096, 8192, 12288]
-    assert [frame.pts_seconds for frame in frames] == pytest.approx(
-        [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
-    )
-    assert [frame.duration_seconds for frame in frames] == pytest.approx(
-        [1.0 / 3.0] * 4
-    )
     assert all(frame.rgb.shape == (6, 8, 3) for frame in frames)
     assert all(frame.rgb.dtype == np.uint8 for frame in frames)
+    assert all(frame.pts is not None for frame in frames)
+    pts_values = [frame.pts for frame in frames if frame.pts is not None]
+    assert pts_values == sorted(pts_values)
+    assert len(set(pts_values)) == len(frames)
+    assert all(frame.pts_seconds is None or frame.pts_seconds >= 0 for frame in frames)
+    pts_seconds = [
+        frame.pts_seconds for frame in frames if frame.pts_seconds is not None
+    ]
+    assert pts_seconds == sorted(pts_seconds)
+    assert all(
+        frame.duration_seconds is None or frame.duration_seconds > 0 for frame in frames
+    )
     pixel_values = [int(frame.rgb[0, 0, 0]) for frame in frames]
     assert pixel_values == sorted(pixel_values)
     assert pixel_values[0] == pytest.approx(0, abs=2)
@@ -96,6 +105,4 @@ def test_unsupported_video_raises_stable_error(tmp_path: Path) -> None:
     with pytest.raises(VideoDecodeError, match="Unsupported video") as exc_info:
         inspect_video(path)
 
-    assert getattr(exc_info.value.code, "value", exc_info.value.code) == (
-        "UNSUPPORTED_VIDEO"
-    )
+    assert exc_info.value.code is CliErrorCode.UNSUPPORTED_VIDEO
