@@ -8,7 +8,9 @@ import pytest
 
 from chess_gaze.errors import CliErrorCode
 from chess_gaze.model_assets import (
+    ManifestEntry,
     ModelAssetError,
+    ModelManifest,
     load_model_registry,
     prefetch_model_asset,
     validate_required_assets,
@@ -23,7 +25,12 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def build_registry(tmp_path: Path, *, unigaze_checksum: str | None) -> Path:
+def build_registry(
+    tmp_path: Path,
+    *,
+    unigaze_checksum: str | None,
+    unigaze_requires_license_approval: bool = True,
+) -> Path:
     registry_path = tmp_path / "model_registry.json"
     write_json(
         registry_path,
@@ -36,6 +43,7 @@ def build_registry(tmp_path: Path, *, unigaze_checksum: str | None) -> Path:
                     "checksum_sha256": None,
                     "source_url": "https://example.invalid/mediapipe",
                     "license": "Google AI Edge Terms",
+                    "requires_license_approval": False,
                     "license_approved": True,
                     "license_approved_by": "repo_owner",
                     "license_approved_at": "2026-06-25",
@@ -47,8 +55,9 @@ def build_registry(tmp_path: Path, *, unigaze_checksum: str | None) -> Path:
                     "task_name": "gaze_estimation",
                     "expected_relative_path": "unigaze/unigaze_h14_joint.safetensors",
                     "checksum_sha256": unigaze_checksum,
-                    "source_url": "https://example.invalid/unigaze",
+                    "source_url": "https://huggingface.co/UniGaze/UniGaze-models",
                     "license": "MG-NC-RAI-2.0",
+                    "requires_license_approval": unigaze_requires_license_approval,
                     "license_approved": True,
                     "license_approved_by": "repo_owner",
                     "license_approved_at": "2026-06-25",
@@ -70,6 +79,10 @@ def test_registry_file_records_unigaze_license_approval_metadata() -> None:
     )
     registry_data = json.loads(registry_path.read_text(encoding="utf-8"))
 
+    assert all(
+        "requires_license_approval" in model for model in registry_data["models"]
+    )
+
     unigaze_entry = next(
         model
         for model in registry_data["models"]
@@ -77,9 +90,28 @@ def test_registry_file_records_unigaze_license_approval_metadata() -> None:
     )
 
     assert unigaze_entry["license"] == "MG-NC-RAI-2.0"
+    assert unigaze_entry["requires_license_approval"] is True
     assert unigaze_entry["license_approved"] is True
     assert unigaze_entry["license_approved_by"] == "repo_owner"
     assert unigaze_entry["license_approved_at"] == "2026-06-25"
+    assert (
+        unigaze_entry["source_url"] == "https://huggingface.co/UniGaze/UniGaze-models"
+    )
+
+
+def test_model_manifest_defaults_to_independent_model_lists() -> None:
+    manifest_a = ModelManifest()
+    manifest_b = ModelManifest()
+
+    manifest_a.models.append(
+        ManifestEntry(
+            model_id="ignored",
+            installed_relative_path=Path("ignored.bin"),
+            checksum_sha256=None,
+        )
+    )
+
+    assert manifest_b.models == []
 
 
 def test_manifest_cannot_add_uncommitted_registry_entry(tmp_path: Path) -> None:
@@ -165,6 +197,33 @@ def test_validate_required_assets_raises_for_unapproved_license(tmp_path: Path) 
 
     assert exc_info.value.code == CliErrorCode.MODEL_LICENSE_NOT_APPROVED
     assert "MG-NC-RAI-2.0" in str(exc_info.value)
+
+
+def test_validate_required_assets_uses_registry_approval_requirement_metadata(
+    tmp_path: Path,
+) -> None:
+    asset_bytes = b"fixture-unigaze-weights"
+    registry_path = build_registry(
+        tmp_path,
+        unigaze_checksum=sha256_bytes(asset_bytes),
+        unigaze_requires_license_approval=False,
+    )
+    models_root = tmp_path / "models"
+    asset_path = models_root / "unigaze" / "unigaze_h14_joint.safetensors"
+    mediapipe_path = models_root / "mediapipe" / "face_landmarker.task"
+    asset_path.parent.mkdir(parents=True)
+    mediapipe_path.parent.mkdir(parents=True)
+    asset_path.write_bytes(asset_bytes)
+    mediapipe_path.write_bytes(b"mediapipe")
+
+    registry = load_model_registry(registry_path)
+
+    resolved_assets = validate_required_assets(registry, models_root, set())
+
+    assert {asset.model_id for asset in resolved_assets} == {
+        "mediapipe-face-landmarker",
+        "unigaze-h14-joint",
+    }
 
 
 def test_validate_required_assets_resolves_matching_fixture_assets(

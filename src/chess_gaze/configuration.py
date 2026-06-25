@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
+
+
+class ConfigurationError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class AnalysisConfig(BaseModel):
@@ -20,9 +27,36 @@ def load_config(path: Path | None) -> AnalysisConfig:
         return AnalysisConfig()
 
     try:
-        return AnalysisConfig.model_validate_json(path.read_text(encoding="utf-8"))
+        contents = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ConfigurationError(
+            "CONFIG_PATH_MISSING",
+            f"Configuration file is missing: {path}",
+        ) from exc
+    except OSError as exc:
+        raise ConfigurationError(
+            "CONFIG_LOAD_UNREADABLE",
+            f"Configuration file is unreadable: {path}",
+        ) from exc
+
+    try:
+        payload = json.loads(contents)
+    except json.JSONDecodeError as exc:
+        raise ConfigurationError(
+            "CONFIG_LOAD_INVALID",
+            f"Configuration file must contain valid JSON: {path}",
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ConfigurationError(
+            "CONFIG_LOAD_UNSUPPORTED_SHAPE",
+            f"Configuration file must contain a JSON object: {path}",
+        )
+
+    try:
+        return AnalysisConfig.model_validate(payload)
     except ValidationError as exc:
-        raise ValueError(str(exc)) from exc
+        raise ConfigurationError("CONFIG_LOAD_INVALID", str(exc)) from exc
 
 
 def load_env_file(path: Path = Path(".env")) -> dict[str, str]:

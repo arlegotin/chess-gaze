@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from chess_gaze.errors import CliErrorCode
 
@@ -18,14 +18,12 @@ class ModelRegistryEntry(BaseModel):
     checksum_sha256: str | None
     source_url: str
     license: str
+    requires_license_approval: bool
     license_approved: bool
     license_approved_by: str | None
     license_approved_at: str | None
     input_contract: dict[str, object]
     output_contract: dict[str, object]
-
-    def requires_explicit_license_approval(self) -> bool:
-        return self.license == "MG-NC-RAI-2.0"
 
 
 class ModelRegistry(BaseModel):
@@ -54,7 +52,7 @@ class ManifestEntry(BaseModel):
 class ModelManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    models: list[ManifestEntry] = []
+    models: list[ManifestEntry] = Field(default_factory=list)
 
 
 class ResolvedModelAsset(BaseModel):
@@ -105,7 +103,7 @@ def validate_required_assets(
 
     resolved_assets: list[ResolvedModelAsset] = []
     for entry in registry.models:
-        if entry.requires_explicit_license_approval() and (
+        if entry.requires_license_approval and (
             not entry.license_approved
             or entry.license_approved_by is None
             or entry.license_approved_at is None

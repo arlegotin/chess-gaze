@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from chess_gaze.configuration import load_config, load_env_file
+from chess_gaze.configuration import ConfigurationError, load_config, load_env_file
 
 
 def test_load_config_uses_task_4_defaults(tmp_path: Path) -> None:
@@ -24,8 +24,47 @@ def test_load_config_rejects_unknown_keys(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="unexpected_key"):
+    with pytest.raises(ConfigurationError, match="unexpected_key") as exc_info:
         load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
+
+
+def test_load_config_raises_stable_error_for_missing_path(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="missing") as exc_info:
+        load_config(tmp_path / "missing.json")
+
+    assert exc_info.value.code == "CONFIG_PATH_MISSING"
+
+
+def test_load_config_raises_stable_error_for_unreadable_input(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config-dir"
+    config_dir.mkdir()
+
+    with pytest.raises(ConfigurationError, match="unreadable") as exc_info:
+        load_config(config_dir)
+
+    assert exc_info.value.code == "CONFIG_LOAD_UNREADABLE"
+
+
+def test_load_config_raises_stable_error_for_invalid_json(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"output_root":', encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="valid JSON") as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
+
+
+def test_load_config_raises_stable_error_for_unsupported_shape(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('["not", "an", "object"]', encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="JSON object") as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_UNSUPPORTED_SHAPE"
 
 
 def test_load_env_file_reads_simple_key_value_pairs(tmp_path: Path) -> None:
