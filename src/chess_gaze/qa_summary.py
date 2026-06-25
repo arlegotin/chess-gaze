@@ -225,7 +225,7 @@ def _read_jsonl_model[ModelT: BaseModel](
     validation_errors: list[str] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return records, [
             (
                 f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "

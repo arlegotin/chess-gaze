@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO, cast
 
 import av
 import numpy as np
@@ -554,3 +554,49 @@ def test_malformed_errors_jsonl_fails_artifact_revalidation(
     assert summary.final_status == "failed"
     assert summary.artifact_validation.schema_validation_passed is False
     assert summary.artifact_validation.counts_match is True
+
+
+def test_invalid_utf8_errors_jsonl_writes_failed_qa_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=1)
+
+    from chess_gaze import pipeline
+
+    real_frame_error_writer = pipeline.frame_error_writer
+
+    def append_invalid_utf8_error_jsonl(
+        errors_handle: TextIO, record: FrameRecord
+    ) -> None:
+        real_frame_error_writer(errors_handle, record)
+        errors_handle.flush()
+        cast(Any, errors_handle).buffer.write(b"\xff\n")
+        errors_handle.flush()
+
+    monkeypatch.setattr(pipeline, "frame_error_writer", append_invalid_utf8_error_jsonl)
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+    [run_dir] = (tmp_path / "output" / "tiny" / "runs").iterdir()
+    summary = QASummary.model_validate_json(
+        (run_dir / "qa_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary.final_status == "failed"
+    assert summary.status_transitions == [
+        "created",
+        "processing",
+        "revalidating",
+        "failed",
+    ]
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert summary.artifact_validation.counts_match is True
+    assert any(
+        CliErrorCode.SCHEMA_VALIDATION_FAILED.value in error
+        for error in summary.artifact_validation.validation_errors
+    )

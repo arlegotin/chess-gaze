@@ -416,3 +416,20 @@ def test_malformed_jsonl_produces_failed_qa_summary(tmp_path: Path) -> None:
         "revalidating",
         "failed",
     ]
+
+
+def test_invalid_utf8_jsonl_produces_failed_qa_summary(tmp_path: Path) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=2)
+    (layout.records_dir / "frames.jsonl").write_bytes(b"\xff\n")
+
+    result = validate_run_artifacts(layout)
+    summary = build_qa_summary(layout)
+
+    assert result.schema_validation_passed is False
+    assert result.final_status == "failed"
+    assert any(
+        CliErrorCode.SCHEMA_VALIDATION_FAILED.value in error
+        for error in result.validation_errors
+    )
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert summary.final_status == "failed"
