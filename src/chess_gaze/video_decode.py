@@ -69,6 +69,7 @@ def inspect_video(path: Path) -> VideoInspection:
                 source_sha256=source_sha256,
                 frame_width=stream.width,
                 frame_height=stream.height,
+                frame_count_decoded=frame_count_decoded,
             ),
             container_name=container.format.name,
             container_long_name=container.format.long_name,

@@ -18,6 +18,7 @@ from chess_gaze.pipeline import (
     PipelineError,
     analyze_video,
 )
+from chess_gaze.qa_summary import QASummary
 
 
 def make_tiny_video(path: Path, frame_count: int = 3) -> None:
@@ -308,6 +309,14 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     assert (result.layout.run_dir / "video_manifest.json").is_file()
     assert (result.layout.run_dir / "calibration.json").is_file()
     assert result.qa_summary_path.is_file()
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
+    assert summary.byte_counts.total_run_bytes == sum(
+        path.stat().st_size
+        for path in result.layout.run_dir.rglob("*")
+        if path.is_file()
+    )
 
 
 def test_config_output_root_controls_run_layout_for_fake_observers(
@@ -538,3 +547,10 @@ def test_malformed_errors_jsonl_fails_artifact_revalidation(
         )
 
     assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+    [run_dir] = (tmp_path / "output" / "tiny" / "runs").iterdir()
+    summary = QASummary.model_validate_json(
+        (run_dir / "qa_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert summary.artifact_validation.counts_match is True

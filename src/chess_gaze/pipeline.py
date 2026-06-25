@@ -28,7 +28,7 @@ from chess_gaze.model_assets import (
     load_model_registry,
     validate_required_assets,
 )
-from chess_gaze.qa_summary import ArtifactValidationError, build_qa_summary
+from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
 from chess_gaze.video_decode import (
     DecodedFrame,
     VideoDecodeError,
@@ -39,6 +39,7 @@ from chess_gaze.visualization import render_processed_frame
 
 DEFAULT_MODEL_REGISTRY_PATH = Path(__file__).with_name("model_registry.json")
 DEFAULT_APPROVED_LICENSES = frozenset({"MG-NC-RAI-2.0"})
+QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
 RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
@@ -163,7 +164,6 @@ def analyze_video(
 
     decoded_frame_count = 0
     frame_error_count = 0
-    written_error_count = 0
     with (
         frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
         errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
@@ -178,33 +178,17 @@ def analyze_video(
                 errors_handle=errors_handle,
             )
             frame_error_count += len(frame_errors)
-            written_error_count += len(record.errors)
             frames_handle.write(record.model_dump_json() + "\n")
 
-    validated_records = _read_frame_records(frames_jsonl_path)
-    validated_errors = _read_frame_error_records(errors_jsonl_path)
-    if len(validated_records) != decoded_frame_count:
-        raise PipelineError(
-            CliErrorCode.SCHEMA_VALIDATION_FAILED,
-            (
-                "Validated frame record count does not match decoded frame count: "
-                f"{len(validated_records)} != {decoded_frame_count}"
-            ),
-        )
-    if len(validated_errors) != written_error_count:
-        raise PipelineError(
-            CliErrorCode.SCHEMA_VALIDATION_FAILED,
-            (
-                "Validated frame error count does not match written frame errors: "
-                f"{len(validated_errors)} != {written_error_count}"
-            ),
-        )
-
     try:
-        qa_summary = build_qa_summary(layout)
+        qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
     except ArtifactValidationError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
-    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
+    if not qa_summary.artifact_validation.schema_validation_passed:
+        raise PipelineError(
+            CliErrorCode.SCHEMA_VALIDATION_FAILED,
+            f"Run artifact validation failed; see {qa_summary_path}",
+        )
 
     return AnalyzeResult(
         layout=layout,
@@ -215,10 +199,29 @@ def analyze_video(
         errors_jsonl_path=errors_jsonl_path,
         qa_summary_path=qa_summary_path,
         decoded_frame_count=decoded_frame_count,
-        validated_record_count=len(validated_records),
-        validated_error_count=len(validated_errors),
+        validated_record_count=qa_summary.counts.frame_records,
+        validated_error_count=sum(qa_summary.errors_by_code.values()),
         frame_error_count=frame_error_count,
     )
+
+
+def _build_and_write_qa_summary(
+    run_layout: RunLayout, qa_summary_path: Path
+) -> QASummary:
+    qa_summary = build_qa_summary(run_layout)
+    stable_total_run_bytes: int | None = None
+
+    for _attempt in range(QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS):
+        _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
+        refreshed_summary = build_qa_summary(run_layout)
+        refreshed_total_run_bytes = refreshed_summary.byte_counts.total_run_bytes
+        if refreshed_total_run_bytes == stable_total_run_bytes:
+            return qa_summary
+        stable_total_run_bytes = refreshed_total_run_bytes
+        qa_summary = refreshed_summary
+
+    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
+    return qa_summary
 
 
 def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
@@ -400,42 +403,6 @@ def _append_frame_errors(errors_handle: TextIO, record: FrameRecord) -> None:
 
 
 frame_error_writer: FrameErrorWriter = _append_frame_errors
-
-
-def _read_frame_records(path: Path) -> list[FrameRecord]:
-    records: list[FrameRecord] = []
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        if not line.strip():
-            continue
-        try:
-            records.append(FrameRecord.model_validate_json(line))
-        except ValueError as exc:
-            raise PipelineError(
-                CliErrorCode.SCHEMA_VALIDATION_FAILED,
-                f"Invalid frame record at {path}:{line_number}: {exc}",
-            ) from exc
-    return records
-
-
-def _read_frame_error_records(path: Path) -> list[FrameErrorRecord]:
-    records: list[FrameErrorRecord] = []
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        if not line.strip():
-            continue
-        try:
-            records.append(FrameErrorRecord.model_validate_json(line))
-        except ValueError as exc:
-            raise PipelineError(
-                CliErrorCode.SCHEMA_VALIDATION_FAILED,
-                f"Invalid frame error record at {path}:{line_number}: {exc}",
-            ) from exc
-    return records
 
 
 def _write_json(path: Path, payload: object) -> None:

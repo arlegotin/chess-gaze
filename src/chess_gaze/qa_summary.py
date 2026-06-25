@@ -123,6 +123,7 @@ class _LoadedRunArtifacts(StrictSchemaModel):
     raw_frame_paths: list[Path]
     processed_frame_paths: list[Path]
     crop_paths: list[Path]
+    schema_validation_errors: list[str]
 
 
 def validate_run_artifacts(run_layout: RunLayout) -> ArtifactValidationResult:
@@ -150,7 +151,7 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
         worst_exposure_frame_ids=_worst_exposure_frame_ids(loaded.raw_frame_paths),
         qa_sample_frame_ids=_qa_sample_frame_ids(loaded.frame_records),
         representative_failure_frame_ids=_representative_failure_frame_ids(
-            loaded.frame_records
+            loaded.frame_records, loaded.error_records
         ),
         status_transitions=_status_transitions(final_status),
         final_status=final_status,
@@ -168,10 +169,10 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
     video_manifest = _read_json_model(
         run_layout.run_dir / "video_manifest.json", VideoManifest
     )
-    frame_records = _read_jsonl_model(
+    frame_records, frame_record_errors = _read_jsonl_model(
         run_layout.records_dir / "frames.jsonl", FrameRecord, "frame"
     )
-    error_records = _read_jsonl_model(
+    error_records, frame_error_record_errors = _read_jsonl_model(
         run_layout.records_dir / "errors.jsonl", FrameErrorRecord, "frame error"
     )
     return _LoadedRunArtifacts(
@@ -182,6 +183,7 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
         raw_frame_paths=_artifact_files(run_layout.raw_frames_dir),
         processed_frame_paths=_artifact_files(run_layout.processed_frames_dir),
         crop_paths=_artifact_files(run_layout.crops_dir),
+        schema_validation_errors=frame_record_errors + frame_error_record_errors,
     )
 
 
@@ -190,7 +192,8 @@ def _validate_loaded_run_artifacts(
 ) -> ArtifactValidationResult:
     counts = _artifact_counts(loaded)
     byte_counts = _byte_counts(run_layout, loaded)
-    validation_errors = _count_validation_errors(counts, loaded.frame_records)
+    count_validation_errors = _count_validation_errors(counts, loaded.frame_records)
+    validation_errors = loaded.schema_validation_errors + count_validation_errors
     final_status: Literal["complete", "failed"] = (
         "complete" if not validation_errors else "failed"
     )
@@ -198,8 +201,8 @@ def _validate_loaded_run_artifacts(
         source_artifacts=dict(SOURCE_ARTIFACTS),
         counts=counts,
         byte_counts=byte_counts,
-        schema_validation_passed=True,
-        counts_match=not validation_errors,
+        schema_validation_passed=not loaded.schema_validation_errors,
+        counts_match=not count_validation_errors,
         validation_errors=validation_errors,
         final_status=final_status,
     )
@@ -217,15 +220,18 @@ def _read_json_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) ->
 
 def _read_jsonl_model[ModelT: BaseModel](
     path: Path, model_type: type[ModelT], record_name: str
-) -> list[ModelT]:
+) -> tuple[list[ModelT], list[str]]:
     records: list[ModelT] = []
+    validation_errors: list[str] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise ArtifactValidationError(
-            CliErrorCode.SCHEMA_VALIDATION_FAILED,
-            f"Unable to read {record_name} JSONL artifact at {path}: {exc}",
-        ) from exc
+        return records, [
+            (
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Unable to read {record_name} JSONL artifact at {path}: {exc}"
+            )
+        ]
 
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
@@ -233,11 +239,11 @@ def _read_jsonl_model[ModelT: BaseModel](
         try:
             records.append(model_type.model_validate_json(line))
         except ValueError as exc:
-            raise ArtifactValidationError(
-                CliErrorCode.SCHEMA_VALIDATION_FAILED,
-                f"Invalid {record_name} record at {path}:{line_number}: {exc}",
-            ) from exc
-    return records
+            validation_errors.append(
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Invalid {record_name} record at {path}:{line_number}: {exc}"
+            )
+    return records, validation_errors
 
 
 def _artifact_files(directory: Path) -> list[Path]:
@@ -247,20 +253,13 @@ def _artifact_files(directory: Path) -> list[Path]:
 
 
 def _artifact_counts(loaded: _LoadedRunArtifacts) -> ArtifactCounts:
-    decoded_frame_count = _decoded_frame_count(loaded.frame_records)
     return ArtifactCounts(
-        decoded_frames=decoded_frame_count,
+        decoded_frames=loaded.video_manifest.frame_count_decoded,
         frame_records=len(loaded.frame_records),
         raw_frames=len(loaded.raw_frame_paths),
         processed_frames=len(loaded.processed_frame_paths),
         crop_files=len(loaded.crop_paths),
     )
-
-
-def _decoded_frame_count(frame_records: list[FrameRecord]) -> int:
-    if not frame_records:
-        return 0
-    return max(record.frame_index for record in frame_records) + 1
 
 
 def _byte_counts(run_layout: RunLayout, loaded: _LoadedRunArtifacts) -> ByteCounts:
@@ -426,17 +425,24 @@ def _qa_sample_frame_ids(frame_records: list[FrameRecord]) -> list[str]:
     return [ordered_records[index].frame_id for index in sample_indices]
 
 
-def _representative_failure_frame_ids(frame_records: list[FrameRecord]) -> list[str]:
-    failed_records = [
-        record
-        for record in frame_records
-        if record.status is not FrameStatus.OK or record.errors
-    ]
+def _representative_failure_frame_ids(
+    frame_records: list[FrameRecord], error_records: list[FrameErrorRecord]
+) -> list[str]:
+    failed_frames: dict[str, tuple[int, str]] = {}
+    for record in frame_records:
+        if record.status is not FrameStatus.OK or record.errors:
+            failed_frames[record.frame_id] = (record.frame_index, record.frame_id)
+    for error_record in error_records:
+        failed_frames.setdefault(
+            error_record.frame_id,
+            (error_record.frame_index, error_record.frame_id),
+        )
+
     return [
-        record.frame_id
-        for record in sorted(
-            failed_records, key=lambda record: (record.frame_index, record.frame_id)
-        )[:REPRESENTATIVE_FAILURE_COUNT]
+        frame_id_value
+        for _frame_index, frame_id_value in sorted(failed_frames.values())[
+            :REPRESENTATIVE_FAILURE_COUNT
+        ]
     ]
 
 

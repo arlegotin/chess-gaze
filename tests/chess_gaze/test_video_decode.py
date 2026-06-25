@@ -46,6 +46,7 @@ def test_inspect_video_reports_expected_metadata(tmp_path: Path) -> None:
     assert inspection.video_manifest.source_sha256 == inspection.source_sha256
     assert inspection.video_manifest.frame_width == 8
     assert inspection.video_manifest.frame_height == 6
+    assert inspection.video_manifest.frame_count_decoded == 3
     assert "mp4" in inspection.container_name
     assert inspection.container_long_name
     assert inspection.codec_name == "mpeg4"

@@ -184,6 +184,7 @@ class VideoManifest(StrictSchemaModel):
     source_sha256: str
     frame_width: int
     frame_height: int
+    frame_count_decoded: int
 
 
 class RunManifest(StrictSchemaModel):

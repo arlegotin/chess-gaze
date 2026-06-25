@@ -14,7 +14,6 @@ from chess_gaze.frame_records import FrameRecord, RunManifest, VideoManifest
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.image_io import save_rgb_png
 from chess_gaze.qa_summary import (
-    ArtifactValidationError,
     build_qa_summary,
     validate_run_artifacts,
 )
@@ -154,6 +153,7 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
             source_sha256="0" * 64,
             frame_width=8,
             frame_height=8,
+            frame_count_decoded=frame_count,
         ),
     )
     (layout.run_dir / "run_manifest.json").write_text(
@@ -203,6 +203,12 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
             "frame_index": 17,
             "code": ErrorCode.FACE_NOT_FOUND.value,
             "message": "No face detected in frame.",
+        },
+        {
+            "frame_id": "f000000018",
+            "frame_index": 18,
+            "code": ErrorCode.PROCESSED_FRAME_WRITE_FAILED.value,
+            "message": "Processed frame write failed.",
         },
     ]
     (layout.records_dir / "errors.jsonl").write_text(
@@ -282,9 +288,10 @@ def test_build_qa_summary_revalidates_counts_rates_errors_and_samples(
     assert summary.rates.recommended_gaze_valid_rate == pytest.approx(14 / 35)
     assert summary.errors_by_code == {
         ErrorCode.FACE_NOT_FOUND.value: 2,
+        ErrorCode.PROCESSED_FRAME_WRITE_FAILED.value: 1,
         ErrorCode.RAW_FRAME_WRITE_FAILED.value: 1,
     }
-    assert summary.errors_by_severity == {"error": 1, "warning": 2}
+    assert summary.errors_by_severity == {"error": 2, "warning": 2}
     assert summary.worst_blur_frame_ids == sorted(summary.worst_blur_frame_ids)
     assert summary.worst_exposure_frame_ids[:3] == [
         "f000000000",
@@ -327,6 +334,7 @@ def test_build_qa_summary_revalidates_counts_rates_errors_and_samples(
     assert summary.representative_failure_frame_ids == [
         "f000000004",
         "f000000017",
+        "f000000018",
         "f000000031",
     ]
     assert summary.status_transitions == [
@@ -362,14 +370,49 @@ def test_validate_run_artifacts_reports_count_mismatches_without_hiding_records(
     assert result.counts.raw_frames == 2
 
 
-def test_malformed_jsonl_raises_schema_validation_failed(tmp_path: Path) -> None:
+def test_tail_truncated_run_uses_video_manifest_decoded_count(tmp_path: Path) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=3)
+    frame_lines = (
+        (layout.records_dir / "frames.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    (layout.records_dir / "frames.jsonl").write_text(
+        "\n".join(frame_lines[:2]) + "\n",
+        encoding="utf-8",
+    )
+    (layout.raw_frames_dir / "f000000002.png").unlink()
+    (layout.processed_frames_dir / "f000000002.jpg").unlink()
+
+    result = validate_run_artifacts(layout)
+
+    assert result.counts.decoded_frames == 3
+    assert result.counts.frame_records == 2
+    assert result.counts.raw_frames == 2
+    assert result.counts.processed_frames == 2
+    assert result.counts_match is False
+    assert result.final_status == "failed"
+
+
+def test_malformed_jsonl_produces_failed_qa_summary(tmp_path: Path) -> None:
     layout = _write_fixture_run(tmp_path, frame_count=2)
     (layout.records_dir / "frames.jsonl").write_text(
         '{"frame_id": "f000000000"}\n{malformed-json\n',
         encoding="utf-8",
     )
 
-    with pytest.raises(ArtifactValidationError) as exc_info:
-        validate_run_artifacts(layout)
+    result = validate_run_artifacts(layout)
+    summary = build_qa_summary(layout)
 
-    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+    assert result.schema_validation_passed is False
+    assert result.final_status == "failed"
+    assert any(
+        CliErrorCode.SCHEMA_VALIDATION_FAILED.value in error
+        for error in result.validation_errors
+    )
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert summary.final_status == "failed"
+    assert summary.status_transitions == [
+        "created",
+        "processing",
+        "revalidating",
+        "failed",
+    ]
