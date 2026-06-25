@@ -1,0 +1,38 @@
+{
+  "models": [
+    {
+      "model_id": "mediapipe-face-landmarker",
+      "task_name": "face_landmarks",
+      "expected_relative_path": "mediapipe/face_landmarker.task",
+      "checksum_sha256": null,
+      "source_url": "https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker",
+      "license": "Google AI Edge Terms",
+      "license_approved": true,
+      "license_approved_by": "repo_owner",
+      "license_approved_at": "2026-06-25",
+      "input_contract": {
+        "running_mode": "IMAGE"
+      },
+      "output_contract": {
+        "landmarks": "478 3D face landmarks"
+      }
+    },
+    {
+      "model_id": "unigaze-h14-joint",
+      "task_name": "gaze_estimation",
+      "expected_relative_path": "unigaze/unigaze_h14_joint.safetensors",
+      "checksum_sha256": null,
+      "source_url": "https://huggingface.co/lsr98/UniGaze",
+      "license": "MG-NC-RAI-2.0",
+      "license_approved": true,
+      "license_approved_by": "repo_owner",
+      "license_approved_at": "2026-06-25",
+      "input_contract": {
+        "input_size_px": 224
+      },
+      "output_contract": {
+        "order": "pitch_yaw_radians"
+      }
+    }
+  ]
+}
