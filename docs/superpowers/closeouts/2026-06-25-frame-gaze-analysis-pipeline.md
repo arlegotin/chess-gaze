@@ -19,12 +19,14 @@ local model assets, builds the real observer bundle, runs MediaPipe face
 landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
 checkpoint, writes processed overlays, and revalidates artifacts.
 
-The full default CLI run over both mandatory verification videos was not run in
-this closeout because the default pipeline intentionally processes every frame
-and the local videos contain 3,613 and 1,973 frames. A bounded real-model
-entrypoint smoke used a one-frame lossless clip from `test_1.mp4` and verified
-the full default observer path on a frame with face, both eyes, head pose,
-UniGaze appearance gaze, recommended gaze, eye crops, and QA summary.
+The full default CLI run over `artifacts/input/test_2.mp4` completed
+successfully after the initial closeout, covering all 1,973 decoded frames. A
+bounded real-model entrypoint smoke also used a one-frame lossless clip from
+`test_1.mp4` and verified the full default observer path on a frame with face,
+both eyes, head pose, UniGaze appearance gaze, recommended gaze, eye crops, and
+QA summary. The full default CLI run over `test_1.mp4` was not run because it
+contains 3,613 frames and the default pipeline intentionally processes every
+frame.
 
 ## Task Summary
 
@@ -164,6 +166,32 @@ head pose valid, geometric gaze valid, UniGaze appearance gaze valid,
 recommended gaze valid, no errors, two eye crops, and QA summary `final_status`
 `complete`.
 
+The default real CLI path was then run end-to-end on the full smaller mandatory
+verification video:
+
+```text
+UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/test_2.mp4 --output-root artifacts/output --models-root models
+artifacts/output/test_2/runs/20260625T173257Z-d9d9ce3f
+```
+
+Fresh artifact verification for that run:
+
+```text
+final_status complete
+decoded_frames 1973
+frame_records 1973
+raw_frames 1973
+processed_frames 1973
+crop_files 2915
+schema_validation_passed True
+counts_match True
+face_present_rate 0.7384693360364927
+both_eyes_present_rate 0.7384693360364927
+head_pose_valid_rate 0.6644703497212366
+face_gaze_valid_rate 0.7384693360364927
+recommended_gaze_valid_rate 0.3882412569690826
+```
+
 ## Manual QA Sample Notes
 
 QA summaries now provide deterministic sample IDs, worst blur/exposure frame
@@ -173,10 +201,9 @@ overlay and both eye crops for manual inspection.
 
 ## Remaining Limitations
 
-- Full default `chess-gaze analyze` over `artifacts/input/test_1.mp4` and
-  `artifacts/input/test_2.mp4` was not run because the videos contain 5,586
-  total frames and the default pipeline runs UniGaze H14 on every selected-face
-  frame on CPU.
+- Full default `chess-gaze analyze` over `artifacts/input/test_1.mp4` has not
+  been run yet. The smaller mandatory video, `artifacts/input/test_2.mp4`,
+  completed end to end with schema-valid artifacts.
 - Board target mapping is still absent from the current schema, so recommended
   gaze target fields remain null.
 - MediaPipe/OpenCV/PyAV runs emit non-fatal duplicate AVFoundation class
