@@ -431,6 +431,30 @@ def test_scene_records_enforce_semantic_coordinate_frames() -> None:
         )
 
 
+def test_scene_manifest_rejects_wrong_coordinate_frame_mapping() -> None:
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(
+            {
+                **_manifest_payload(),
+                "coordinate_frames": {
+                    **_manifest_payload()["coordinate_frames"],
+                    "math_frame": "scene_pseudo_m",
+                },
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(
+            {
+                **_manifest_payload(),
+                "coordinate_frames": {
+                    **_manifest_payload()["coordinate_frames"],
+                    "viewer_frame": "camera_opencv_pseudo_m",
+                },
+            }
+        )
+
+
 def test_scene_axis_basis_rejects_parallel_back_and_negative_determinant() -> None:
     with pytest.raises(ValidationError):
         SceneAxisBasisRecord.model_validate(
@@ -512,6 +536,46 @@ def test_valid_scene_eye_midpoint_requires_valid_eyes_and_camera_point() -> None
 
     with pytest.raises(ValidationError):
         SceneFrameRecord.model_validate(invalid_frame_payload)
+
+
+def test_scene_frame_record_rejects_contradictory_estimator_eligibility_flags() -> None:
+    with pytest.raises(ValidationError):
+        SceneFrameRecord.model_validate(
+            {
+                **_scene_frame_payload(),
+                "valid_for_scene_center": True,
+                "eye_midpoint": {
+                    **_midpoint_payload(valid=False),
+                    "camera_point_m": None,
+                    "scene_point_m": None,
+                    "origin_policy": None,
+                    "pupil_distance_px": None,
+                    "estimated_depth_m": None,
+                    "source_reason_invalid": "RIGHT_EYE_INVALID",
+                    "reason_invalid": "EYE_MIDPOINT_INVALID",
+                },
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SceneFrameRecord.model_validate(
+            {
+                **_scene_frame_payload(),
+                "valid_for_main_monitor_direction": True,
+                "unigaze_ray": {
+                    **_ray_payload(valid=False),
+                    "origin_camera_m": None,
+                    "origin_scene_m": None,
+                    "direction_camera": None,
+                    "direction_scene": None,
+                    "direction_source": None,
+                    "pitch_radians": None,
+                    "yaw_radians": None,
+                    "source_reason_invalid": "GAZE_MODEL_FAILED",
+                    "reason_invalid": "UNIGAZE_INVALID",
+                },
+            }
+        )
 
 
 def test_valid_unigaze_ray_requires_origin_and_appearance_source() -> None:
@@ -610,6 +674,8 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
     frame = SceneFrameRecord.model_validate(
         {
             **_scene_frame_payload(),
+            "valid_for_scene_center": False,
+            "valid_for_main_monitor_direction": False,
             "left_eye": {
                 **_eye_payload(valid=False),
                 "image_px": None,

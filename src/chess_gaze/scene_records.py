@@ -629,6 +629,14 @@ class SceneFrameRecord(SceneSchemaModel):
             not self.left_eye.valid or not self.right_eye.valid
         ):
             raise ValueError("valid eye midpoint requires both eyes to be valid")
+        if self.valid_for_scene_center and not self.eye_midpoint.valid:
+            raise ValueError(
+                "valid_for_scene_center requires a valid eye_midpoint record"
+            )
+        if self.valid_for_main_monitor_direction and not self.unigaze_ray.valid:
+            raise ValueError(
+                "valid_for_main_monitor_direction requires a valid unigaze_ray record"
+            )
         if self.main_monitor_hit.valid and not self.unigaze_ray.valid:
             raise ValueError("valid monitor hit requires a valid unigaze ray")
         return self
@@ -665,6 +673,20 @@ class SceneCoordinateFramesRecord(SceneSchemaModel):
                 enum_type=CoordinateFrame3D,
             )
         return coerced
+
+    @model_validator(mode="after")
+    def validate_semantic_mapping(self) -> SceneCoordinateFramesRecord:
+        if self.math_frame != CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M:
+            raise ValueError(
+                "math_frame must be camera_opencv_pseudo_m"
+            )
+        if self.scene_frame != CoordinateFrame3D.SCENE_PSEUDO_M:
+            raise ValueError("scene_frame must be scene_pseudo_m")
+        if self.monitor_frame != CoordinateFrame3D.MONITOR_PLANE_PSEUDO_M:
+            raise ValueError("monitor_frame must be monitor_plane_pseudo_m")
+        if self.viewer_frame != CoordinateFrame3D.THREE_VIEW:
+            raise ValueError("viewer_frame must be three_view")
+        return self
 
 
 class SceneCenterEstimatorRecord(SceneSchemaModel):

@@ -175,6 +175,60 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src
 - `tests/chess_gaze/test_scene_records.py`
 - `.superpowers/sdd/task-1-report-3d-scene.md`
 
+## Review Fixes Round 4
+
+### What changed
+
+- Enforced the exact semantic mapping for `SceneCoordinateFramesRecord`:
+  - `math_frame = camera_opencv_pseudo_m`
+  - `scene_frame = scene_pseudo_m`
+  - `monitor_frame = monitor_plane_pseudo_m`
+  - `viewer_frame = three_view`
+- Added frame-level consistency validation so estimator-eligibility flags cannot claim:
+  - `valid_for_scene_center=True` when `eye_midpoint.valid=False`
+  - `valid_for_main_monitor_direction=True` when `unigaze_ray.valid=False`
+
+### RED evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `2 failed, 26 passed in 0.10s`
+- Failures matched the remaining review findings:
+  - `SceneManifest` accepted wrong semantic coordinate-frame mappings;
+  - `SceneFrameRecord` accepted contradictory estimator-eligibility flags.
+
+### GREEN evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `28 passed in 0.07s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_records.py tests/chess_gaze/test_scene_records.py
+```
+
+- `All checks passed!`
+
+### Files changed
+
+- `src/chess_gaze/scene_records.py`
+- `tests/chess_gaze/test_scene_records.py`
+- `.superpowers/sdd/task-1-report-3d-scene.md`
+
 ## Review Fixes Round 3
 
 ### What changed
