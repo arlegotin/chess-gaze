@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import model_validator
+from pydantic import ConfigDict, model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
@@ -107,6 +107,17 @@ class ErrorRecord(StrictSchemaModel):
     message: str
 
 
+class PnPLandmarkIndices(StrictSchemaModel):
+    nose_tip: int
+    chin: int
+    left_eye_outer: int
+    right_eye_outer: int
+    left_eye_inner: int
+    right_eye_inner: int
+    left_mouth_corner: int
+    right_mouth_corner: int
+
+
 class FrameRecord(StrictSchemaModel):
     frame_id: str
     frame_index: int
@@ -166,6 +177,20 @@ class RunManifest(StrictSchemaModel):
 
 
 class CalibrationRecord(StrictSchemaModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
     raw_frame_image_format: str
     processed_frame_image_format: str
     processed_frame_jpeg_quality: int
+    max_face_candidates: int
+    candidate_face_score_min: float
+    usable_face_score_min: float
+    usable_eye_confidence_min: float
+    default_iris_diameter_mm: float
+    default_iris_diameter_uncertainty_mm: float
+    unigaze_input_size_px: int
+    unigaze_output_order: str
+    face_landmarker_running_mode: str
+    camera_intrinsics_policy: str
+    metric_translation_allowed: bool
+    pnp_landmark_indices: PnPLandmarkIndices
