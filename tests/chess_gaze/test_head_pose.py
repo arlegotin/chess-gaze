@@ -136,14 +136,15 @@ def test_mediapipe_transform_keeps_pose_valid_when_pnp_reprojection_is_high() ->
         y=-3000.0,
     )
     expected_yaw = 0.21
-    expected_pitch = -0.12
+    mediapipe_transform_pitch = 0.12
+    expected_image_pitch = -0.12
     expected_roll = 0.08
     face = _face_with_landmarks(
         landmarks,
         image_size=IMAGE_SIZE,
         facial_transformation_matrix=_facial_transform_matrix(
             expected_yaw,
-            expected_pitch,
+            mediapipe_transform_pitch,
             expected_roll,
         ),
     )
@@ -157,8 +158,9 @@ def test_mediapipe_transform_keeps_pose_valid_when_pnp_reprojection_is_high() ->
     assert observation.reprojection_error_px is not None
     assert observation.reprojection_error_px > observation.reprojection_error_max_px
     assert observation.yaw_radians == pytest.approx(expected_yaw)
-    assert observation.pitch_radians == pytest.approx(expected_pitch)
+    assert observation.pitch_radians == pytest.approx(expected_image_pitch)
     assert observation.roll_radians == pytest.approx(expected_roll)
+    assert observation.pitch_radians is not None
     assert abs(observation.pitch_radians) < 1.0
     assert observation.rotation_matrix is not None
     assert observation.quaternion_wxyz is not None

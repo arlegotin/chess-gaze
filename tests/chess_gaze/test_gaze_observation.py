@@ -90,11 +90,11 @@ def test_unigaze_model_loads_local_asset_without_download_helpers(
     assert observed_offline_env == ["1"]
     assert gaze.method == "unigaze_h14_joint"
     assert gaze.pitch_radians == pytest.approx(0.125)
-    assert gaze.yaw_radians == pytest.approx(-0.25)
+    assert gaze.yaw_radians == pytest.approx(0.25)
     assert gaze.confidence is None
     assert gaze.confidence_source == "not_provided_by_unigaze"
     assert gaze.unit_vector == pytest.approx(
-        pitch_yaw_to_unit_vector(pitch_radians=0.125, yaw_radians=-0.25)
+        pitch_yaw_to_unit_vector(pitch_radians=0.125, yaw_radians=0.25)
     )
 
 

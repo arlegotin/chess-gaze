@@ -99,7 +99,9 @@ class UniGazeModel:
             raise ValueError("UniGaze pred_gaze must have shape (1, 2)")
 
         pitch_radians = float(pred_gaze[0, 0].detach().cpu())
-        yaw_radians = float(pred_gaze[0, 1].detach().cpu())
+        # UniGaze's reference drawing treats positive yaw as image-left. Frame
+        # records and overlays use positive yaw as image-right.
+        yaw_radians = -float(pred_gaze[0, 1].detach().cpu())
         _require_finite(pitch_radians, "pitch_radians")
         _require_finite(yaw_radians, "yaw_radians")
 

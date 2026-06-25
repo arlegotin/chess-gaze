@@ -476,7 +476,7 @@ def build_fake_mediapipe(
             captured["options"] = options
             return cls()
 
-        def detect(self, image: object) -> SimpleNamespace:
+        def detect(self, image: Any) -> SimpleNamespace:
             captured["image"] = image
             return SimpleNamespace(
                 face_landmarks=face_landmarks,
@@ -540,7 +540,7 @@ def build_sequence_fake_mediapipe(
             captured["options"] = options
             return cls()
 
-        def detect(self, image: object) -> SimpleNamespace:
+        def detect(self, image: Any) -> SimpleNamespace:
             captured.setdefault("images", []).append(image)
             captured["detect_shapes"].append(image.data.shape)
             captured.setdefault("detect_contiguous", []).append(

@@ -250,8 +250,9 @@ def estimate_head_pose(
     )
     rotation_matrix = _matrix_tuple(pose_rotation_matrix_array)
     quaternion = _quaternion_wxyz(pose_rotation_matrix_array)
-    yaw_radians, pitch_radians, roll_radians = _yaw_pitch_roll(
-        pose_rotation_matrix_array
+    yaw_radians, pitch_radians, roll_radians = _pose_yaw_pitch_roll(
+        pose_rotation_matrix_array,
+        source_is_mediapipe_transform=transform_rotation_matrix is not None,
     )
 
     if quaternion is None or not all(
@@ -491,6 +492,17 @@ def _yaw_pitch_roll(
     return float(yaw), float(pitch), float(roll)
 
 
+def _pose_yaw_pitch_roll(
+    rotation_matrix: npt.NDArray[np.float64],
+    *,
+    source_is_mediapipe_transform: bool,
+) -> tuple[float, float, float]:
+    yaw, pitch, roll = _yaw_pitch_roll(rotation_matrix)
+    if source_is_mediapipe_transform:
+        return yaw, -pitch, roll
+    return yaw, pitch, roll
+
+
 def _method_name(
     facial_transform: MatrixTuple | None,
 ) -> str:
@@ -552,8 +564,9 @@ def _valid_transform_observation(
 ) -> HeadPoseObservation:
     rotation_matrix = _matrix_tuple(transform_rotation_matrix)
     quaternion = _quaternion_wxyz(transform_rotation_matrix)
-    yaw_radians, pitch_radians, roll_radians = _yaw_pitch_roll(
-        transform_rotation_matrix
+    yaw_radians, pitch_radians, roll_radians = _pose_yaw_pitch_roll(
+        transform_rotation_matrix,
+        source_is_mediapipe_transform=True,
     )
     if quaternion is None or not all(
         math.isfinite(value)
