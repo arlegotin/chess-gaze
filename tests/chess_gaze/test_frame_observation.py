@@ -94,6 +94,21 @@ class _FakeGazeModel:
         )
 
 
+class _DisagreeingGazeModel:
+    def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
+        assert tuple(normalized_batch.shape) == (1, 3, 224, 224)
+        return FaceModelGaze(
+            valid=True,
+            method="fake_unigaze",
+            pitch_radians=1.0,
+            yaw_radians=1.0,
+            unit_vector=pitch_yaw_to_unit_vector(pitch_radians=1.0, yaw_radians=1.0),
+            confidence=None,
+            confidence_source="not_provided_by_unigaze",
+            reason_invalid=None,
+        )
+
+
 def _face_observation(candidate: FaceCandidate) -> FaceObservation:
     return FaceObservation(
         frame_id="f000000000",
@@ -360,3 +375,43 @@ def test_model_backed_frame_observer_records_missing_face_without_later_models(
     assert record.right_eye.present is False
     assert record.recommended_gaze.valid is False
     assert ErrorCode.FACE_NOT_FOUND in {error.code for error in record.errors}
+
+
+def test_model_backed_frame_observer_marks_gaze_disagreement_as_warning(
+    tmp_path: Path,
+) -> None:
+    run_layout = RunLayout(
+        run_dir=tmp_path,
+        raw_frames_dir=tmp_path / "raw_frames",
+        processed_frames_dir=tmp_path / "processed_frames",
+        crops_dir=tmp_path / "crops",
+        face_crops_dir=tmp_path / "crops" / "face",
+        eyes_crops_dir=tmp_path / "crops" / "eyes",
+        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
+        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
+        records_dir=tmp_path / "records",
+    )
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=_DisagreeingGazeModel(),
+        calibration=default_calibration(),
+        run_layout=run_layout,
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    record = observer(_observer_frame())
+
+    assert record.face.present is True
+    assert record.left_eye.present is True
+    assert record.right_eye.present is True
+    assert record.head_pose.valid is True
+    assert record.appearance_gaze.valid is True
+    assert record.recommended_gaze.valid is False
+    assert record.recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+    assert record.status is FrameStatus.WARNING
+    assert [error.code for error in record.errors] == [
+        ErrorCode.GAZE_ESTIMATORS_DISAGREE
+    ]

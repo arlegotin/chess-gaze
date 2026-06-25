@@ -364,7 +364,10 @@ def _frame_status(
     appearance_gaze: FaceModelGaze,
     recommended_gaze: GazeAngles,
 ) -> FrameStatus:
-    if errors:
+    warning_only_gaze_disagreement = _warning_only_gaze_disagreement(
+        errors, recommended_gaze
+    )
+    if errors and not warning_only_gaze_disagreement:
         return FrameStatus.ERROR
     if not (
         face.present
@@ -372,10 +375,24 @@ def _frame_status(
         and right_eye.present
         and head_pose.valid
         and appearance_gaze.valid
-        and recommended_gaze.valid
     ):
         return FrameStatus.ERROR
+    if not recommended_gaze.valid:
+        if warning_only_gaze_disagreement:
+            return FrameStatus.WARNING
+        return FrameStatus.ERROR
     return FrameStatus.OK
+
+
+def _warning_only_gaze_disagreement(
+    errors: list[ErrorRecord], recommended_gaze: GazeAngles
+) -> bool:
+    return (
+        not recommended_gaze.valid
+        and recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+        and bool(errors)
+        and {error.code for error in errors} == {ErrorCode.GAZE_ESTIMATORS_DISAGREE}
+    )
 
 
 def _append_error_once(errors: list[ErrorRecord], error: ErrorRecord) -> None:
