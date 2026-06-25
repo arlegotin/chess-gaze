@@ -27,6 +27,8 @@ unigaze_output_order = "pitch_yaw_radians"
 face_landmarker_running_mode = "IMAGE"
 camera_intrinsics_policy = "estimate_with_explicit_uncertainty"
 metric_translation_allowed = False
+derived_percentile_lower = 0.05
+derived_percentile_upper = 0.95
 
 PNP_LANDMARK_INDICES = PnPLandmarkIndices(
     nose_tip=1,
@@ -39,19 +41,28 @@ PNP_LANDMARK_INDICES = PnPLandmarkIndices(
     right_mouth_corner=291,
 )
 
+PERCENTILE_POLICY_DESCRIPTION = (
+    "percentile policy lower=0.05 upper=0.95 using linear interpolation"
+)
 FACE_BBOX_DERIVATION_METHOD = (
-    "median selected-face bounding box width, height, and area from "
-    "face.bounding_box where face.present is true"
+    "median plus p05/p95 percentile range of selected-face bounding box width, "
+    "height, and area from face.bounding_box where face.present is true; "
+    f"{PERCENTILE_POLICY_DESCRIPTION}"
 )
 INTER_PUPIL_DERIVATION_METHOD = (
-    "median Euclidean distance between left and right pupil centers when both "
-    "eyes are present"
+    "median plus p05/p95 percentile range of Euclidean distance between left "
+    "and right pupil centers when both eyes are present; "
+    f"{PERCENTILE_POLICY_DESCRIPTION}"
 )
 LEFT_IRIS_DERIVATION_METHOD = (
-    "median maximum pairwise iris landmark distance per frame for the left eye"
+    "median plus p05/p95 percentile range of maximum pairwise iris landmark "
+    "distance per frame for the left eye; "
+    f"{PERCENTILE_POLICY_DESCRIPTION}"
 )
 RIGHT_IRIS_DERIVATION_METHOD = (
-    "median maximum pairwise iris landmark distance per frame for the right eye"
+    "median plus p05/p95 percentile range of maximum pairwise iris landmark "
+    "distance per frame for the right eye; "
+    f"{PERCENTILE_POLICY_DESCRIPTION}"
 )
 FACECAM_ROI_DERIVATION_METHOD = (
     "bounding box union over observed selected-face boxes; derived ROI for QA only"
@@ -150,8 +161,8 @@ def _percentile(values: Sequence[float], percentile: float) -> float:
 def _measurement_summary(values: Sequence[float]) -> dict[str, float]:
     return {
         "median": median(values),
-        "p05": _percentile(values, 0.05),
-        "p95": _percentile(values, 0.95),
+        "p05": _percentile(values, derived_percentile_lower),
+        "p95": _percentile(values, derived_percentile_upper),
     }
 
 
@@ -185,6 +196,8 @@ def default_calibration() -> CalibrationRecord:
         face_landmarker_running_mode=face_landmarker_running_mode,
         camera_intrinsics_policy=camera_intrinsics_policy,
         metric_translation_allowed=metric_translation_allowed,
+        derived_percentile_lower=derived_percentile_lower,
+        derived_percentile_upper=derived_percentile_upper,
         pnp_landmark_indices=PNP_LANDMARK_INDICES,
     )
 

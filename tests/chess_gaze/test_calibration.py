@@ -216,6 +216,8 @@ def test_default_calibration_persists_named_constants() -> None:
         "face_landmarker_running_mode": "IMAGE",
         "camera_intrinsics_policy": "estimate_with_explicit_uncertainty",
         "metric_translation_allowed": False,
+        "derived_percentile_lower": 0.05,
+        "derived_percentile_upper": 0.95,
         "pnp_landmark_indices": {
             "nose_tip": 1,
             "chin": 152,
@@ -295,8 +297,9 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
     assert derived.selected_face_bbox_size_image_px.coordinate_space == "image_px"
     assert (
         derived.selected_face_bbox_size_image_px.derivation_method
-        == "median selected-face bounding box width, height, and area from "
-        "face.bounding_box where face.present is true"
+        == "median plus p05/p95 percentile range of selected-face bounding box "
+        "width, height, and area from face.bounding_box where face.present is "
+        "true; percentile policy lower=0.05 upper=0.95 using linear interpolation"
     )
     assert derived.selected_face_bbox_size_image_px.contributing_frame_count == 3
     assert derived.selected_face_bbox_size_image_px.uncertainty == "low"
@@ -311,8 +314,9 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
     assert derived.inter_pupil_distance_image_px.coordinate_space == "image_px"
     assert (
         derived.inter_pupil_distance_image_px.derivation_method
-        == "median Euclidean distance between left and right pupil centers "
-        "when both eyes are present"
+        == "median plus p05/p95 percentile range of Euclidean distance between "
+        "left and right pupil centers when both eyes are present; percentile "
+        "policy lower=0.05 upper=0.95 using linear interpolation"
     )
     assert derived.inter_pupil_distance_image_px.contributing_frame_count == 3
     assert derived.inter_pupil_distance_image_px.uncertainty == "low"
@@ -327,7 +331,9 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
     assert derived.left_iris_diameter_image_px.coordinate_space == "image_px"
     assert (
         derived.left_iris_diameter_image_px.derivation_method
-        == "median maximum pairwise iris landmark distance per frame for the left eye"
+        == "median plus p05/p95 percentile range of maximum pairwise iris "
+        "landmark distance per frame for the left eye; percentile policy "
+        "lower=0.05 upper=0.95 using linear interpolation"
     )
     assert derived.left_iris_diameter_image_px.contributing_frame_count == 3
     assert derived.left_iris_diameter_image_px.uncertainty == "medium"
@@ -338,6 +344,17 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
         "p05": 14.2,
         "p95": 19.6,
     }
+    assert derived.right_iris_diameter_image_px.unit == "image_px"
+    assert derived.right_iris_diameter_image_px.coordinate_space == "image_px"
+    assert (
+        derived.right_iris_diameter_image_px.derivation_method
+        == "median plus p05/p95 percentile range of maximum pairwise iris "
+        "landmark distance per frame for the right eye; percentile policy "
+        "lower=0.05 upper=0.95 using linear interpolation"
+    )
+    assert derived.right_iris_diameter_image_px.contributing_frame_count == 3
+    assert derived.right_iris_diameter_image_px.uncertainty == "medium"
+    assert derived.right_iris_diameter_image_px.usage == "measurement"
     assert derived.facecam_roi_image_px.value == {
         "x_min": 90.0,
         "y_min": 40.0,

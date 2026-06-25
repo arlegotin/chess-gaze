@@ -193,4 +193,6 @@ class CalibrationRecord(StrictSchemaModel):
     face_landmarker_running_mode: str
     camera_intrinsics_policy: str
     metric_translation_allowed: bool
+    derived_percentile_lower: float
+    derived_percentile_upper: float
     pnp_landmark_indices: PnPLandmarkIndices
