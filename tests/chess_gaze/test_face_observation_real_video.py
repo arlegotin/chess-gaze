@@ -22,6 +22,17 @@ SAMPLED_FRAME_INDICES = {
     Path("artifacts/input/test_2.mp4"): (0, 300, 900, 1500, 1972),
 }
 TEST_0_RECOVERED_FRAME_INDICES = (80, 217, 247, 258)
+MIX_2_REPORTED_VISIBLE_FACE_REGIONS = {
+    237: (300.0, 130.0, 450.0, 310.0),
+    265: (270.0, 130.0, 420.0, 310.0),
+    266: (270.0, 130.0, 420.0, 310.0),
+    268: (270.0, 130.0, 420.0, 310.0),
+    422: (930.0, 200.0, 1100.0, 360.0),
+    423: (930.0, 200.0, 1100.0, 360.0),
+    510: (880.0, 170.0, 1040.0, 330.0),
+    524: (880.0, 170.0, 1040.0, 330.0),
+    532: (790.0, 160.0, 970.0, 330.0),
+}
 
 
 def test_mediapipe_face_observer_matches_real_video_evidence() -> None:
@@ -136,6 +147,80 @@ def test_mediapipe_face_observer_recovers_test0_visible_split_frame_faces() -> N
             "f000000247",
             "f000000258",
         ]
+    finally:
+        observer.close()
+
+
+def test_mediapipe_face_observer_recovers_mix2_reported_visible_faces() -> None:
+    video_path = REPO_ROOT / "artifacts/input/mix_2.mp4"
+    if not video_path.is_file():
+        pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
+
+    registry = load_model_registry(MODEL_REGISTRY_PATH)
+    model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
+    model_path = MODELS_ROOT / model_entry.expected_relative_path
+    if not model_path.is_file():
+        pytest.skip(
+            "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
+            f"{model_path}"
+        )
+    assert model_entry.checksum_sha256 is not None
+    assert sha256_file(model_path) == model_entry.checksum_sha256
+
+    observer = MediaPipeFaceObserver(
+        model_asset_path=model_path,
+        calibration=default_calibration(),
+    )
+    try:
+        sampled_frames = _sample_frames(
+            video_path,
+            tuple(MIX_2_REPORTED_VISIBLE_FACE_REGIONS),
+        )
+        recovered_boxes: dict[str, tuple[float, float, float, float]] = {}
+        for frame in sampled_frames:
+            observation = observer.observe(frame.rgb, frame_id=frame.frame_id)
+
+            assert observation.selection.present, (
+                f"{frame.frame_id} should recover the visible face"
+            )
+            assert observation.selection.primary_candidate_id is not None
+            candidate = next(
+                item
+                for item in observation.selection.candidates
+                if item.candidate_id == observation.selection.primary_candidate_id
+            )
+            bbox = candidate.bounding_box_image_px
+            center_x = (bbox.x_min + bbox.x_max) / 2.0
+            center_y = (bbox.y_min + bbox.y_max) / 2.0
+            x_min, y_min, x_max, y_max = MIX_2_REPORTED_VISIBLE_FACE_REGIONS[
+                frame.frame_index
+            ]
+            assert x_min <= center_x <= x_max, (
+                f"{frame.frame_id} face center x {center_x:.1f} outside "
+                f"expected visible-face region {x_min:.1f}..{x_max:.1f}"
+            )
+            assert y_min <= center_y <= y_max, (
+                f"{frame.frame_id} face center y {center_y:.1f} outside "
+                f"expected visible-face region {y_min:.1f}..{y_max:.1f}"
+            )
+            recovered_boxes[frame.frame_id] = (
+                round(bbox.x_min, 1),
+                round(bbox.y_min, 1),
+                round(bbox.x_max, 1),
+                round(bbox.y_max, 1),
+            )
+
+        assert recovered_boxes == {
+            "f000000237": (320.7, 155.7, 432.0, 281.4),
+            "f000000265": (289.0, 156.1, 398.8, 288.6),
+            "f000000266": (288.9, 156.2, 398.7, 288.7),
+            "f000000268": (288.7, 156.9, 399.1, 289.0),
+            "f000000422": (975.2, 229.7, 1069.6, 339.7),
+            "f000000423": (973.8, 230.0, 1069.5, 339.6),
+            "f000000510": (920.8, 200.6, 1009.0, 301.6),
+            "f000000524": (920.5, 201.8, 1008.3, 301.5),
+            "f000000532": (831.3, 183.6, 937.4, 310.3),
+        }
     finally:
         observer.close()
 
