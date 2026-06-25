@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+Status: Completed on 2026-06-25. The implemented outcome and any deviations from
+the original checklist are recorded in
+`docs/superpowers/closeouts/2026-06-25-test-0-quality-repair.md`.
+
 **Goal:** Improve default real-model analysis quality on `artifacts/input/test_0.mp4` by fixing the face-detection, head-pose, and gaze-arbitration seams that produced missing visible faces/eyes and wrong-direction arrows.
 
 **Architecture:** Keep the default frame-independent pipeline, but make each frame more robust: MediaPipe full-frame detection remains primary, deterministic split-frame retries recover scale/context misses, MediaPipe facial transformation matrices provide head-pose angles when available while PnP remains recorded evidence, and recommended gaze is emitted only when estimators agree within a defensible angular threshold or when appearance gaze is the only valid estimator. Regression tests cover pure seams plus bounded `test_0.mp4` samples.

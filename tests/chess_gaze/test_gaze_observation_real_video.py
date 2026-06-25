@@ -9,8 +9,10 @@ import pytest
 
 from chess_gaze.artifact_runs import create_run_layout
 from chess_gaze.calibration import default_calibration
+from chess_gaze.errors import FrameStatus
 from chess_gaze.eye_observation import observe_eyes
 from chess_gaze.face_observation import FaceCandidate, MediaPipeFaceObserver
+from chess_gaze.frame_observation import ModelBackedFrameObserver
 from chess_gaze.gaze_observation import (
     GazeThresholds,
     UniGazeModel,
@@ -24,6 +26,7 @@ from chess_gaze.model_assets import (
     load_model_registry,
     sha256_file,
 )
+from chess_gaze.pipeline import ObserverFrame
 from chess_gaze.video_decode import DecodedFrame, iter_decoded_frames
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +38,96 @@ SAMPLED_FRAME_INDICES = {
     Path("artifacts/input/test_1.mp4"): (300, 900, 1800, 2700, 3600),
     Path("artifacts/input/test_2.mp4"): (300, 900, 1500, 1972),
 }
+TEST_0_RECOMMENDED_FRAME_INDICES = (90, 155, 217)
+
+
+def test_default_model_observer_recommends_gaze_on_repaired_test0_frames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = REPO_ROOT / "artifacts/input/test_0.mp4"
+    if not video_path.is_file():
+        pytest.skip(f"BLOCKED: missing mandatory real-data video: {video_path}")
+
+    registry = load_model_registry(MODEL_REGISTRY_PATH)
+    mediapipe_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
+    unigaze_entry = registry.by_id(UNIGAZE_MODEL_ID)
+    mediapipe_path = MODELS_ROOT / mediapipe_entry.expected_relative_path
+    unigaze_path = MODELS_ROOT / unigaze_entry.expected_relative_path
+    if not mediapipe_path.is_file():
+        pytest.skip(
+            "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
+            f"{mediapipe_path}"
+        )
+    if not unigaze_path.is_file():
+        pytest.skip(
+            f"BLOCKED: missing mandatory UniGaze checkpoint asset: {unigaze_path}"
+        )
+    assert mediapipe_entry.checksum_sha256 is not None
+    assert unigaze_entry.checksum_sha256 is not None
+    assert sha256_file(mediapipe_path) == mediapipe_entry.checksum_sha256
+    assert sha256_file(unigaze_path) == unigaze_entry.checksum_sha256
+
+    _disable_network_helpers(monkeypatch)
+    calibration = default_calibration()
+    run_layout = create_run_layout(
+        input_path=video_path,
+        output_root=tmp_path / "test0-observer",
+        clock=lambda: datetime(2026, 6, 25, 12, 0, 0, tzinfo=UTC),
+        run_suffix="abcdef12",
+    )
+    face_observer = MediaPipeFaceObserver(
+        model_asset_path=mediapipe_path,
+        calibration=calibration,
+    )
+    observer = ModelBackedFrameObserver(
+        face_observer=face_observer,
+        gaze_model=UniGazeModel.from_local_asset(
+            ResolvedModelAsset(
+                model_id=unigaze_entry.model_id,
+                task_name=unigaze_entry.task_name,
+                resolved_path=unigaze_path,
+                source_url=unigaze_entry.source_url,
+                checksum_sha256=unigaze_entry.checksum_sha256,
+                license=unigaze_entry.license,
+            ),
+            device="cpu",
+        ),
+        calibration=calibration,
+        run_layout=run_layout,
+    )
+
+    try:
+        sampled_frames = _sample_frames(video_path, TEST_0_RECOMMENDED_FRAME_INDICES)
+        records = [observer(_observer_frame(frame)) for frame in sampled_frames]
+    finally:
+        observer.close()
+
+    assert [record.frame_index for record in records] == list(
+        TEST_0_RECOMMENDED_FRAME_INDICES
+    )
+    assert all(record.status is FrameStatus.OK for record in records)
+    assert all(record.face.present for record in records)
+    assert all(
+        record.left_eye.present and record.right_eye.present for record in records
+    )
+    assert all(record.head_pose.valid for record in records)
+    assert all(record.geometric_gaze.valid for record in records)
+    assert all(record.appearance_gaze.valid for record in records)
+    assert all(record.recommended_gaze.valid for record in records)
+    assert all(not record.errors for record in records)
+
+
+def _observer_frame(frame: DecodedFrame) -> ObserverFrame:
+    timestamp_seconds = frame.pts_seconds if frame.pts_seconds is not None else 0.0
+    return ObserverFrame(
+        frame_id=frame.frame_id,
+        frame_index=frame.frame_index,
+        timestamp_seconds=timestamp_seconds,
+        rgb=frame.rgb,
+        pts=frame.pts,
+        pts_seconds=frame.pts_seconds,
+        duration_seconds=frame.duration_seconds,
+    )
 
 
 def test_unigaze_predicts_from_real_video_face_evidence(
