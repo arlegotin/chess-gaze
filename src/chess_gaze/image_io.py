@@ -22,9 +22,9 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             suffix=".tmp",
             delete=False,
         ) as temp_file:
+            temp_path = Path(temp_file.name)
             temp_file.write(data)
             temp_file.flush()
-            temp_path = Path(temp_file.name)
 
         temp_path.replace(path)
     except Exception:
@@ -42,7 +42,12 @@ def save_rgb_png(path: Path, image: np.ndarray) -> str:
 
 
 def save_bgr_jpeg(path: Path, image: np.ndarray, quality: int) -> str:
-    success, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    """Persist an RGB image as JPEG, converting to BGR only at the OpenCV boundary."""
+
+    bgr_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    success, encoded = cv2.imencode(
+        ".jpg", bgr_image, [cv2.IMWRITE_JPEG_QUALITY, quality]
+    )
     if not success:
         raise ValueError("failed to encode JPEG image")
 

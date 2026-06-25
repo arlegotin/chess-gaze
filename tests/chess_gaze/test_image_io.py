@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from hashlib import sha256
 from pathlib import Path
+from typing import Literal
 
 import cv2
 import numpy as np
+import pytest
+from PIL import Image
 
+import chess_gaze.image_io as image_io
 from chess_gaze.image_io import atomic_write_bytes, save_bgr_jpeg, save_rgb_png
 
 
@@ -39,3 +43,46 @@ def test_save_bgr_jpeg_returns_sha256_of_written_bytes(tmp_path: Path) -> None:
     loaded = cv2.imread(str(tmp_path / "frame.jpg"))
     assert loaded is not None
     assert loaded.shape == image.shape
+
+
+def test_save_bgr_jpeg_converts_rgb_input_before_encoding(tmp_path: Path) -> None:
+    image = np.zeros((16, 16, 3), dtype=np.uint8)
+    image[:, :] = np.array([255, 0, 0], dtype=np.uint8)
+
+    save_bgr_jpeg(tmp_path / "frame.jpg", image, quality=95)
+
+    loaded = np.asarray(Image.open(tmp_path / "frame.jpg").convert("RGB"))
+    pixel = loaded[8, 8]
+    assert pixel[0] >= 200
+    assert pixel[1] <= 40
+    assert pixel[2] <= 40
+
+
+def test_atomic_write_bytes_removes_temp_file_when_flush_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    temp_path = tmp_path / "artifact.bin.fake.tmp"
+
+    class BrokenTempFile:
+        def __init__(self) -> None:
+            self.name = str(temp_path)
+
+        def __enter__(self) -> BrokenTempFile:
+            temp_path.write_bytes(b"partial")
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
+            return False
+
+        def write(self, data: bytes) -> int:
+            return len(data)
+
+        def flush(self) -> None:
+            raise OSError("flush failed")
+
+    monkeypatch.setattr(image_io, "NamedTemporaryFile", lambda **_: BrokenTempFile())
+
+    with pytest.raises(OSError, match="flush failed"):
+        atomic_write_bytes(tmp_path / "artifact.bin", b"abc")
+
+    assert not temp_path.exists()
