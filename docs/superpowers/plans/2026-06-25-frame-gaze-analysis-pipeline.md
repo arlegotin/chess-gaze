@@ -4,7 +4,7 @@
 
 **Goal:** Build the local `chess-gaze analyze <video_path>` pipeline that decodes every frame, preserves raw evidence, records strict per-frame face/eye/head/gaze observations, and writes QA artifacts without temporal smoothing.
 
-**Architecture:** Implement deep domain modules under `src/chess_gaze/` only where they own real invariants: CLI/preflight, strict record schemas, artifact runs, model assets, video decode, image IO, calibration, observations, visualization, pipeline orchestration, and QA summary. Heavy ML integrations are isolated behind small protocol-style wrappers so most tests run with deterministic fakes while real model smoke checks remain opt-in when ignored local assets exist.
+**Architecture:** Implement deep domain modules under `src/chess_gaze/` only where they own real invariants: CLI/preflight, strict record schemas, artifact runs, model assets, video decode, image IO, calibration, observations, visualization, pipeline orchestration, and QA summary. Heavy ML integrations are isolated behind small protocol-style wrappers so deterministic fakes can support TDD, but mandatory real-video verification runs as soon as each subsystem can consume the local verification videos.
 
 **Tech Stack:** Python 3.12, uv, pytest, Ruff, mypy, PyAV, MediaPipe Face Landmarker, OpenCV headless, NumPy, Pydantic v2, Pillow, PyTorch, torchvision, timm, UniGaze `unigaze_h14_joint`, safetensors, huggingface_hub.
 
@@ -43,6 +43,16 @@
 - Keep left and right eye observations independent.
 - Keep local videos, model binaries, and generated artifacts ignored.
 - Standard gates after implementation are `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, and `uv run mypy`.
+- `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4` are mandatory
+  real-data verification inputs, not examples.
+- Each testable subsystem must be exercised with those videos at the earliest
+  task where it can run, before dependent tasks proceed.
+- Synthetic videos, fake observers, and unit fixtures may support TDD, but they
+  cannot replace real-data verification for subsystems that can consume real
+  video frames.
+- If a required local video or model asset is unavailable, record the exact
+  missing path and blocked verification. Do not claim the affected task,
+  subsystem, smoke check, or closeout item is complete.
 
 ---
 
@@ -79,6 +89,15 @@ model-free artifact contract testable before MediaPipe and UniGaze are wired.
 If execution is parallelized, the fake-observer parts of Task 12 may be pulled
 forward immediately after Task 5; they must not require MediaPipe, UniGaze, or
 real model assets.
+
+Real-data checkpoint rule: before each task commits, run the earliest feasible
+check against both local verification videos for the subsystem just introduced.
+For video-only subsystems, missing model assets are not a reason to defer the
+check.
+For model-backed subsystems, missing model assets must be recorded as blockers
+with exact paths. A task is not complete if a feasible real-data check was
+skipped, failed without root-cause analysis, or was replaced by synthetic-only
+evidence.
 
 ### Task 1: CLI Skeleton
 
@@ -683,7 +702,40 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_video_decode.py -q
 
 Expected: all decode tests pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run real-video decode verification**
+
+Inspect and decode `artifacts/input/test_1.mp4` and
+`artifacts/input/test_2.mp4` with the implemented PyAV path:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+from pathlib import Path
+from chess_gaze.video_decode import inspect_video, iter_decoded_frames
+
+expected = {
+    Path("artifacts/input/test_1.mp4"): 3613,
+    Path("artifacts/input/test_2.mp4"): 1973,
+}
+
+for path, expected_count in expected.items():
+    if not path.is_file():
+        raise SystemExit(f"missing mandatory real-data video: {path}")
+    inspection = inspect_video(path)
+    decoded_count = sum(1 for _ in iter_decoded_frames(path))
+    print(f"{path}: inspected={inspection.frame_count_decoded} decoded={decoded_count}")
+    if decoded_count != expected_count:
+        raise SystemExit(
+            f"{path} decoded {decoded_count} frames; expected {expected_count} "
+            "unless this run records PyAV evidence for the corrected count"
+        )
+PY
+```
+
+Expected: both files decode from local disk, with decoded frame counts recorded
+as 3613 and 1973 unless PyAV evidence proves different counts. If either file is
+missing, record the exact missing path and do not mark Task 5 complete.
+
+- [ ] **Step 7: Commit**
 
 Run:
 
@@ -767,6 +819,7 @@ Expected: commit succeeds.
 **Files:**
 - Create: `src/chess_gaze/face_observation.py`
 - Create: `tests/chess_gaze/test_face_observation.py`
+- Create: `tests/chess_gaze/test_face_observation_real_video.py`
 
 **Interfaces:**
 - Consumes: geometry types and calibration defaults
@@ -830,12 +883,39 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py -
 
 Expected: all face tests pass without requiring the real `.task` model.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run real-video face observation verification or record blocker**
+
+Create `tests/chess_gaze/test_face_observation_real_video.py` with an
+asset-gated mandatory test that:
+
+- requires both `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4`;
+- requires `models/mediapipe/face_landmarker.task` to exist and match the
+  committed registry checksum before claiming the check passed;
+- decodes deterministic frame IDs from both verification videos;
+- runs `MediaPipeFaceObserver` in `IMAGE` mode on those real frames;
+- asserts candidate records preserve frame IDs, image dimensions, score
+  provenance, and all candidates;
+- records face-present counts and representative `FACE_NOT_FOUND` frames;
+- fails if no sampled frame in either video produces a face candidate unless
+  manual frame evidence is attached proving the face is absent or fully hidden.
 
 Run:
 
 ```sh
-git add src/chess_gaze/face_observation.py tests/chess_gaze/test_face_observation.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_real_video.py -q
+```
+
+Expected: the face observer is verified on real frames from both verification
+videos. If the local videos or MediaPipe task asset are missing, record exact
+missing paths and do not mark Task 7 complete or start Tasks 8-10 as completed
+face-dependent work.
+
+- [ ] **Step 7: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/face_observation.py tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_real_video.py
 git commit -m "feat: add face observation selection"
 ```
 
@@ -846,6 +926,7 @@ Expected: commit succeeds.
 **Files:**
 - Create: `src/chess_gaze/eye_observation.py`
 - Create: `tests/chess_gaze/test_eye_observation.py`
+- Create: `tests/chess_gaze/test_eye_observation_real_video.py`
 
 **Interfaces:**
 - Consumes: selected face landmarks from `face_observation`
@@ -899,12 +980,40 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_eye_observation.py -q
 
 Expected: all eye observation tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run real-video eye and iris verification or record blocker**
+
+Create `tests/chess_gaze/test_eye_observation_real_video.py` with an
+asset-gated mandatory test that:
+
+- uses the same local video and MediaPipe asset requirements as Task 7;
+- decodes deterministic real frames from both verification videos;
+- runs face observation first and passes selected real face landmarks into
+  `observe_eyes`;
+- asserts left and right eye records stay independent on real frames;
+- asserts real eye crop paths are relative to the run directory and the crop
+  transforms map back to `image_px`;
+- records per-video eye-present and iris-present counts plus representative
+  failures;
+- fails if all sampled frames with a detected face produce no eye or iris
+  evidence unless manual frame evidence is attached.
 
 Run:
 
 ```sh
-git add src/chess_gaze/eye_observation.py tests/chess_gaze/test_eye_observation.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_eye_observation_real_video.py -q
+```
+
+Expected: eye and iris extraction is verified on real frames from both
+verification videos. If required videos or MediaPipe assets are missing, record
+exact blockers and do not mark Task 8 complete or build later eye-dependent work
+as complete.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/eye_observation.py tests/chess_gaze/test_eye_observation.py tests/chess_gaze/test_eye_observation_real_video.py
 git commit -m "feat: add eye and iris observation"
 ```
 
@@ -915,6 +1024,7 @@ Expected: commit succeeds.
 **Files:**
 - Create: `src/chess_gaze/head_pose.py`
 - Create: `tests/chess_gaze/test_head_pose.py`
+- Create: `tests/chess_gaze/test_head_pose_real_video.py`
 
 **Interfaces:**
 - Consumes: selected face landmarks and calibration PnP indices
@@ -962,12 +1072,39 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_head_pose.py -q
 
 Expected: all head-pose tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run real-video head-pose verification or record blocker**
+
+Create `tests/chess_gaze/test_head_pose_real_video.py` with an
+asset-gated mandatory test that:
+
+- uses the same local video and MediaPipe asset requirements as Task 7;
+- decodes deterministic real frames from both verification videos;
+- runs face observation first and passes selected real face landmarks into
+  `estimate_head_pose`;
+- asserts MediaPipe transform matrices are preserved when present;
+- asserts PnP evidence records named method, finite rotation values, and null
+  metric translation without calibrated scale;
+- records valid and invalid head-pose counts plus representative failure frames;
+- fails if all sampled frames with a detected face produce no head-pose evidence
+  unless manual frame evidence is attached.
 
 Run:
 
 ```sh
-git add src/chess_gaze/head_pose.py tests/chess_gaze/test_head_pose.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_head_pose_real_video.py -q
+```
+
+Expected: head-pose evidence is verified on real frames from both verification
+videos. If required videos or MediaPipe assets are missing, record exact
+blockers and do not mark Task 9 complete or build later head-pose-dependent work
+as complete.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/head_pose.py tests/chess_gaze/test_head_pose.py tests/chess_gaze/test_head_pose_real_video.py
 git commit -m "feat: add head pose evidence"
 ```
 
@@ -978,6 +1115,7 @@ Expected: commit succeeds.
 **Files:**
 - Create: `src/chess_gaze/gaze_observation.py`
 - Create: `tests/chess_gaze/test_gaze_observation.py`
+- Create: `tests/chess_gaze/test_gaze_observation_real_video.py`
 
 **Interfaces:**
 - Consumes: eye observations, head pose, model assets, and image crops
@@ -1045,12 +1183,39 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_gaze_observation.py -
 
 Expected: all gaze tests pass without downloading or loading the real H14 weights.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run real-video UniGaze verification or record blocker**
+
+Create `tests/chess_gaze/test_gaze_observation_real_video.py` with an
+asset-gated mandatory test that:
+
+- requires both local verification videos;
+- requires `models/mediapipe/face_landmarker.task` and
+  `models/unigaze/unigaze_h14_joint.safetensors` to exist and match the
+  committed registry checksums before claiming the check passed;
+- decodes deterministic real frames from both videos;
+- obtains real face crops through the face and eye/head evidence path;
+- runs `UniGazeModel.from_local_asset` and `predict` from the verified local
+  asset path with network helpers disabled;
+- asserts predicted pitch/yaw values are finite, stored in the documented order,
+  and have `confidence_source="not_provided_by_unigaze"`;
+- records per-video successful-prediction counts and representative failures.
 
 Run:
 
 ```sh
-git add src/chess_gaze/gaze_observation.py tests/chess_gaze/test_gaze_observation.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_gaze_observation_real_video.py -q
+```
+
+Expected: UniGaze is verified on real face evidence from both verification
+videos. If required videos or model assets are missing, record exact blockers
+and do not mark Task 10 complete or build later gaze-dependent work as complete.
+
+- [ ] **Step 7: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/gaze_observation.py tests/chess_gaze/test_gaze_observation.py tests/chess_gaze/test_gaze_observation_real_video.py
 git commit -m "feat: add gaze observation"
 ```
 
@@ -1061,6 +1226,7 @@ Expected: commit succeeds.
 **Files:**
 - Create: `src/chess_gaze/visualization.py`
 - Create: `tests/chess_gaze/test_visualization.py`
+- Create: `tests/chess_gaze/test_visualization_real_video.py`
 
 **Interfaces:**
 - Consumes: `FrameRecord`, RGB frames, and `save_bgr_jpeg`
@@ -1112,12 +1278,35 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_visualization.py -q
 
 Expected: all visualization tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run real-frame visualization verification**
+
+Create `tests/chess_gaze/test_visualization_real_video.py` with a mandatory
+video-only test that:
+
+- requires both local verification videos;
+- decodes deterministic real frames from both videos without requiring model
+  assets;
+- renders processed JPEGs using deterministic valid and failure records sized to
+  the real frame dimensions;
+- asserts output dimensions, nonzero byte size, explicit JPEG quality, and no
+  mutation of the source evidence fields.
 
 Run:
 
 ```sh
-git add src/chess_gaze/visualization.py tests/chess_gaze/test_visualization.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_visualization_real_video.py -q
+```
+
+Expected: visualization is verified on real decoded frame dimensions from both
+verification videos. If either video is missing, record the exact missing path
+and do not mark Task 11 complete.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/visualization.py tests/chess_gaze/test_visualization.py tests/chess_gaze/test_visualization_real_video.py
 git commit -m "feat: add processed frame visualization"
 ```
 
@@ -1129,6 +1318,7 @@ Expected: commit succeeds.
 - Create: `src/chess_gaze/pipeline.py`
 - Modify: `src/chess_gaze/cli.py`
 - Create: `tests/chess_gaze/test_pipeline_contract.py`
+- Create: `tests/chess_gaze/test_pipeline_real_video_contract.py`
 - Modify: `tests/chess_gaze/test_cli.py`
 
 **Interfaces:**
@@ -1189,12 +1379,41 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py 
 
 Expected: all pipeline and CLI tests pass with fake observers.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run real-video pipeline contract with fake observers**
+
+Create `tests/chess_gaze/test_pipeline_real_video_contract.py` with an
+asset-gated mandatory test that treats missing local verification videos as a
+blocker and fails fast when the model-free pipeline cannot process them with
+fake observers. The test must:
+
+- require `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4`;
+- run `analyze_video` with deterministic fake observers so no MediaPipe or
+  UniGaze model file is required;
+- assert each output run has one raw frame, one processed frame, and one JSONL
+  record per decoded source frame;
+- assert decoded counts are 3613 and 1973 unless PyAV evidence recorded in the
+  test output proves different local counts;
+- report an exact blocker if either verification video is missing;
+- fail, not skip, if the model-free artifact contract fails in the local
+  workspace.
 
 Run:
 
 ```sh
-git add src/chess_gaze/pipeline.py src/chess_gaze/cli.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_cli.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py -q
+```
+
+Expected: both local verification videos pass the model-free artifact contract.
+If a video is missing, record the exact missing path and blocked verification in
+the task report and closeout; do not claim real-video pipeline verification
+passed.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/pipeline.py src/chess_gaze/cli.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_pipeline_real_video_contract.py tests/chess_gaze/test_cli.py
 git commit -m "feat: orchestrate frame analysis pipeline"
 ```
 
@@ -1205,6 +1424,7 @@ Expected: commit succeeds.
 **Files:**
 - Create: `src/chess_gaze/qa_summary.py`
 - Create: `tests/chess_gaze/test_qa_summary.py`
+- Create: `tests/chess_gaze/test_qa_summary_real_video_contract.py`
 - Modify: `src/chess_gaze/pipeline.py`
 
 **Interfaces:**
@@ -1259,12 +1479,36 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_qa_summary.py -q
 
 Expected: all QA summary tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run real-video QA summary revalidation**
+
+Create `tests/chess_gaze/test_qa_summary_real_video_contract.py` with a
+mandatory video-only test that:
+
+- reuses the Task 12 deterministic fake-observer real-video pipeline path;
+- requires both local verification videos;
+- asserts `qa_summary.json` exists for each run and was built by re-reading
+  manifests, JSONL, and artifact files from disk;
+- asserts decoded frame count, raw frame count, processed frame count, and JSONL
+  record count match for `test_1.mp4` and `test_2.mp4`;
+- asserts deterministic QA sample IDs, byte counts, status transitions, and
+  representative failure frames are present.
 
 Run:
 
 ```sh
-git add src/chess_gaze/qa_summary.py src/chess_gaze/pipeline.py tests/chess_gaze/test_qa_summary.py
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py tests/chess_gaze/test_qa_summary_real_video_contract.py -q
+```
+
+Expected: real-video model-free pipeline and QA summary revalidation pass for
+both verification videos. If either video is missing, record the exact missing
+path and do not mark Task 13 complete.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```sh
+git add src/chess_gaze/qa_summary.py src/chess_gaze/pipeline.py tests/chess_gaze/test_qa_summary.py tests/chess_gaze/test_qa_summary_real_video_contract.py
 git commit -m "feat: add qa summary validation"
 ```
 
@@ -1288,7 +1532,10 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run pytest
 ```
 
-Expected: all automated tests pass. Tests requiring ignored videos or real model binaries skip with explicit messages when assets are absent.
+Expected: all automated tests pass. Tests requiring absent ignored assets skip
+with explicit blocker messages. Video-only real-data tests run when
+`artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4` are present, even
+when model binaries are absent.
 
 - [ ] **Step 2: Run lint**
 
@@ -1330,7 +1577,7 @@ UV_CACHE_DIR=.uv-cache uv run python -c 'import importlib.metadata as m; provide
 
 Expected: prints `['opencv-python-headless']` and exits 0.
 
-- [ ] **Step 6: Run real-video smoke when assets exist**
+- [ ] **Step 6: Run mandatory real-video smoke or record blocker**
 
 If `artifacts/input/test_1.mp4`, `artifacts/input/test_2.mp4`, `models/mediapipe/face_landmarker.task`, and `models/unigaze/unigaze_h14_joint.safetensors` exist with approved checksums in `src/chess_gaze/model_registry.json`, run:
 
@@ -1347,7 +1594,10 @@ Expected:
 - artifact counts match decoded frame count;
 - `FACE_NOT_FOUND` over 1 percent is reported as a smoke warning with representative frames, not hidden.
 
-If the ignored videos or model files are absent, record the exact missing paths and do not claim real-model smoke passed.
+If any required ignored video or model file is absent, record the exact missing
+path, the blocked smoke requirement, and the next unblock action. Do not claim
+real-video smoke, manual QA, or implementation closeout complete for the
+affected verification.
 
 - [ ] **Step 7: Update README with usage and model policy**
 

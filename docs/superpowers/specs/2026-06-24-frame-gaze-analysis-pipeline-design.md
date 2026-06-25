@@ -7,15 +7,15 @@ Updated: 2026-06-25
 ## Status
 
 This is the active design spec for the first real runtime feature in
-`chess-gaze`. It intentionally stops before an implementation plan. The next
-step, after user review, is a separate Superpowers implementation plan.
+`chess-gaze`. The executable Superpowers implementation plan is
+`docs/superpowers/plans/2026-06-25-frame-gaze-analysis-pipeline.md`.
 
 2026-06-25 correction: the initial model choice did not meet the project's
 accuracy-first standard because it selected L2CS-Net without a current,
 candidate-complete comparison against UniGaze. This revision makes UniGaze
 `unigaze_h14_joint` the primary learned gaze model, records license/runtime
 caveats explicitly, and tightens other dependency and artifact decisions found
-during the follow-up audit. No implementation plan has been written yet.
+during the follow-up audit.
 
 ## Goal
 
@@ -52,10 +52,19 @@ uv run mypy
 ```
 
 `artifacts/`, `models/`, and common checkpoint formats are gitignored. The two
-local sample videos exist under `artifacts/input/`, but they are ignored local
-inputs, not committed test fixtures.
+local verification videos exist under `artifacts/input/`, but they are ignored
+local inputs, not committed test fixtures.
 
-Observed sample media:
+These two local verification videos are mandatory real-data verification inputs
+for this spec. They are not illustrative examples. Every subsystem that can be
+exercised with a real video must be checked against
+`artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4` as soon as that
+subsystem is executable, before later tasks build on it. Synthetic fixtures,
+fakes, and unit tests may define deterministic contracts, but they do not
+replace required real-data verification for any subsystem that can consume real
+video data.
+
+Observed mandatory verification media:
 
 | Video | Resolution | FPS | Duration | Frames | Video codec | Notes |
 | --- | ---: | ---: | ---: | ---: | --- | --- |
@@ -1052,14 +1061,20 @@ uv run mypy
 
 Real-model smoke targets:
 
-- On the two local sample videos, `FACE_NOT_FOUND` should be no more than 1
+- On the two local verification videos, `FACE_NOT_FOUND` should be no more than 1
   percent of decoded frames unless manual visualization review proves the face is
   absent or fully hidden in those frames. Until labeled expected-output frames
   exist, this is a smoke warning and triage target, not an automated hard gate.
-- On the two local sample videos, frames with both eyes visibly open in the
+- On the two local verification videos, frames with both eyes visibly open in the
   processed visualization should have both iris centers marked. Misses must be
   listed in `qa_summary.json` representative failures. Until labeled frames
   exist, this is manual QA evidence, not a deterministic pass/fail threshold.
+
+Real-data verification is mandatory for acceptance. If either local video or a
+required local model asset is unavailable, the exact missing path, affected
+subsystem, blocked verification, and next unblock action must be recorded in
+the closeout. Theoretical progress, synthetic-only tests, or skipped smoke
+checks must not be described as complete real-data verification.
 
 ## Testing Strategy
 
@@ -1079,12 +1094,14 @@ Required automated tests:
 | Integration | Run with fake/model-stub observers to prove the artifact contract without heavyweight ML dependencies. |
 | Integration | Verify atomic temp-then-rename writes and partial-run status when a write failure is injected. |
 | Integration | Verify exactly one `cv2` provider is importable after dependency sync. |
-| Smoke | Run real analysis on `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4` when model assets are present locally. |
-| Manual QA | Inspect deterministic processed-frame samples from each local test video. |
+| Smoke | Run real analysis on `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4`, or record the exact blocker when required local model assets are absent. |
+| Manual QA | Inspect deterministic processed-frame samples from each local verification video. |
 
-Tests must not require committing ignored video files or model weights. Real
-model smoke tests may be opt-in if model assets are absent, but the absence must
-be reported clearly rather than hidden.
+Tests must not require committing ignored video files or model weights. When
+ignored assets are unavailable, tests may skip with explicit messages, but the
+skip is a recorded blocker for the affected real-data requirement, not a pass.
+Video-only checks must still run when `test_1.mp4` and `test_2.mp4` are
+present, even if model assets are absent.
 
 ## Best Practices and Mistakes to Avoid
 
