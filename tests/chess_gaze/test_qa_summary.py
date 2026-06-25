@@ -352,6 +352,61 @@ def test_build_qa_summary_revalidates_counts_rates_errors_and_samples(
     datetime.fromisoformat(summary.built_from_disk_at_utc.replace("Z", "+00:00"))
 
 
+def test_build_qa_summary_does_not_treat_warning_only_records_as_failures(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=2)
+    warning_payload = _record(0).model_dump(mode="python")
+    warning_payload["status"] = FrameStatus.WARNING
+    warning_payload["recommended_gaze"] = {
+        "valid": False,
+        "yaw_radians": None,
+        "pitch_radians": None,
+        "reason_invalid": ErrorCode.GAZE_ESTIMATORS_DISAGREE,
+    }
+    warning_payload["errors"] = [
+        {
+            "code": ErrorCode.GAZE_ESTIMATORS_DISAGREE,
+            "message": "Recommended gaze is invalid: GAZE_ESTIMATORS_DISAGREE.",
+        }
+    ]
+    warning_record = FrameRecord.model_validate(warning_payload)
+    hard_failure_record = _record(1, status=FrameStatus.ERROR)
+    (layout.records_dir / "frames.jsonl").write_text(
+        warning_record.model_dump_json()
+        + "\n"
+        + hard_failure_record.model_dump_json()
+        + "\n",
+        encoding="utf-8",
+    )
+    (layout.records_dir / "errors.jsonl").write_text(
+        json.dumps(
+            {
+                "frame_id": warning_record.frame_id,
+                "frame_index": warning_record.frame_index,
+                "code": ErrorCode.GAZE_ESTIMATORS_DISAGREE.value,
+                "message": "Recommended gaze is invalid: GAZE_ESTIMATORS_DISAGREE.",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "frame_id": hard_failure_record.frame_id,
+                "frame_index": hard_failure_record.frame_index,
+                "code": ErrorCode.FACE_NOT_FOUND.value,
+                "message": "No face detected in frame.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = build_qa_summary(layout)
+
+    assert summary.errors_by_severity == {"warning": 2}
+    assert summary.representative_failure_frame_ids == ["f000000001"]
+
+
 def test_validate_run_artifacts_reports_count_mismatches_without_hiding_records(
     tmp_path: Path,
 ) -> None:

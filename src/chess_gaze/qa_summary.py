@@ -430,13 +430,14 @@ def _representative_failure_frame_ids(
 ) -> list[str]:
     failed_frames: dict[str, tuple[int, str]] = {}
     for record in frame_records:
-        if record.status is not FrameStatus.OK or record.errors:
+        if record.status is FrameStatus.ERROR:
             failed_frames[record.frame_id] = (record.frame_index, record.frame_id)
     for error_record in error_records:
-        failed_frames.setdefault(
-            error_record.frame_id,
-            (error_record.frame_index, error_record.frame_id),
-        )
+        if _severity(error_record.code) == "error":
+            failed_frames.setdefault(
+                error_record.frame_id,
+                (error_record.frame_index, error_record.frame_id),
+            )
 
     return [
         frame_id_value

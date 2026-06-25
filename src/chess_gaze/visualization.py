@@ -29,6 +29,7 @@ _HEAD_Z_COLOR: Color = (80, 160, 255)
 _TEXT_COLOR: Color = (255, 255, 255)
 _TEXT_SHADOW_COLOR: Color = (0, 0, 0)
 _ERROR_COLOR: Color = (255, 90, 90)
+_WARNING_COLOR: Color = (255, 220, 90)
 _OK_COLOR: Color = (90, 255, 140)
 
 
@@ -227,7 +228,7 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
 
 
 def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
-    status_color = _OK_COLOR if record.status is FrameStatus.OK else _ERROR_COLOR
+    status_color = _status_color(record.status)
     lines = [
         f"{record.frame_id} status={record.status.value}",
         f"idx={record.frame_index} t={record.timestamp_seconds:.3f}s",
@@ -266,6 +267,14 @@ def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
             color=status_color if index == 0 else _TEXT_COLOR,
             scale=0.45,
         )
+
+
+def _status_color(status: FrameStatus) -> Color:
+    if status is FrameStatus.OK:
+        return _OK_COLOR
+    if status is FrameStatus.WARNING:
+        return _WARNING_COLOR
+    return _ERROR_COLOR
 
 
 def _has_complete_head_pose(head_pose: HeadPoseRecord) -> bool:

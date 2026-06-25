@@ -33,4 +33,5 @@ class CliErrorCode(StrEnum):
 
 class FrameStatus(StrEnum):
     OK = "OK"
+    WARNING = "WARNING"
     ERROR = "ERROR"

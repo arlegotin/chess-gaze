@@ -31,6 +31,12 @@ from chess_gaze.gaze_observation import (
 from chess_gaze.head_pose import HeadPoseObservation, ImageSize, estimate_head_pose
 
 DEFAULT_RECOMMENDED_GAZE_MAX_PAIRWISE_DELTA_RADIANS = 0.35
+FRAME_WARNING_ERROR_CODES = frozenset(
+    {
+        ErrorCode.GAZE_ESTIMATORS_DISAGREE,
+        ErrorCode.MULTIPLE_FACE_CANDIDATES,
+    }
+)
 
 EyeObserver = Callable[
     [FaceCandidate, npt.NDArray[np.uint8], RunLayout, str], EyePairObservation
@@ -364,18 +370,42 @@ def _frame_status(
     appearance_gaze: FaceModelGaze,
     recommended_gaze: GazeAngles,
 ) -> FrameStatus:
-    if errors:
-        return FrameStatus.ERROR
     if not (
         face.present
         and left_eye.present
         and right_eye.present
         and head_pose.valid
         and appearance_gaze.valid
-        and recommended_gaze.valid
     ):
         return FrameStatus.ERROR
+
+    if not recommended_gaze.valid:
+        if _warning_only_recommended_gaze_disagreement(errors, recommended_gaze):
+            return FrameStatus.WARNING
+        return FrameStatus.ERROR
+
+    if errors:
+        if _only_warning_errors(errors):
+            return FrameStatus.WARNING
+        return FrameStatus.ERROR
+
     return FrameStatus.OK
+
+
+def _warning_only_recommended_gaze_disagreement(
+    errors: list[ErrorRecord], recommended_gaze: GazeAngles
+) -> bool:
+    return (
+        not recommended_gaze.valid
+        and recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+        and _only_warning_errors(errors)
+    )
+
+
+def _only_warning_errors(errors: list[ErrorRecord]) -> bool:
+    return bool(errors) and (
+        {error.code for error in errors} <= FRAME_WARNING_ERROR_CODES
+    )
 
 
 def _append_error_once(errors: list[ErrorRecord], error: ErrorRecord) -> None:
