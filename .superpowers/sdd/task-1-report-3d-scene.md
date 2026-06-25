@@ -66,3 +66,61 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src
 
 - No functional concerns for Task 1.
 - I did not run the broader repository test suite; verification was limited to the task-specified focused pytest command and focused Ruff checks.
+
+## Review Fixes
+
+### What changed
+
+- Replaced free-form nested dicts in scene records with strict structured models for frame diagnostics, manifest source artifacts, coordinate frames, robust estimator metadata, viewer metadata, summary hit bounds, and artifact validation.
+- Added spec-level scene frame fields: `source_frame_status`, `valid_for_scene_center`, `valid_for_main_monitor_direction`, and structured `camera`.
+- Added alias-backed persisted names so scene payloads can serialize spec-aligned keys such as `camera_m`, `scene_m`, `ray_t_m`, `scene_axes_camera`, `main_monitor_plane`, and `viewer`.
+- Fixed the camera model policy literal to `estimated_pinhole_from_image_size`.
+- Added source diagnostic string fields for midpoint, head, unigaze ray, and monitor hit records.
+- Added axis-basis validation for anti-parallel `back_camera`/`forward_camera` and determinant near `+1`.
+- Split persisted head-radius assumption records into independent `X`, `Y`, and `Z` constant names.
+
+### RED evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `7 failed, 13 passed in 0.13s`
+- Failures matched the review findings:
+  - missing separate head-radius assumption names;
+  - no axis-basis invariant enforcement;
+  - missing spec-level frame and manifest fields;
+  - free-form diagnostics/manifest metadata drift;
+  - missing structured summary fields.
+
+### GREEN evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `20 passed in 0.07s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src/chess_gaze/scene_records.py tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py
+```
+
+- `All checks passed!`
+
+### Files changed
+
+- `src/chess_gaze/scene_calibration.py`
+- `src/chess_gaze/scene_records.py`
+- `tests/chess_gaze/test_scene_calibration.py`
+- `tests/chess_gaze/test_scene_records.py`
+- `.superpowers/sdd/task-1-report-3d-scene.md`

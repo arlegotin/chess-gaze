@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from chess_gaze.geometry import CoordinateSpace, Point2D
 from chess_gaze.scene_calibration import default_scene_assumptions
 from chess_gaze.scene_records import (
+    SceneAxisBasisRecord,
     SceneEyeMidpointRecord,
     SceneEyeRecord,
     SceneFrameRecord,
@@ -57,7 +58,6 @@ def _eye_payload(valid: bool = True) -> dict[str, Any]:
         "valid": valid,
         "image_px": _point2d_payload(),
         "camera_point_m": _vector_payload(),
-        "scene_point_m": _vector_payload(space="scene_pseudo_m"),
         "source_reason_invalid": None,
         "reason_invalid": None,
     }
@@ -73,8 +73,10 @@ def _midpoint_payload(valid: bool = True) -> dict[str, Any]:
             z=0.0,
             space="scene_pseudo_m",
         ),
+        "origin_policy": "both_eyes_required",
         "pupil_distance_px": 31.5,
         "estimated_depth_m": 0.8,
+        "source_reason_invalid": None,
         "reason_invalid": None,
     }
 
@@ -82,6 +84,7 @@ def _midpoint_payload(valid: bool = True) -> dict[str, Any]:
 def _head_payload(valid: bool = True) -> dict[str, Any]:
     return {
         "valid": valid,
+        "ellipsoid_center_camera_m": _vector_payload(x=0.0, y=0.025, z=0.72),
         "ellipsoid_center_scene_m": _vector_payload(
             x=0.0,
             y=0.03,
@@ -89,6 +92,11 @@ def _head_payload(valid: bool = True) -> dict[str, Any]:
             space="scene_pseudo_m",
         ),
         "radii_m": (0.09, 0.12, 0.10),
+        "yaw_radians": 0.02,
+        "pitch_radians": -0.04,
+        "roll_radians": 0.01,
+        "orientation_source": "head_pose_yaw_pitch_roll",
+        "source_reason_invalid": None,
         "reason_invalid": None,
     }
 
@@ -106,8 +114,10 @@ def _ray_payload(valid: bool = True) -> dict[str, Any]:
         ),
         "direction_camera": _unit_vector_payload(),
         "direction_scene": _unit_vector_payload(space="scene_pseudo_m"),
+        "direction_source": "appearance_gaze_unigaze_pitch_yaw",
         "pitch_radians": 0.1,
         "yaw_radians": -0.1,
+        "source_reason_invalid": None,
         "reason_invalid": None,
     }
 
@@ -129,6 +139,7 @@ def _hit_payload(valid: bool = True) -> dict[str, Any]:
         "signed_distance_m": 0.0,
         "within_physical_monitor": True,
         "within_extended_plane": True,
+        "source_reason_invalid": None,
         "reason_invalid": None,
     }
 
@@ -162,6 +173,107 @@ def _monitor_plane_payload() -> dict[str, Any]:
         "extended_width_m": 1.8,
         "extended_height_m": 1.02,
         "distance_from_scene_center_m": 0.7,
+        "distance_source": "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
+    }
+
+
+def _frame_camera_payload() -> dict[str, Any]:
+    return {
+        "fx_px": 1920.0,
+        "fy_px": 1920.0,
+        "cx_px": 960.0,
+        "cy_px": 540.0,
+        "depth_source": "interpupillary_distance_assumption",
+    }
+
+
+def _manifest_payload() -> dict[str, Any]:
+    return {
+        "run_id": "run-123",
+        "source_video_path": "artifacts/input/nakamura_1.mp4",
+        "source_video_sha256": "abc123",
+        "source_artifacts": {
+            "frame_records": "records/frames.jsonl",
+            "scene_frame_records": "records/scene_frames.jsonl",
+            "scene_summary": "scene/scene_summary.json",
+            "viewer": "viewer/index.html",
+        },
+        "coordinate_frames": {
+            "math_frame": "camera_opencv_pseudo_m",
+            "scene_frame": "scene_pseudo_m",
+            "monitor_frame": "monitor_plane_pseudo_m",
+            "viewer_frame": "three_view",
+        },
+        "camera_model": {
+            "policy": "estimated_pinhole_from_image_size",
+            "frame_width_px": 1920,
+            "frame_height_px": 1080,
+            "fx_px": 960.0,
+            "fy_px": 960.0,
+            "cx_px": 960.0,
+            "cy_px": 540.0,
+            "metric_translation_allowed": False,
+            "uncertainty": "high",
+        },
+        "assumptions": [
+            record.model_dump() for record in default_scene_assumptions().records
+        ],
+        "robust_estimators": {
+            "scene_center": {
+                "method": "geometric_median_after_mad_screen",
+                "candidate_frame_count": 1900,
+                "inlier_frame_count": 1850,
+                "fallback_used": False,
+            },
+            "main_unigaze_direction": {
+                "method": "angular_ransac_then_normalized_inlier_mean",
+                "candidate_frame_count": 1800,
+                "inlier_frame_count": 1550,
+                "inlier_angle_radians": 0.35,
+                "fallback_used": False,
+            },
+            "scene_orientation": {
+                "method": "eye_pair_right_and_head_up_with_camera_axis_fallbacks",
+                "candidate_frame_count": 1850,
+                "fallbacks": [],
+            },
+        },
+        "scene_center_camera_m": _vector_payload(x=0.0, y=0.0, z=0.65),
+        "scene_axes_camera": _axis_basis_payload(),
+        "main_monitor_plane": _monitor_plane_payload(),
+        "viewer": {
+            "library": "three",
+            "version": "0.185.0",
+            "source": "npm:three",
+            "license": "MIT",
+            "dist_integrity": "sha512-test",
+        },
+        "generated_at_utc": "2026-06-26T12:00:00Z",
+    }
+
+
+def _summary_payload() -> dict[str, Any]:
+    return {
+        "run_id": "run-123",
+        "decoded_frames": 20,
+        "scene_frame_records": 20,
+        "valid_eye_midpoint_frames": 10,
+        "valid_unigaze_ray_frames": 8,
+        "valid_monitor_hit_frames": 6,
+        "invalid_monitor_hit_reasons": {"UNIGAZE_INVALID": 2},
+        "monitor_hit_bounds": {
+            "u_min_m": -0.42,
+            "u_max_m": 0.38,
+            "v_min_m": -0.21,
+            "v_max_m": 0.19,
+        },
+        "representative_scene_warning_frame_ids": ["frame-0002"],
+        "artifact_validation": {
+            "scene_frame_count_matches_decoded": True,
+            "viewer_exists": True,
+            "scene_manifest_valid": True,
+            "scene_summary_valid": True,
+        },
     }
 
 
@@ -170,6 +282,10 @@ def _scene_frame_payload() -> dict[str, Any]:
         "frame_id": "frame-0001",
         "frame_index": 1,
         "timestamp_seconds": 0.1,
+        "source_frame_status": "OK",
+        "valid_for_scene_center": True,
+        "valid_for_main_monitor_direction": True,
+        "camera": _frame_camera_payload(),
         "left_eye": _eye_payload(),
         "right_eye": _eye_payload(),
         "eye_midpoint": _midpoint_payload(),
@@ -177,8 +293,8 @@ def _scene_frame_payload() -> dict[str, Any]:
         "unigaze_ray": _ray_payload(),
         "main_monitor_hit": _hit_payload(),
         "diagnostics": {
-            "source_frame_status": "OK",
-            "left_eye_reason": None,
+            "warnings": [],
+            "source_error_codes": [],
         },
     }
 
@@ -217,8 +333,26 @@ def test_scene_enums_reject_unknown_strings() -> None:
                 **_eye_payload(valid=False),
                 "image_px": None,
                 "camera_point_m": None,
-                "scene_point_m": None,
+                "source_reason_invalid": "unknown eye state",
                 "reason_invalid": "UNKNOWN_REASON",
+            }
+        )
+
+
+def test_scene_axis_basis_rejects_parallel_back_and_negative_determinant() -> None:
+    with pytest.raises(ValidationError):
+        SceneAxisBasisRecord.model_validate(
+            {
+                **_axis_basis_payload(),
+                "back_camera": _unit_vector_payload(x=0.0, y=0.0, z=1.0),
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SceneAxisBasisRecord.model_validate(
+            {
+                **_axis_basis_payload(),
+                "determinant_right_up_back": -1.0,
             }
         )
 
@@ -248,7 +382,7 @@ def test_invalid_scene_eye_requires_reason_invalid() -> None:
                 **_eye_payload(valid=False),
                 "image_px": None,
                 "camera_point_m": None,
-                "scene_point_m": None,
+                "source_reason_invalid": "LEFT_EYE_NOT_FOUND",
                 "reason_invalid": None,
             }
         )
@@ -268,7 +402,6 @@ def test_valid_scene_eye_midpoint_requires_valid_eyes_and_camera_point() -> None
         **_eye_payload(valid=False),
         "image_px": None,
         "camera_point_m": None,
-        "scene_point_m": None,
         "source_reason_invalid": "RIGHT_EYE_NOT_FOUND",
         "reason_invalid": "RIGHT_EYE_INVALID",
     }
@@ -327,8 +460,10 @@ def test_valid_monitor_hit_requires_valid_ray_and_finite_forward_intersection() 
         "origin_scene_m": None,
         "direction_camera": None,
         "direction_scene": None,
+        "direction_source": None,
         "pitch_radians": None,
         "yaw_radians": None,
+        "source_reason_invalid": "GAZE_MODEL_FAILED",
         "reason_invalid": "UNIGAZE_INVALID",
     }
 
@@ -344,7 +479,6 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
                 **_eye_payload(valid=False),
                 "image_px": None,
                 "camera_point_m": None,
-                "scene_point_m": None,
                 "source_reason_invalid": "LEFT_EYE_NOT_FOUND",
                 "reason_invalid": "LEFT_EYE_INVALID",
             },
@@ -352,7 +486,6 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
                 **_eye_payload(valid=False),
                 "image_px": None,
                 "camera_point_m": None,
-                "scene_point_m": None,
                 "source_reason_invalid": "RIGHT_EYE_NOT_FOUND",
                 "reason_invalid": "RIGHT_EYE_INVALID",
             },
@@ -360,13 +493,18 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
                 **_midpoint_payload(valid=False),
                 "camera_point_m": None,
                 "scene_point_m": None,
+                "origin_policy": None,
                 "pupil_distance_px": None,
                 "estimated_depth_m": None,
+                "source_reason_invalid": "RIGHT_EYE_INVALID",
                 "reason_invalid": "EYE_MIDPOINT_INVALID",
             },
             "head": {
                 **_head_payload(valid=False),
+                "ellipsoid_center_camera_m": None,
                 "ellipsoid_center_scene_m": None,
+                "orientation_source": None,
+                "source_reason_invalid": "HEAD_POSE_INVALID",
                 "reason_invalid": "NON_FINITE_INPUT",
             },
             "unigaze_ray": {
@@ -375,8 +513,10 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
                 "origin_scene_m": None,
                 "direction_camera": None,
                 "direction_scene": None,
+                "direction_source": None,
                 "pitch_radians": None,
                 "yaw_radians": None,
+                "source_reason_invalid": "GAZE_MODEL_FAILED",
                 "reason_invalid": "UNIGAZE_INVALID",
             },
             "main_monitor_hit": {
@@ -390,6 +530,7 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
                 "signed_distance_m": None,
                 "within_physical_monitor": None,
                 "within_extended_plane": None,
+                "source_reason_invalid": "RAY_PARALLEL_TO_MONITOR",
                 "reason_invalid": "RAY_PARALLEL_TO_MONITOR",
             },
         }
@@ -403,59 +544,106 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
         frame.main_monitor_hit.reason_invalid
         == SceneInvalidReason.RAY_PARALLEL_TO_MONITOR
     )
+    assert frame.eye_midpoint.source_reason_invalid == "RIGHT_EYE_INVALID"
+    assert frame.head.source_reason_invalid == "HEAD_POSE_INVALID"
+    assert frame.unigaze_ray.source_reason_invalid == "GAZE_MODEL_FAILED"
+    assert frame.main_monitor_hit.source_reason_invalid == "RAY_PARALLEL_TO_MONITOR"
 
 
-def test_scene_frame_record_serializes_schema_version() -> None:
+def test_scene_frame_record_serializes_spec_alias_fields() -> None:
     frame = SceneFrameRecord.model_validate(_scene_frame_payload())
+    payload = frame.model_dump(by_alias=True)
 
-    assert frame.model_dump()["schema_version"] == "gaze-scene-frame-v1"
+    assert payload["schema_version"] == "gaze-scene-frame-v1"
+    assert payload["source_frame_status"] == "OK"
+    assert payload["valid_for_scene_center"] is True
+    assert payload["valid_for_main_monitor_direction"] is True
+    assert payload["camera"]["depth_source"] == "interpupillary_distance_assumption"
+    assert payload["left_eye"]["camera_m"]["space"] == "camera_opencv_pseudo_m"
+    assert payload["eye_midpoint"]["camera_m"]["z"] == 0.8
+    assert payload["eye_midpoint"]["scene_m"]["space"] == "scene_pseudo_m"
+    assert payload["main_monitor_hit"]["ray_t_m"] == 0.3
+    assert payload["diagnostics"] == {"warnings": [], "source_error_codes": []}
 
 
-def test_scene_manifest_serializes_schema_version() -> None:
-    manifest = SceneManifest.model_validate(
-        {
-            "run_id": "run-123",
-            "source_video_path": "artifacts/input/nakamura_1.mp4",
-            "source_video_sha256": "abc123",
-            "camera_model": {
-                "frame_width_px": 1920,
-                "frame_height_px": 1080,
-                "fx_px": 960.0,
-                "fy_px": 960.0,
-                "cx_px": 960.0,
-                "cy_px": 540.0,
-                "model": "estimated_pinhole_from_frame_size",
-            },
-            "assumptions": [
-                record.model_dump() for record in default_scene_assumptions().records
-            ],
-            "scene_center_camera_m": _vector_payload(x=0.0, y=0.0, z=0.65),
-            "axis_basis": _axis_basis_payload(),
-            "monitor_plane": _monitor_plane_payload(),
-            "robust_estimators": {"scene_center": {"candidate_count": 7}},
-            "viewer_dependency": {"three_js_version": "0.185.0"},
-        }
+def test_scene_camera_model_requires_approved_policy_literal() -> None:
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(
+            {
+                **_manifest_payload(),
+                "camera_model": {
+                    **_manifest_payload()["camera_model"],
+                    "policy": "estimated_pinhole_from_frame_size",
+                },
+            }
+        )
+
+
+def test_scene_manifest_serializes_structured_spec_fields() -> None:
+    manifest = SceneManifest.model_validate(_manifest_payload())
+    payload = manifest.model_dump(by_alias=True)
+
+    assert payload["schema_version"] == "gaze-scene-manifest-v1"
+    assert payload["camera_model"]["policy"] == "estimated_pinhole_from_image_size"
+    assert (
+        payload["source_artifacts"]["scene_frame_records"]
+        == "records/scene_frames.jsonl"
     )
-
-    assert manifest.model_dump()["schema_version"] == "gaze-scene-manifest-v1"
-
-
-def test_scene_summary_serializes_schema_version() -> None:
-    summary = SceneSummary.model_validate(
-        {
-            "run_id": "run-123",
-            "decoded_frames": 20,
-            "scene_frame_records": 20,
-            "valid_eye_midpoint_frames": 10,
-            "valid_unigaze_ray_frames": 8,
-            "valid_monitor_hit_frames": 6,
-            "invalid_reason_counts": {"UNIGAZE_INVALID": 2},
-            "representative_invalid_frame_ids": ["frame-0002"],
-            "count_validation_passed": True,
-        }
+    assert payload["coordinate_frames"]["viewer_frame"] == "three_view"
+    assert payload["scene_axes_camera"]["forward_camera"]["z"] == 1.0
+    assert (
+        payload["main_monitor_plane"]["distance_source"]
+        == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
     )
+    assert payload["viewer"]["version"] == "0.185.0"
+    assert payload["generated_at_utc"] == "2026-06-26T12:00:00Z"
 
-    assert summary.model_dump()["schema_version"] == "gaze-scene-summary-v1"
+
+def test_structured_nested_models_reject_non_finite_values_and_unknown_keys() -> None:
+    frame_payload = _scene_frame_payload()
+    frame_payload["diagnostics"]["unexpected_metric"] = math.nan
+    with pytest.raises(ValidationError):
+        SceneFrameRecord.model_validate(frame_payload)
+
+    unknown_frame_payload = _scene_frame_payload()
+    unknown_frame_payload["diagnostics"]["unexpected"] = "value"
+    with pytest.raises(ValidationError):
+        SceneFrameRecord.model_validate(unknown_frame_payload)
+
+    manifest_payload = _manifest_payload()
+    manifest_payload["robust_estimators"]["scene_center"][
+        "candidate_frame_count"
+    ] = math.nan
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(manifest_payload)
+
+    unknown_manifest_payload = _manifest_payload()
+    unknown_manifest_payload["robust_estimators"]["scene_center"][
+        "unexpected"
+    ] = "value"
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(unknown_manifest_payload)
+
+    viewer_manifest_payload = _manifest_payload()
+    viewer_manifest_payload["viewer"]["dist_integrity"] = math.nan
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(viewer_manifest_payload)
+
+    unknown_viewer_manifest_payload = _manifest_payload()
+    unknown_viewer_manifest_payload["viewer"]["unexpected"] = "value"
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(unknown_viewer_manifest_payload)
+
+
+def test_scene_summary_serializes_structured_breakdowns() -> None:
+    summary = SceneSummary.model_validate(_summary_payload())
+    payload = summary.model_dump()
+
+    assert payload["schema_version"] == "gaze-scene-summary-v1"
+    assert payload["invalid_monitor_hit_reasons"] == {"UNIGAZE_INVALID": 2}
+    assert payload["monitor_hit_bounds"]["u_min_m"] == -0.42
+    assert payload["representative_scene_warning_frame_ids"] == ["frame-0002"]
+    assert payload["artifact_validation"]["scene_manifest_valid"] is True
 
 
 def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> None:
@@ -487,15 +675,14 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
                 record.model_dump() for record in default_scene_assumptions().records
             ],
             "summary": {
-                "run_id": "run-123",
+                **_summary_payload(),
                 "decoded_frames": 1,
                 "scene_frame_records": 1,
                 "valid_eye_midpoint_frames": 1,
                 "valid_unigaze_ray_frames": 1,
                 "valid_monitor_hit_frames": 1,
-                "invalid_reason_counts": {},
-                "representative_invalid_frame_ids": [],
-                "count_validation_passed": True,
+                "invalid_monitor_hit_reasons": {},
+                "representative_scene_warning_frame_ids": [],
             },
         }
     )

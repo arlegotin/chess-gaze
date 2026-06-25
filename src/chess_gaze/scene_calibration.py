@@ -132,12 +132,22 @@ def default_scene_assumptions() -> SceneAssumptions:
             uncertainty="low",
         ),
         SceneAssumptionRecord(
-            name="DEFAULT_HEAD_ELLIPSOID_RADIUS_M",
-            value=(
-                DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M,
-                DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M,
-                DEFAULT_HEAD_ELLIPSOID_RADIUS_Z_M,
-            ),
+            name="DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M",
+            value=DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M,
+            unit="m",
+            source="adult_male_default",
+            uncertainty="medium",
+        ),
+        SceneAssumptionRecord(
+            name="DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M",
+            value=DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M,
+            unit="m",
+            source="adult_male_default",
+            uncertainty="medium",
+        ),
+        SceneAssumptionRecord(
+            name="DEFAULT_HEAD_ELLIPSOID_RADIUS_Z_M",
+            value=DEFAULT_HEAD_ELLIPSOID_RADIUS_Z_M,
             unit="m",
             source="adult_male_default",
             uncertainty="medium",
