@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -357,6 +358,18 @@ def test_scene_axis_basis_rejects_parallel_back_and_negative_determinant() -> No
         )
 
 
+def test_scene_axis_basis_rejects_computed_degenerate_basis() -> None:
+    with pytest.raises(ValidationError):
+        SceneAxisBasisRecord.model_validate(
+            {
+                **_axis_basis_payload(),
+                "right_camera": _unit_vector_payload(x=1.0, y=0.0, z=0.0),
+                "up_camera": _unit_vector_payload(x=1.0, y=0.0, z=0.0),
+                "determinant_right_up_back": 1.0,
+            }
+        )
+
+
 def test_valid_scene_eye_requires_image_and_camera_point() -> None:
     with pytest.raises(ValidationError):
         SceneEyeRecord.model_validate(
@@ -432,6 +445,28 @@ def test_valid_unigaze_ray_requires_origin_and_appearance_source() -> None:
             {
                 **_ray_payload(),
                 "source": "recommended_gaze",
+            }
+        )
+
+
+def test_scene_head_radii_accept_json_style_lists_but_reject_bad_values() -> None:
+    head = SceneFrameRecord.model_validate(_scene_frame_payload()).head
+
+    assert head.model_dump(by_alias=True)["ellipsoid_radii_m"] == (0.09, 0.12, 0.10)
+
+    with pytest.raises(ValidationError):
+        type(head).model_validate(
+            {
+                **_head_payload(),
+                "radii_m": [0.09, 0.12],
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        type(head).model_validate(
+            {
+                **_head_payload(),
+                "radii_m": [0.09, math.nan, 0.10],
             }
         )
 
@@ -564,6 +599,25 @@ def test_scene_frame_record_serializes_spec_alias_fields() -> None:
     assert payload["eye_midpoint"]["scene_m"]["space"] == "scene_pseudo_m"
     assert payload["main_monitor_hit"]["ray_t_m"] == 0.3
     assert payload["diagnostics"] == {"warnings": [], "source_error_codes": []}
+
+
+def test_scene_frame_record_validates_from_json_text_and_round_trips() -> None:
+    payload = _scene_frame_payload()
+    payload["head"].pop("radii_m")
+    payload["head"]["ellipsoid_radii_m"] = [0.09, 0.12, 0.10]
+
+    frame = SceneFrameRecord.model_validate_json(json.dumps(payload))
+
+    assert frame.model_dump(by_alias=True)["head"]["ellipsoid_radii_m"] == (
+        0.09,
+        0.12,
+        0.10,
+    )
+    assert (
+        SceneFrameRecord.model_validate_json(frame.model_dump_json(by_alias=True))
+        .model_dump(by_alias=True)["head"]["ellipsoid_radii_m"]
+        == (0.09, 0.12, 0.10)
+    )
 
 
 def test_scene_camera_model_requires_approved_policy_literal() -> None:

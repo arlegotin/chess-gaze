@@ -124,3 +124,53 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src
 - `tests/chess_gaze/test_scene_calibration.py`
 - `tests/chess_gaze/test_scene_records.py`
 - `.superpowers/sdd/task-1-report-3d-scene.md`
+
+## Review Fixes Round 2
+
+### What changed
+
+- Added JSON round-trip coverage for a full `SceneFrameRecord`, including `head.ellipsoid_radii_m` supplied as a JSON array.
+- Updated `SceneHeadRecord` radii validation to accept JSON-style lists, coerce valid length-3 input into the strict tuple shape, and still reject wrong-length and non-finite values.
+- Tightened `SceneAxisBasisRecord` validation to compute the determinant from the actual `right/up/back` vectors, reject degenerate bases even when a fake determinant is supplied, and reject material mismatch between supplied and computed determinant values.
+- Preserved existing anti-parallel `back_camera`/`forward_camera` validation.
+
+### RED evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `2 failed, 20 passed in 0.09s`
+- Failures matched the remaining review findings:
+  - computed-degenerate axis basis was incorrectly accepted;
+  - `SceneFrameRecord.model_validate_json(...)` rejected JSON-array `ellipsoid_radii_m`.
+
+### GREEN evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `23 passed in 0.06s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src/chess_gaze/scene_records.py tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py
+```
+
+- `All checks passed!`
+
+### Files changed
+
+- `src/chess_gaze/scene_records.py`
+- `tests/chess_gaze/test_scene_records.py`
+- `.superpowers/sdd/task-1-report-3d-scene.md`

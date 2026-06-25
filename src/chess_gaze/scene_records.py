@@ -212,12 +212,26 @@ class SceneHeadRecord(SceneSchemaModel):
         )
         return coerced
 
+    @field_validator("radii_m", mode="before")
+    @classmethod
+    def coerce_radii_sequence(
+        cls,
+        value: Any,
+    ) -> tuple[float, float, float] | Any:
+        if isinstance(value, list):
+            if len(value) != 3:
+                raise ValueError("radii_m must contain exactly 3 values")
+            return (value[0], value[1], value[2])
+        return value
+
     @field_validator("radii_m")
     @classmethod
     def validate_radii(
         cls,
         value: tuple[float, float, float],
     ) -> tuple[float, float, float]:
+        if len(value) != 3:
+            raise ValueError("radii_m must contain exactly 3 values")
         return _validate_finite_triplet(value, field_name="radii_m")
 
     @model_validator(mode="after")
@@ -313,6 +327,7 @@ class SceneMonitorHitRecord(SceneSchemaModel):
         if isinstance(plane_uv_m, (list, tuple)) and len(plane_uv_m) == 2:
             coerced.setdefault("u_m", plane_uv_m[0])
             coerced.setdefault("v_m", plane_uv_m[1])
+            coerced.pop("plane_uv_m", None)
         _coerce_enum_field(
             coerced,
             field_name="reason_invalid",
@@ -367,6 +382,23 @@ class SceneAxisBasisRecord(SceneSchemaModel):
 
     @model_validator(mode="after")
     def validate_axis_basis(self) -> SceneAxisBasisRecord:
+        computed_determinant = (
+            self.right_camera.x
+            * (
+                (self.up_camera.y * self.back_camera.z)
+                - (self.up_camera.z * self.back_camera.y)
+            )
+            - self.right_camera.y
+            * (
+                (self.up_camera.x * self.back_camera.z)
+                - (self.up_camera.z * self.back_camera.x)
+            )
+            + self.right_camera.z
+            * (
+                (self.up_camera.x * self.back_camera.y)
+                - (self.up_camera.y * self.back_camera.x)
+            )
+        )
         dot_product = (
             (self.back_camera.x * self.forward_camera.x)
             + (self.back_camera.y * self.forward_camera.y)
@@ -374,8 +406,12 @@ class SceneAxisBasisRecord(SceneSchemaModel):
         )
         if abs(dot_product + 1.0) > 0.001:
             raise ValueError("back_camera must be anti-parallel to forward_camera")
-        if not 0.99 <= self.determinant_right_up_back <= 1.01:
-            raise ValueError("determinant_right_up_back must be near +1")
+        if not 0.99 <= computed_determinant <= 1.01:
+            raise ValueError("computed determinant must be near +1")
+        if abs(self.determinant_right_up_back - computed_determinant) > 0.001:
+            raise ValueError(
+                "determinant_right_up_back must match the computed determinant"
+            )
         return self
 
 
