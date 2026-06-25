@@ -107,6 +107,23 @@ class ErrorRecord(StrictSchemaModel):
     message: str
 
 
+class FrameErrorRecord(StrictSchemaModel):
+    frame_id: str
+    frame_index: int
+    code: ErrorCode
+    message: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_artifact_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        coerced = dict(data)
+        _coerce_error_code_field(coerced, "code")
+        return coerced
+
+
 class PnPLandmarkIndices(StrictSchemaModel):
     nose_tip: int
     chin: int

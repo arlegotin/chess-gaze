@@ -15,7 +15,12 @@ from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import ConfigurationError, load_config
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
-from chess_gaze.frame_records import ErrorRecord, FrameRecord, RunManifest
+from chess_gaze.frame_records import (
+    ErrorRecord,
+    FrameErrorRecord,
+    FrameRecord,
+    RunManifest,
+)
 from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
 from chess_gaze.model_assets import (
     ModelAssetError,
@@ -35,6 +40,7 @@ DEFAULT_MODEL_REGISTRY_PATH = Path(__file__).with_name("model_registry.json")
 DEFAULT_APPROVED_LICENSES = frozenset({"MG-NC-RAI-2.0"})
 RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
+FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
 
 
 class FrameRecordObserver(Protocol):
@@ -67,8 +73,8 @@ class ObserverBundle:
 @dataclass(frozen=True)
 class AnalyzeRequest:
     video_path: Path
-    output_root: Path = Path("artifacts/output")
-    models_root: Path = Path("models")
+    output_root: Path | None = None
+    models_root: Path | None = None
     config_path: Path | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
@@ -85,6 +91,7 @@ class AnalyzeResult:
     errors_jsonl_path: Path
     decoded_frame_count: int
     validated_record_count: int
+    validated_error_count: int
     frame_error_count: int
 
 
@@ -153,6 +160,7 @@ def analyze_video(
 
     decoded_frame_count = 0
     frame_error_count = 0
+    written_error_count = 0
     with (
         frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
         errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
@@ -167,15 +175,25 @@ def analyze_video(
                 errors_handle=errors_handle,
             )
             frame_error_count += len(frame_errors)
+            written_error_count += len(record.errors)
             frames_handle.write(record.model_dump_json() + "\n")
 
     validated_records = _read_frame_records(frames_jsonl_path)
+    validated_errors = _read_frame_error_records(errors_jsonl_path)
     if len(validated_records) != decoded_frame_count:
         raise PipelineError(
             CliErrorCode.SCHEMA_VALIDATION_FAILED,
             (
                 "Validated frame record count does not match decoded frame count: "
                 f"{len(validated_records)} != {decoded_frame_count}"
+            ),
+        )
+    if len(validated_errors) != written_error_count:
+        raise PipelineError(
+            CliErrorCode.SCHEMA_VALIDATION_FAILED,
+            (
+                "Validated frame error count does not match written frame errors: "
+                f"{len(validated_errors)} != {written_error_count}"
             ),
         )
 
@@ -189,6 +207,7 @@ def analyze_video(
         errors_jsonl_path=errors_jsonl_path,
         decoded_frame_count=decoded_frame_count,
         validated_record_count=len(validated_records),
+        validated_error_count=len(validated_errors),
         frame_error_count=frame_error_count,
     )
 
@@ -201,8 +220,8 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
 
     return _ResolvedRequest(
         video_path=request.video_path,
-        output_root=request.output_root,
-        models_root=request.models_root,
+        output_root=request.output_root or config.output_root,
+        models_root=request.models_root or config.models_root,
         raw_frame_image_format=config.raw_frame_image_format,
         processed_frame_image_format=config.processed_frame_image_format,
         processed_frame_jpeg_quality=config.processed_frame_jpeg_quality,
@@ -307,7 +326,7 @@ def _process_frame(
         )
         record = _record_with_errors(record, frame_errors)
 
-    _append_frame_errors(errors_handle, record)
+    frame_error_writer(errors_handle, record)
     return record, frame_errors
 
 
@@ -361,17 +380,17 @@ def _record_with_errors(
 def _append_frame_errors(errors_handle: TextIO, record: FrameRecord) -> None:
     for error in record.errors:
         errors_handle.write(
-            json.dumps(
-                {
-                    "frame_id": record.frame_id,
-                    "frame_index": record.frame_index,
-                    "code": error.code.value,
-                    "message": error.message,
-                },
-                sort_keys=True,
-            )
+            FrameErrorRecord(
+                frame_id=record.frame_id,
+                frame_index=record.frame_index,
+                code=error.code,
+                message=error.message,
+            ).model_dump_json()
             + "\n"
         )
+
+
+frame_error_writer: FrameErrorWriter = _append_frame_errors
 
 
 def _read_frame_records(path: Path) -> list[FrameRecord]:
@@ -388,6 +407,24 @@ def _read_frame_records(path: Path) -> list[FrameRecord]:
             raise PipelineError(
                 CliErrorCode.SCHEMA_VALIDATION_FAILED,
                 f"Invalid frame record at {path}:{line_number}: {exc}",
+            ) from exc
+    return records
+
+
+def _read_frame_error_records(path: Path) -> list[FrameErrorRecord]:
+    records: list[FrameErrorRecord] = []
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        if not line.strip():
+            continue
+        try:
+            records.append(FrameErrorRecord.model_validate_json(line))
+        except ValueError as exc:
+            raise PipelineError(
+                CliErrorCode.SCHEMA_VALIDATION_FAILED,
+                f"Invalid frame error record at {path}:{line_number}: {exc}",
             ) from exc
     return records
 

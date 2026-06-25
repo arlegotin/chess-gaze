@@ -42,8 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     analyze = subparsers.add_parser("analyze")
     analyze.add_argument("video_path")
-    analyze.add_argument("--output-root", default="artifacts/output")
-    analyze.add_argument("--models-root", default="models")
+    analyze.add_argument("--output-root", default=None)
+    analyze.add_argument("--models-root", default=None)
     analyze.add_argument("--config", default=None)
     return parser
 
@@ -68,8 +68,12 @@ def main(argv: list[str] | None = None) -> int:
         result = analyze_video(
             AnalyzeRequest(
                 video_path=video_path,
-                output_root=Path(args.output_root),
-                models_root=Path(args.models_root),
+                output_root=(
+                    Path(args.output_root) if args.output_root is not None else None
+                ),
+                models_root=(
+                    Path(args.models_root) if args.models_root is not None else None
+                ),
                 config_path=Path(args.config) if args.config is not None else None,
             )
         )

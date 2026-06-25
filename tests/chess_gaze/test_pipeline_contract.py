@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TextIO
 
 import av
 import numpy as np
@@ -227,6 +228,54 @@ def _jsonl(path: Path) -> list[dict[str, object]]:
     ]
 
 
+def _write_model_registry_with_assets(models_root: Path, registry_path: Path) -> None:
+    mediapipe_path = models_root / "mediapipe" / "face_landmarker.task"
+    unigaze_path = models_root / "unigaze" / "unigaze_h14_joint.safetensors"
+    mediapipe_path.parent.mkdir(parents=True)
+    unigaze_path.parent.mkdir(parents=True)
+    mediapipe_path.write_bytes(b"mediapipe")
+    unigaze_path.write_bytes(b"unigaze")
+    registry_path.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "model_id": "mediapipe-face-landmarker",
+                        "task_name": "face_landmarks",
+                        "expected_relative_path": "mediapipe/face_landmarker.task",
+                        "checksum_sha256": None,
+                        "source_url": "https://example.invalid/mediapipe",
+                        "license": "Google AI Edge Terms",
+                        "requires_license_approval": False,
+                        "license_approved": True,
+                        "license_approved_by": "repo_owner",
+                        "license_approved_at": "2026-06-25",
+                        "input_contract": {"running_mode": "IMAGE"},
+                        "output_contract": {"landmarks": "face mesh"},
+                    },
+                    {
+                        "model_id": "unigaze-h14-joint",
+                        "task_name": "gaze_estimation",
+                        "expected_relative_path": (
+                            "unigaze/unigaze_h14_joint.safetensors"
+                        ),
+                        "checksum_sha256": None,
+                        "source_url": "https://example.invalid/unigaze",
+                        "license": "MG-NC-RAI-2.0",
+                        "requires_license_approval": True,
+                        "license_approved": True,
+                        "license_approved_by": "repo_owner",
+                        "license_approved_at": "2026-06-25",
+                        "input_contract": {"input_size_px": 224},
+                        "output_contract": {"order": "pitch_yaw_radians"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     tmp_path: Path,
 ) -> None:
@@ -259,6 +308,57 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     assert (result.layout.run_dir / "video_manifest.json").is_file()
     assert (result.layout.run_dir / "calibration.json").is_file()
     assert not (result.layout.run_dir / "qa_summary.json").exists()
+
+
+def test_config_output_root_controls_run_layout_for_fake_observers(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    configured_output = tmp_path / "configured-output"
+    config_path = tmp_path / "analysis.json"
+    make_tiny_video(video_path, frame_count=1)
+    config_path.write_text(
+        json.dumps({"output_root": str(configured_output)}),
+        encoding="utf-8",
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            config_path=config_path,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert result.layout.run_dir.is_relative_to(configured_output)
+
+
+def test_config_models_root_controls_default_model_asset_gate(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "configured-models"
+    registry_path = tmp_path / "model_registry.json"
+    config_path = tmp_path / "analysis.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+    config_path.write_text(
+        json.dumps({"models_root": str(models_root), "output_root": str(output_root)}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                config_path=config_path,
+                model_registry_path=registry_path,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.PIPELINE_NOT_IMPLEMENTED
+    assert not output_root.exists()
 
 
 def test_no_face_fake_observer_records_face_not_found_and_processed_frames(
@@ -366,3 +466,75 @@ def test_raw_frame_write_failure_records_partial_status_and_error_evidence(
         and "simulated raw write failure" in str(line["message"])
         for line in error_lines
     )
+
+
+def test_processed_frame_write_failure_records_error_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    def fail_first_processed_frame(
+        rgb_frame: np.ndarray,
+        record: FrameRecord,
+        output_path: Path,
+        quality: int,
+    ) -> str:
+        del rgb_frame, record, quality
+        if output_path.name == "f000000000.jpg":
+            raise OSError("simulated processed write failure")
+        output_path.write_bytes(b"jpg")
+        return "digest"
+
+    monkeypatch.setattr(
+        pipeline,
+        "render_processed_frame",
+        fail_first_processed_frame,
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    records = _records_from(result.frames_jsonl_path)
+    assert records[0].status is FrameStatus.ERROR
+    assert ErrorCode.PROCESSED_FRAME_WRITE_FAILED in {
+        error.code for error in records[0].errors
+    }
+    error_lines = _jsonl(result.errors_jsonl_path)
+    assert any(
+        line["frame_id"] == "f000000000"
+        and line["code"] == ErrorCode.PROCESSED_FRAME_WRITE_FAILED.value
+        and "simulated processed write failure" in str(line["message"])
+        for line in error_lines
+    )
+
+
+def test_malformed_errors_jsonl_fails_artifact_revalidation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=1)
+
+    from chess_gaze import pipeline
+
+    real_frame_error_writer = pipeline.frame_error_writer
+
+    def append_malformed_error_json(errors_handle: TextIO, record: FrameRecord) -> None:
+        real_frame_error_writer(errors_handle, record)
+        errors_handle.write("{malformed-json\n")
+
+    monkeypatch.setattr(pipeline, "frame_error_writer", append_malformed_error_json)
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            observers=ObserverBundle(
+                frame_observer=lambda frame: _fake_record(frame, face_present=False)
+            ),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
