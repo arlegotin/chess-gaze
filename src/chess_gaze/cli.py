@@ -8,6 +8,14 @@ INPUT_NOT_FOUND_EXIT = 10
 USAGE_EXIT = 2
 
 
+def system_exit_code(exc: SystemExit) -> int:
+    if isinstance(exc.code, int):
+        return exc.code
+    if exc.code is None:
+        return 0
+    return USAGE_EXIT
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chess-gaze")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -24,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return int(exc.code)
+        return system_exit_code(exc)
 
     if args.command != "analyze":
         parser.print_usage(sys.stderr)

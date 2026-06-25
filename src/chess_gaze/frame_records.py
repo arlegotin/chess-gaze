@@ -14,9 +14,7 @@ class GazeAngles(StrictSchemaModel):
 
     @model_validator(mode="after")
     def validate_complete_angles(self) -> GazeAngles:
-        if self.valid and (
-            self.yaw_radians is None or self.pitch_radians is None
-        ):
+        if self.valid and (self.yaw_radians is None or self.pitch_radians is None):
             raise ValueError("valid gaze requires both yaw and pitch")
         return self
 
