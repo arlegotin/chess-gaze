@@ -307,7 +307,7 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     assert (result.layout.run_dir / "run_manifest.json").is_file()
     assert (result.layout.run_dir / "video_manifest.json").is_file()
     assert (result.layout.run_dir / "calibration.json").is_file()
-    assert not (result.layout.run_dir / "qa_summary.json").exists()
+    assert result.qa_summary_path.is_file()
 
 
 def test_config_output_root_controls_run_layout_for_fake_observers(

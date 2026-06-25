@@ -28,6 +28,7 @@ from chess_gaze.model_assets import (
     load_model_registry,
     validate_required_assets,
 )
+from chess_gaze.qa_summary import ArtifactValidationError, build_qa_summary
 from chess_gaze.video_decode import (
     DecodedFrame,
     VideoDecodeError,
@@ -89,6 +90,7 @@ class AnalyzeResult:
     video_manifest_path: Path
     frames_jsonl_path: Path
     errors_jsonl_path: Path
+    qa_summary_path: Path
     decoded_frame_count: int
     validated_record_count: int
     validated_error_count: int
@@ -143,6 +145,7 @@ def analyze_video(
     video_manifest_path = layout.run_dir / "video_manifest.json"
     frames_jsonl_path = layout.records_dir / "frames.jsonl"
     errors_jsonl_path = layout.records_dir / "errors.jsonl"
+    qa_summary_path = layout.run_dir / "qa_summary.json"
 
     _write_json(
         run_manifest_path,
@@ -197,7 +200,12 @@ def analyze_video(
             ),
         )
 
-    # Task 13 owns qa_summary.json; Task 12 intentionally leaves this seam empty.
+    try:
+        qa_summary = build_qa_summary(layout)
+    except ArtifactValidationError as exc:
+        raise PipelineError(exc.code, str(exc)) from exc
+    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
+
     return AnalyzeResult(
         layout=layout,
         run_manifest_path=run_manifest_path,
@@ -205,6 +213,7 @@ def analyze_video(
         video_manifest_path=video_manifest_path,
         frames_jsonl_path=frames_jsonl_path,
         errors_jsonl_path=errors_jsonl_path,
+        qa_summary_path=qa_summary_path,
         decoded_frame_count=decoded_frame_count,
         validated_record_count=len(validated_records),
         validated_error_count=len(validated_errors),
