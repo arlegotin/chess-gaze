@@ -174,3 +174,103 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src
 - `src/chess_gaze/scene_records.py`
 - `tests/chess_gaze/test_scene_records.py`
 - `.superpowers/sdd/task-1-report-3d-scene.md`
+
+## Review Fixes Round 3
+
+### What changed
+
+- Made `source_frame_status` strict against the repo’s `FrameStatus` enum while preserving valid persisted values like `"OK"`.
+- Enforced semantic coordinate-frame validation for camera-space and scene-space vectors across the scene record models, monitor plane, manifest scene center, and viewer hit points.
+- Changed `SceneMonitorHitRecord` to persist only `plane_uv_m` in by-alias JSON output while still accepting compatibility input via `u_m`/`v_m` and exposing Python accessors for those values.
+
+### RED evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `3 failed, 23 passed in 0.10s`
+- Failures matched the remaining review findings:
+  - invalid `source_frame_status` was accepted;
+  - semantic coordinate-space mismatches were accepted;
+  - `SceneMonitorHitRecord.model_dump(by_alias=True)` still emitted `u_m` and `v_m`.
+
+### GREEN evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `26 passed in 0.07s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src/chess_gaze/scene_records.py tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py
+```
+
+- `All checks passed!`
+
+### Files changed
+
+- `src/chess_gaze/scene_records.py`
+- `tests/chess_gaze/test_scene_records.py`
+- `.superpowers/sdd/task-1-report-3d-scene.md`
+
+## Review Fixes Round 3
+
+### What changed
+
+- Made `SceneFrameRecord.source_frame_status` strict by using the repo’s exact `FrameStatus` enum values, while preserving persisted `"OK"`/`"WARNING"`/`"ERROR"` output.
+- Added semantic coordinate-frame validation for camera-space and scene-space vectors across scene records, manifest scene center, monitor plane normals/basis vectors, and viewer hit points.
+- Changed `SceneMonitorHitRecord` to persist only `plane_uv_m` in by-alias output, while still accepting compatibility input via `u_m`/`v_m` and exposing Python accessors for later code.
+
+### RED evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `3 failed, 23 passed in 0.10s`
+- Failures matched the remaining review findings:
+  - invalid `source_frame_status` was accepted;
+  - semantic coordinate-space mismatches were accepted;
+  - `SceneMonitorHitRecord.model_dump(by_alias=True)` still emitted `u_m`/`v_m`.
+
+### GREEN evidence
+
+Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py -q
+```
+
+Summary:
+
+- `26 passed in 0.07s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_calibration.py src/chess_gaze/scene_records.py tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_scene_records.py
+```
+
+- `All checks passed!`
+
+### Files changed
+
+- `src/chess_gaze/scene_records.py`
+- `tests/chess_gaze/test_scene_records.py`
+- `.superpowers/sdd/task-1-report-3d-scene.md`

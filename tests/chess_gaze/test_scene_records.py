@@ -340,6 +340,97 @@ def test_scene_enums_reject_unknown_strings() -> None:
         )
 
 
+def test_scene_frame_record_rejects_unknown_source_frame_status() -> None:
+    with pytest.raises(ValidationError):
+        SceneFrameRecord.model_validate(
+            {
+                **_scene_frame_payload(),
+                "source_frame_status": "NOT_A_REAL_STATUS",
+            }
+        )
+
+
+def test_scene_records_enforce_semantic_coordinate_frames() -> None:
+    with pytest.raises(ValidationError):
+        SceneEyeRecord.model_validate(
+            {
+                **_eye_payload(),
+                "camera_point_m": _vector_payload(space="scene_pseudo_m"),
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SceneEyeRecord.model_validate(
+            {
+                **_eye_payload(),
+                "scene_point_m": _vector_payload(space="camera_opencv_pseudo_m"),
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SceneUniGazeRayRecord.model_validate(
+            {
+                **_ray_payload(),
+                "direction_scene": _unit_vector_payload(
+                    space="camera_opencv_pseudo_m"
+                ),
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(
+            {
+                **_manifest_payload(),
+                "main_monitor_plane": {
+                    **_monitor_plane_payload(),
+                    "normal_camera": _unit_vector_payload(space="scene_pseudo_m"),
+                },
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        ViewerSceneData.model_validate(
+            {
+                "run_id": "run-123",
+                "source_video_stem": "nakamura_1",
+                "frame_count": 1,
+                "frames": [_scene_frame_payload()],
+                "valid_hit_points": [
+                    {
+                        "frame_id": "frame-0001",
+                        "frame_index": 1,
+                        "point_scene_m": _vector_payload(
+                            x=0.2,
+                            y=0.1,
+                            z=0.3,
+                            space="camera_opencv_pseudo_m",
+                        ),
+                        "u_m": 0.2,
+                        "v_m": 0.1,
+                        "within_physical_monitor": True,
+                        "within_extended_plane": True,
+                    }
+                ],
+                "monitor_plane": _monitor_plane_payload(),
+                "axis_basis": _axis_basis_payload(),
+                "assumptions": [
+                    record.model_dump()
+                    for record in default_scene_assumptions().records
+                ],
+                "summary": {
+                    **_summary_payload(),
+                    "decoded_frames": 1,
+                    "scene_frame_records": 1,
+                    "valid_eye_midpoint_frames": 1,
+                    "valid_unigaze_ray_frames": 1,
+                    "valid_monitor_hit_frames": 1,
+                    "invalid_monitor_hit_reasons": {},
+                    "representative_scene_warning_frame_ids": [],
+                },
+            }
+        )
+
+
 def test_scene_axis_basis_rejects_parallel_back_and_negative_determinant() -> None:
     with pytest.raises(ValidationError):
         SceneAxisBasisRecord.model_validate(
@@ -504,6 +595,15 @@ def test_valid_monitor_hit_requires_valid_ray_and_finite_forward_intersection() 
 
     with pytest.raises(ValidationError):
         SceneFrameRecord.model_validate(invalid_frame_payload)
+
+
+def test_scene_monitor_hit_serializes_only_plane_uv_m() -> None:
+    hit = SceneMonitorHitRecord.model_validate(_hit_payload())
+    payload = hit.model_dump(by_alias=True)
+
+    assert payload["plane_uv_m"] == (0.2, 0.1)
+    assert "u_m" not in payload
+    assert "v_m" not in payload
 
 
 def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
