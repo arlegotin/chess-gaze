@@ -123,7 +123,7 @@ def _median_measurement(
             usage=usage,
         )
     return DerivedConstantRecord(
-        value=median(values),
+        value=_measurement_summary(values),
         unit="image_px",
         coordinate_space="image_px",
         derivation_method=derivation_method,
@@ -131,6 +131,28 @@ def _median_measurement(
         uncertainty=uncertainty,
         usage=usage,
     )
+
+
+def _percentile(values: Sequence[float], percentile: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+
+    rank = (len(ordered) - 1) * percentile
+    lower_index = int(rank)
+    upper_index = min(lower_index + 1, len(ordered) - 1)
+    fraction = rank - lower_index
+    lower_value = ordered[lower_index]
+    upper_value = ordered[upper_index]
+    return lower_value + ((upper_value - lower_value) * fraction)
+
+
+def _measurement_summary(values: Sequence[float]) -> dict[str, float]:
+    return {
+        "median": median(values),
+        "p05": _percentile(values, 0.05),
+        "p95": _percentile(values, 0.95),
+    }
 
 
 def _iris_diameter(eye: EyeRecord) -> float | None:
@@ -206,9 +228,9 @@ def derive_setup_constants(records: Iterable[FrameRecord]) -> DerivedSetupConsta
     if face_areas:
         selected_face_bbox_size_image_px = DerivedConstantRecord(
             value={
-                "median_width_px": median(face_widths),
-                "median_height_px": median(face_heights),
-                "median_area_px2": median(face_areas),
+                "width_px": _measurement_summary(face_widths),
+                "height_px": _measurement_summary(face_heights),
+                "area_px2": _measurement_summary(face_areas),
             },
             unit="image_px",
             coordinate_space="image_px",

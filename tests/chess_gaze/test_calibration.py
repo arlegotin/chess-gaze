@@ -66,39 +66,84 @@ def _frame_record_payload(frame_id: str) -> dict[str, Any]:
     }
 
 
-def _observed_frame_record(frame_id: str) -> FrameRecord:
+def _observed_frame_record(
+    frame_id: str,
+    *,
+    face_x_min: float = 100.0,
+    face_y_min: float = 50.0,
+    face_width: float = 80.0,
+    face_height: float = 120.0,
+    left_pupil_x: float = 125.0,
+    left_pupil_y: float = 100.0,
+    right_pupil_x: float = 155.0,
+    right_pupil_y: float = 100.0,
+    left_iris_diameter: float = 10.0,
+    right_iris_diameter: float = 10.0,
+) -> FrameRecord:
     face_box = BBox(
         space=CoordinateSpace.IMAGE_PX,
-        x_min=100.0,
-        y_min=50.0,
-        x_max=180.0,
-        y_max=170.0,
+        x_min=face_x_min,
+        y_min=face_y_min,
+        x_max=face_x_min + face_width,
+        y_max=face_y_min + face_height,
     )
     left_eye_box = BBox(
         space=CoordinateSpace.IMAGE_PX,
-        x_min=115.0,
-        y_min=90.0,
-        x_max=140.0,
-        y_max=115.0,
+        x_min=left_pupil_x - 10.0,
+        y_min=left_pupil_y - 10.0,
+        x_max=left_pupil_x + 15.0,
+        y_max=left_pupil_y + 15.0,
     )
     right_eye_box = BBox(
         space=CoordinateSpace.IMAGE_PX,
-        x_min=145.0,
-        y_min=90.0,
-        x_max=170.0,
-        y_max=115.0,
+        x_min=right_pupil_x - 10.0,
+        y_min=right_pupil_y - 10.0,
+        x_max=right_pupil_x + 15.0,
+        y_max=right_pupil_y + 15.0,
     )
     iris_landmarks_left = [
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=120.0, y=100.0),
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=130.0, y=100.0),
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=125.0, y=95.0),
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=125.0, y=105.0),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=left_pupil_x - (left_iris_diameter / 2.0),
+            y=left_pupil_y,
+        ),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=left_pupil_x + (left_iris_diameter / 2.0),
+            y=left_pupil_y,
+        ),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=left_pupil_x,
+            y=left_pupil_y - (left_iris_diameter / 2.0),
+        ),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=left_pupil_x,
+            y=left_pupil_y + (left_iris_diameter / 2.0),
+        ),
     ]
     iris_landmarks_right = [
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=150.0, y=100.0),
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=160.0, y=100.0),
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=155.0, y=95.0),
-        Point2D(space=CoordinateSpace.IMAGE_PX, x=155.0, y=105.0),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=right_pupil_x - (right_iris_diameter / 2.0),
+            y=right_pupil_y,
+        ),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=right_pupil_x + (right_iris_diameter / 2.0),
+            y=right_pupil_y,
+        ),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=right_pupil_x,
+            y=right_pupil_y - (right_iris_diameter / 2.0),
+        ),
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=right_pupil_x,
+            y=right_pupil_y + (right_iris_diameter / 2.0),
+        ),
     ]
 
     payload = _frame_record_payload(frame_id)
@@ -107,9 +152,21 @@ def _observed_frame_record(frame_id: str) -> FrameRecord:
         "present": True,
         "bounding_box": face_box.model_dump(),
         "landmarks": [
-            Point2D(space=CoordinateSpace.IMAGE_PX, x=110.0, y=70.0).model_dump(),
-            Point2D(space=CoordinateSpace.IMAGE_PX, x=170.0, y=70.0).model_dump(),
-            Point2D(space=CoordinateSpace.IMAGE_PX, x=140.0, y=155.0).model_dump(),
+            Point2D(
+                space=CoordinateSpace.IMAGE_PX,
+                x=face_x_min + 10.0,
+                y=face_y_min + 20.0,
+            ).model_dump(),
+            Point2D(
+                space=CoordinateSpace.IMAGE_PX,
+                x=face_x_min + face_width - 10.0,
+                y=face_y_min + 20.0,
+            ).model_dump(),
+            Point2D(
+                space=CoordinateSpace.IMAGE_PX,
+                x=face_x_min + (face_width / 2.0),
+                y=face_y_min + face_height - 15.0,
+            ).model_dump(),
         ],
         "reason_invalid": None,
     }
@@ -118,8 +175,8 @@ def _observed_frame_record(frame_id: str) -> FrameRecord:
         "bounding_box": left_eye_box.model_dump(),
         "pupil_center": Point2D(
             space=CoordinateSpace.IMAGE_PX,
-            x=125.0,
-            y=100.0,
+            x=left_pupil_x,
+            y=left_pupil_y,
         ).model_dump(),
         "iris_landmarks": [point.model_dump() for point in iris_landmarks_left],
         "reason_invalid": None,
@@ -129,8 +186,8 @@ def _observed_frame_record(frame_id: str) -> FrameRecord:
         "bounding_box": right_eye_box.model_dump(),
         "pupil_center": Point2D(
             space=CoordinateSpace.IMAGE_PX,
-            x=155.0,
-            y=100.0,
+            x=right_pupil_x,
+            y=right_pupil_y,
         ).model_dump(),
         "iris_landmarks": [point.model_dump() for point in iris_landmarks_right],
         "reason_invalid": None,
@@ -193,12 +250,46 @@ def test_derive_setup_constants_does_not_rewrite_frame_fields() -> None:
 def test_derive_setup_constants_returns_provenance_records() -> None:
     from chess_gaze.calibration import derive_setup_constants
 
-    derived = derive_setup_constants([_observed_frame_record("f000000003")])
+    records = [
+        _observed_frame_record(
+            "f000000003",
+            face_width=80.0,
+            face_height=120.0,
+            left_pupil_x=125.0,
+            right_pupil_x=155.0,
+            left_iris_diameter=10.0,
+            right_iris_diameter=14.0,
+        ),
+        _observed_frame_record(
+            "f000000004",
+            face_x_min=110.0,
+            face_y_min=60.0,
+            face_width=100.0,
+            face_height=140.0,
+            left_pupil_x=130.0,
+            right_pupil_x=166.0,
+            left_iris_diameter=12.0,
+            right_iris_diameter=16.0,
+        ),
+        _observed_frame_record(
+            "f000000005",
+            face_x_min=90.0,
+            face_y_min=40.0,
+            face_width=120.0,
+            face_height=160.0,
+            left_pupil_x=120.0,
+            right_pupil_x=162.0,
+            left_iris_diameter=18.0,
+            right_iris_diameter=20.0,
+        ),
+    ]
+
+    derived = derive_setup_constants(records)
 
     assert derived.selected_face_bbox_size_image_px.value == {
-        "median_width_px": 80.0,
-        "median_height_px": 120.0,
-        "median_area_px2": 9600.0,
+        "width_px": {"median": 100.0, "p05": 82.0, "p95": 118.0},
+        "height_px": {"median": 140.0, "p05": 122.0, "p95": 158.0},
+        "area_px2": {"median": 14000.0, "p05": 10040.0, "p95": 18680.0},
     }
     assert derived.selected_face_bbox_size_image_px.unit == "image_px"
     assert derived.selected_face_bbox_size_image_px.coordinate_space == "image_px"
@@ -207,11 +298,15 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
         == "median selected-face bounding box width, height, and area from "
         "face.bounding_box where face.present is true"
     )
-    assert derived.selected_face_bbox_size_image_px.contributing_frame_count == 1
+    assert derived.selected_face_bbox_size_image_px.contributing_frame_count == 3
     assert derived.selected_face_bbox_size_image_px.uncertainty == "low"
     assert derived.selected_face_bbox_size_image_px.usage == "measurement"
 
-    assert derived.inter_pupil_distance_image_px.value == 30.0
+    assert derived.inter_pupil_distance_image_px.value == {
+        "median": 36.0,
+        "p05": 30.6,
+        "p95": 41.4,
+    }
     assert derived.inter_pupil_distance_image_px.unit == "image_px"
     assert derived.inter_pupil_distance_image_px.coordinate_space == "image_px"
     assert (
@@ -219,27 +314,35 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
         == "median Euclidean distance between left and right pupil centers "
         "when both eyes are present"
     )
-    assert derived.inter_pupil_distance_image_px.contributing_frame_count == 1
+    assert derived.inter_pupil_distance_image_px.contributing_frame_count == 3
     assert derived.inter_pupil_distance_image_px.uncertainty == "low"
     assert derived.inter_pupil_distance_image_px.usage == "measurement"
 
-    assert derived.left_iris_diameter_image_px.value == 10.0
+    assert derived.left_iris_diameter_image_px.value == {
+        "median": 12.0,
+        "p05": 10.2,
+        "p95": 17.4,
+    }
     assert derived.left_iris_diameter_image_px.unit == "image_px"
     assert derived.left_iris_diameter_image_px.coordinate_space == "image_px"
     assert (
         derived.left_iris_diameter_image_px.derivation_method
         == "median maximum pairwise iris landmark distance per frame for the left eye"
     )
-    assert derived.left_iris_diameter_image_px.contributing_frame_count == 1
+    assert derived.left_iris_diameter_image_px.contributing_frame_count == 3
     assert derived.left_iris_diameter_image_px.uncertainty == "medium"
     assert derived.left_iris_diameter_image_px.usage == "measurement"
 
-    assert derived.right_iris_diameter_image_px.value == 10.0
+    assert derived.right_iris_diameter_image_px.value == {
+        "median": 16.0,
+        "p05": 14.2,
+        "p95": 19.6,
+    }
     assert derived.facecam_roi_image_px.value == {
-        "x_min": 100.0,
-        "y_min": 50.0,
-        "x_max": 180.0,
-        "y_max": 170.0,
+        "x_min": 90.0,
+        "y_min": 40.0,
+        "x_max": 210.0,
+        "y_max": 200.0,
     }
     assert derived.facecam_roi_image_px.unit == "image_px"
     assert derived.facecam_roi_image_px.coordinate_space == "image_px"
@@ -248,7 +351,7 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
         == "bounding box union over observed selected-face boxes; derived ROI "
         "for QA only"
     )
-    assert derived.facecam_roi_image_px.contributing_frame_count == 1
+    assert derived.facecam_roi_image_px.contributing_frame_count == 3
     assert derived.facecam_roi_image_px.uncertainty == "medium"
     assert derived.facecam_roi_image_px.usage == "qa_only"
 
