@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from chess_gaze.frame_records import FrameRecord
@@ -386,6 +387,23 @@ def test_derive_setup_constants_returns_provenance_records() -> None:
     assert derived.estimated_camera_intrinsics_policy.contributing_frame_count == 0
     assert derived.estimated_camera_intrinsics_policy.uncertainty == "high"
     assert derived.estimated_camera_intrinsics_policy.usage == "future_use"
+
+
+def test_percentile_policy_text_is_derived_from_named_constants() -> None:
+    from chess_gaze import calibration
+
+    source = inspect.getsource(calibration)
+
+    assert calibration.PERCENTILE_POLICY_DESCRIPTION == (
+        f"percentile policy lower={calibration.derived_percentile_lower} "
+        f"upper={calibration.derived_percentile_upper} using linear interpolation"
+    )
+    assert (
+        "percentile policy lower=0.05 upper=0.95 using linear interpolation"
+        not in source
+    )
+    assert "derived_percentile_lower" in source
+    assert "derived_percentile_upper" in source
 
 
 def test_derive_setup_constants_returns_null_provenance_without_evidence() -> None:

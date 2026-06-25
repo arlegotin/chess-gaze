@@ -42,7 +42,8 @@ PNP_LANDMARK_INDICES = PnPLandmarkIndices(
 )
 
 PERCENTILE_POLICY_DESCRIPTION = (
-    "percentile policy lower=0.05 upper=0.95 using linear interpolation"
+    f"percentile policy lower={derived_percentile_lower} "
+    f"upper={derived_percentile_upper} using linear interpolation"
 )
 FACE_BBOX_DERIVATION_METHOD = (
     "median plus p05/p95 percentile range of selected-face bounding box width, "
