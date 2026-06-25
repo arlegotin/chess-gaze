@@ -4,8 +4,9 @@ Local Python pipeline for per-frame video evidence used by chess gaze analysis.
 
 The implemented pipeline decodes video, writes strict run artifacts, preserves raw
 and processed frame evidence, and revalidates artifacts into `qa_summary.json`.
-The default real-model CLI path is still blocked until local model assets are
-installed and the real face/eye/head/gaze observers are completed.
+The default CLI path validates local model checksums, runs MediaPipe face
+landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
+checkpoint, and records strict per-frame gaze outputs.
 
 ## Setup
 
@@ -52,7 +53,7 @@ Runs are written under:
 artifacts/output/<video-stem>/runs/<run-id>/
 ```
 
-Each completed model-free test run contains:
+Each completed run contains:
 
 - `run_manifest.json`
 - `calibration.json`
@@ -81,8 +82,14 @@ Real-model smoke requires these local files with registry-approved metadata:
 
 ```text
 models/mediapipe/face_landmarker.task
+  sha256: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
 models/unigaze/unigaze_h14_joint.safetensors
+  sha256: a336e7234738e9a9517fc6af7a9bc69cee16958388ad648d48c0f6b0df42ac8f
 ```
+
+In the managed agent sandbox, MediaPipe's native macOS GL/Metal initialization
+fails. Run real-model gates and `chess-gaze analyze` unsandboxed with local
+assets.
 
 ## Repository Shape
 

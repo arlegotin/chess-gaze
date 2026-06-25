@@ -12,18 +12,19 @@ QA artifacts without temporal smoothing.
 
 ## Spec And Plan Status
 
-The active spec and plan were followed for the implemented, model-free pipeline
-surface. Tasks 1-6 and 11-13 were implemented, committed, reviewed, and verified.
-Task 7's pure face-candidate selection and lazy MediaPipe adapter surface were
-committed and reviewed, but its real MediaPipe verification remains blocked.
-Tasks 8-10 remain blocked and are not claimed complete because the required
-local MediaPipe and UniGaze assets are absent, so real face/eye/head/gaze
-observer verification cannot run.
+The active spec and plan were followed for the implemented pipeline surface.
+Tasks 1-13 are implemented and verified, including the previously blocked
+real-model Tasks 7-10. The default `chess-gaze analyze` path now validates
+local model assets, builds the real observer bundle, runs MediaPipe face
+landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
+checkpoint, writes processed overlays, and revalidates artifacts.
 
-The default CLI real-model path validates local model assets and currently stops
-with `PIPELINE_NOT_IMPLEMENTED` after that gate. The testable observer-injection
-pipeline path is covered by synthetic and mandatory real-video model-free
-contracts.
+The full default CLI run over both mandatory verification videos was not run in
+this closeout because the default pipeline intentionally processes every frame
+and the local videos contain 3,613 and 1,973 frames. A bounded real-model
+entrypoint smoke used a one-frame lossless clip from `test_1.mp4` and verified
+the full default observer path on a frame with face, both eyes, head pose,
+UniGaze appearance gaze, recommended gaze, eye crops, and QA summary.
 
 ## Task Summary
 
@@ -35,12 +36,18 @@ contracts.
 - Added PyAV video inspection and deterministic frame decoding.
 - Added calibration defaults with provenance and percentile policy.
 - Added face-candidate selection and a lazy MediaPipe adapter surface; real
-  MediaPipe verification is blocked by the missing `.task` asset.
+  MediaPipe verification now passes with the committed local asset checksum.
+- Added eye and iris observation with independent left/right crop evidence.
+- Added head-pose estimation preserving MediaPipe transform evidence and OpenCV
+  PnP output.
+- Added UniGaze local checkpoint loading with offline Hugging Face boundaries,
+  model-level appearance gaze, geometric per-eye gaze, and recommended-gaze
+  synthesis.
 - Added processed-frame visualization for face, eye, iris, gaze, head-pose,
   status, timestamp, and error overlays.
 - Added `analyze_video()` orchestration with strict run layout, raw frames,
-  processed frames, `frames.jsonl`, `errors.jsonl`, and model-free observer
-  injection for tests.
+  processed frames, `frames.jsonl`, `errors.jsonl`, model-free observer
+  injection for tests, and the default model-backed observer bundle.
 - Added QA summary revalidation from disk, including count checks, schema
   failure evidence, deterministic samples, representative failures, byte counts,
   status transitions, and final status.
@@ -60,12 +67,19 @@ entry records Google AI Edge Terms and `IMAGE` running mode.
 OpenCV dependency resolution is guarded so only `opencv-python-headless` is
 installed.
 
-Missing required real-model assets:
+Required real-model assets are present locally under ignored `models/` and have
+committed registry checksums:
 
 ```text
-/Volumes/git/legotin/chess-gaze/models/mediapipe/face_landmarker.task
-/Volumes/git/legotin/chess-gaze/models/unigaze/unigaze_h14_joint.safetensors
+models/mediapipe/face_landmarker.task
+  sha256: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
+models/unigaze/unigaze_h14_joint.safetensors
+  sha256: a336e7234738e9a9517fc6af7a9bc69cee16958388ad648d48c0f6b0df42ac8f
 ```
+
+MediaPipe real tests and default real analysis require unsandboxed execution in
+the managed macOS agent environment. Inside the sandbox, MediaPipe native
+initialization aborts at GL/Metal graph services; unsandboxed runs pass.
 
 ## TDD And Review Evidence
 
@@ -73,48 +87,46 @@ Each task was implemented test-first where behavior changed. Representative
 evidence:
 
 ```text
-Task 13 RED:
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_qa_summary.py -q
-ModuleNotFoundError: No module named 'chess_gaze.qa_summary'
+Task 10 RED:
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_gaze_observation.py -q
+ModuleNotFoundError: No module named 'chess_gaze.gaze_observation'
 ```
 
 ```text
-Task 13 post-review focused gate:
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_video_decode.py tests/chess_gaze/test_qa_summary.py tests/chess_gaze/test_pipeline_contract.py -q
-18 passed in 0.47s
+Default real observer RED:
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_pipeline_contract.py::test_config_models_root_controls_default_model_observer_factory -q
+ModuleNotFoundError: No module named 'chess_gaze.frame_observation'
 ```
 
-Subagent reviews were run after major task commits. Task 13 required two review
-fixes: the QA summary now uses independent decoded-frame evidence from
-`video_manifest.json`, and malformed JSONL including invalid UTF-8 leaves failed
-QA summary evidence instead of escaping before persistence.
+Task 8 and Task 9 were implemented by subagents and integrated after local
+verification. Task 10 and the default real observer boundary were implemented
+test-first in the main session.
 
 ## Full Gate Outputs
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run pytest -q
-92 passed, 1 skipped in 1707.40s (0:28:27)
-```
-
-The skip is the expected blocked real MediaPipe asset test:
-
-```text
-SKIPPED [1] tests/chess_gaze/test_face_observation_real_video.py:41: BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: /Volumes/git/legotin/chess-gaze/models/mediapipe/face_landmarker.task
+116 passed, 18 warnings in 1649.66s (0:27:29)
 ```
 
 ```text
-UV_CACHE_DIR=.uv-cache uv run ruff check .
+UV_CACHE_DIR=.uv-cache uv run ruff check src tests
 All checks passed!
 ```
 
 ```text
-UV_CACHE_DIR=.uv-cache uv run ruff format --check .
-33 files already formatted
+UV_CACHE_DIR=.uv-cache uv run ruff format --check src tests
+44 files already formatted
 ```
 
 ```text
-UV_CACHE_DIR=.uv-cache uv run mypy
-Success: no issues found in 33 source files
+UV_CACHE_DIR=.uv-cache uv run mypy src tests
+Success: no issues found in 44 source files
+```
+
+```text
+UV_CACHE_DIR=.uv-cache uv lock --check
+Resolved 86 packages in 0.42ms
 ```
 
 ```text
@@ -131,40 +143,43 @@ The mandatory verification videos are present:
 /Volumes/git/legotin/chess-gaze/artifacts/input/test_2.mp4
 ```
 
-Model-free real-video contract tests passed before the final UTF-8 review fix
-and were re-covered by the final full pytest gate:
+Real-video observer gates now pass with real local assets:
 
 ```text
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py tests/chess_gaze/test_qa_summary_real_video_contract.py -q
-4 passed in 976.18s
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_real_video.py tests/chess_gaze/test_eye_observation_real_video.py tests/chess_gaze/test_head_pose_real_video.py tests/chess_gaze/test_gaze_observation_real_video.py -q
+4 passed, 18 warnings in 26.68s
 ```
 
-Full real-model smoke is blocked because the two required model files listed
-above are absent. The next unblock action is to place the approved local model
-assets under `models/`, record checksums in `src/chess_gaze/model_registry.json`,
-then implement and verify Tasks 8-10 before rerunning:
+The default real CLI path was smoke-tested through the actual entrypoint on a
+one-frame lossless clip extracted from `artifacts/input/test_1.mp4` at the
+sampled frame-300 timestamp:
 
-```sh
-UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/test_1.mp4
-UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/test_2.mp4
+```text
+UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze /private/tmp/chess_gaze_test1_frame300_lossless.mp4 --output-root /private/tmp/chess-gaze-smoke-output --models-root models
+/private/tmp/chess-gaze-smoke-output/chess_gaze_test1_frame300_lossless/runs/20260625T165520Z-f4966cb9
 ```
 
-No real-model manual QA is claimed.
+The generated record had `status=OK`, face present, left and right eyes present,
+head pose valid, geometric gaze valid, UniGaze appearance gaze valid,
+recommended gaze valid, no errors, two eye crops, and QA summary `final_status`
+`complete`.
 
 ## Manual QA Sample Notes
 
 QA summaries now provide deterministic sample IDs, worst blur/exposure frame
-IDs, and representative failure frame IDs for model-free real-video runs. Manual
-inspection of model-backed overlays remains blocked until real observers and
-local model assets are available.
+IDs, representative failure frame IDs, byte counts, and detection rates for both
+model-free and model-backed runs. The bounded real-model smoke wrote a processed
+overlay and both eye crops for manual inspection.
 
 ## Remaining Limitations
 
-- Tasks 8-10 are not complete.
-- Default `chess-gaze analyze` cannot complete real-model analysis yet.
-- Model registry production checksums are still unset because the local model
-  files are absent.
-- MediaPipe and UniGaze quality, fidelity, and real-video smoke claims remain
-  unverified.
+- Full default `chess-gaze analyze` over `artifacts/input/test_1.mp4` and
+  `artifacts/input/test_2.mp4` was not run because the videos contain 5,586
+  total frames and the default pipeline runs UniGaze H14 on every selected-face
+  frame on CPU.
+- Board target mapping is still absent from the current schema, so recommended
+  gaze target fields remain null.
+- MediaPipe/OpenCV/PyAV runs emit non-fatal duplicate AVFoundation class
+  warnings from packaged native libraries.
 - Disk-space preflight is a free-space availability check; QA closeout records
   completed run size as the estimate field.

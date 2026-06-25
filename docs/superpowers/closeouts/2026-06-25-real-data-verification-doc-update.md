@@ -2,6 +2,11 @@
 
 Date: 2026-06-25
 
+Supersession note: this closeout is historical. Later on 2026-06-25, the
+MediaPipe and UniGaze assets were downloaded, checksummed, and verified; see
+`docs/superpowers/closeouts/2026-06-25-frame-gaze-analysis-pipeline.md` for the
+current implementation and remaining limitations.
+
 ## Request Summary
 
 Update the active frame-gaze spec and plan so `artifacts/input/test_1.mp4` and

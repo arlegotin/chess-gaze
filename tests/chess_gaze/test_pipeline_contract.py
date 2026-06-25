@@ -342,8 +342,8 @@ def test_config_output_root_controls_run_layout_for_fake_observers(
     assert result.layout.run_dir.is_relative_to(configured_output)
 
 
-def test_config_models_root_controls_default_model_asset_gate(
-    tmp_path: Path,
+def test_config_models_root_controls_default_model_observer_factory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     video_path = tmp_path / "tiny.mp4"
     output_root = tmp_path / "output"
@@ -356,18 +356,39 @@ def test_config_models_root_controls_default_model_asset_gate(
         json.dumps({"models_root": str(models_root), "output_root": str(output_root)}),
         encoding="utf-8",
     )
+    captured_asset_paths: list[Path] = []
 
-    with pytest.raises(PipelineError) as exc_info:
-        analyze_video(
-            AnalyzeRequest(
-                video_path=video_path,
-                config_path=config_path,
-                model_registry_path=registry_path,
-            )
+    from chess_gaze import pipeline
+
+    def fake_default_observer_bundle_factory(
+        resolved_assets: list[Any],
+        calibration: object,
+        run_layout: object,
+    ) -> ObserverBundle:
+        del calibration, run_layout
+        captured_asset_paths.extend(asset.resolved_path for asset in resolved_assets)
+        return ObserverBundle(frame_observer=_fake_record)
+
+    monkeypatch.setattr(
+        pipeline,
+        "default_observer_bundle_factory",
+        fake_default_observer_bundle_factory,
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            config_path=config_path,
+            model_registry_path=registry_path,
         )
+    )
 
-    assert exc_info.value.code is CliErrorCode.PIPELINE_NOT_IMPLEMENTED
-    assert not output_root.exists()
+    assert result.decoded_frame_count == 1
+    assert sorted(path.relative_to(models_root) for path in captured_asset_paths) == [
+        Path("mediapipe/face_landmarker.task"),
+        Path("unigaze/unigaze_h14_joint.safetensors"),
+    ]
+    assert result.layout.run_dir.is_relative_to(output_root)
 
 
 def test_no_face_fake_observer_records_face_not_found_and_processed_frames(

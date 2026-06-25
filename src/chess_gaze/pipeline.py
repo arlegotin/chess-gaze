@@ -16,6 +16,7 @@ from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import ConfigurationError, load_config
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
+    CalibrationRecord,
     ErrorRecord,
     FrameErrorRecord,
     FrameRecord,
@@ -43,6 +44,9 @@ QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
 RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
+DefaultObserverBundleFactory = Callable[
+    [list[ResolvedModelAsset], CalibrationRecord, RunLayout], "ObserverBundle"
+]
 
 
 class FrameRecordObserver(Protocol):
@@ -70,6 +74,7 @@ class ObserverFrame:
 @dataclass(frozen=True)
 class ObserverBundle:
     frame_observer: FrameRecordObserver
+    close: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -125,16 +130,16 @@ def analyze_video(
     except VideoDecodeError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
 
+    resolved_model_assets: list[ResolvedModelAsset] | None = None
     if observers is None:
-        _validate_model_assets(request.model_registry_path, resolved)
-        raise PipelineError(
-            CliErrorCode.PIPELINE_NOT_IMPLEMENTED,
-            "Real face, eye, head, and gaze observers are not implemented yet.",
+        resolved_model_assets = _validate_model_assets(
+            request.model_registry_path, resolved
         )
 
     _estimate_disk_space(resolved.output_root)
 
     created_at = request.clock()
+    calibration = default_calibration()
     layout = create_run_layout(
         input_path=resolved.video_path,
         output_root=resolved.output_root / resolved.video_path.stem / "runs",
@@ -157,28 +162,39 @@ def analyze_video(
             video=inspection.video_manifest,
         ).model_dump(mode="json"),
     )
-    _write_json(calibration_path, default_calibration().model_dump(mode="json"))
+    _write_json(calibration_path, calibration.model_dump(mode="json"))
     _write_json(video_manifest_path, inspection.video_manifest.model_dump(mode="json"))
     frames_jsonl_path.touch()
     errors_jsonl_path.touch()
 
+    if observers is None:
+        if resolved_model_assets is None:
+            raise AssertionError("resolved_model_assets must be set for default run")
+        observers = default_observer_bundle_factory(
+            resolved_model_assets, calibration, layout
+        )
+
     decoded_frame_count = 0
     frame_error_count = 0
-    with (
-        frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
-        errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
-    ):
-        for decoded_frame in iter_decoded_frames(resolved.video_path):
-            decoded_frame_count += 1
-            record, frame_errors = _process_frame(
-                decoded_frame,
-                observers,
-                resolved,
-                layout,
-                errors_handle=errors_handle,
-            )
-            frame_error_count += len(frame_errors)
-            frames_handle.write(record.model_dump_json() + "\n")
+    try:
+        with (
+            frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
+            errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
+        ):
+            for decoded_frame in iter_decoded_frames(resolved.video_path):
+                decoded_frame_count += 1
+                record, frame_errors = _process_frame(
+                    decoded_frame,
+                    observers,
+                    resolved,
+                    layout,
+                    errors_handle=errors_handle,
+                )
+                frame_error_count += len(frame_errors)
+                frames_handle.write(record.model_dump_json() + "\n")
+    finally:
+        if observers.close is not None:
+            observers.close()
 
     try:
         qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
@@ -263,6 +279,46 @@ def _validate_model_assets(
         )
     except ModelAssetError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
+
+
+def _default_observer_bundle_factory(
+    resolved_assets: list[ResolvedModelAsset],
+    calibration: CalibrationRecord,
+    run_layout: RunLayout,
+) -> ObserverBundle:
+    from chess_gaze.face_observation import MediaPipeFaceObserver
+    from chess_gaze.frame_observation import ModelBackedFrameObserver
+    from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID, UniGazeModel
+
+    face_asset = _asset_by_id(resolved_assets, "mediapipe-face-landmarker")
+    gaze_asset = _asset_by_id(resolved_assets, UNIGAZE_MODEL_ID)
+    observer = ModelBackedFrameObserver(
+        face_observer=MediaPipeFaceObserver(
+            model_asset_path=face_asset.resolved_path,
+            calibration=calibration,
+        ),
+        gaze_model=UniGazeModel.from_local_asset(gaze_asset, device="cpu"),
+        calibration=calibration,
+        run_layout=run_layout,
+    )
+    return ObserverBundle(frame_observer=observer, close=observer.close)
+
+
+def _asset_by_id(
+    resolved_assets: list[ResolvedModelAsset], model_id: str
+) -> ResolvedModelAsset:
+    for asset in resolved_assets:
+        if asset.model_id == model_id:
+            return asset
+    raise PipelineError(
+        CliErrorCode.MODEL_ASSET_MISSING,
+        f"Required resolved model asset missing for {model_id}",
+    )
+
+
+default_observer_bundle_factory: DefaultObserverBundleFactory = (
+    _default_observer_bundle_factory
+)
 
 
 def _estimate_disk_space(output_root: Path) -> None:
