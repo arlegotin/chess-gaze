@@ -218,6 +218,8 @@ def synthesize_recommended_gaze(
 
     if len(valid_angles) == 1:
         source, pitch, yaw = valid_angles[0]
+        if source == "single_geometric_eye":
+            return _invalid_recommended_gaze(_first_invalid_reason(left, right, face))
         return RecommendedGaze(
             gaze=GazeAngles(
                 valid=True,
@@ -335,6 +337,12 @@ def _invalid_recommended_gaze(reason: ErrorCode) -> RecommendedGaze:
 def _first_invalid_reason(
     left: GazeAngles, right: GazeAngles, face: FaceModelGaze
 ) -> ErrorCode:
+    for gaze in (left, right):
+        if (
+            gaze.reason_invalid is not None
+            and gaze.reason_invalid is not ErrorCode.GAZE_MODEL_FAILED
+        ):
+            return gaze.reason_invalid
     if face.reason_invalid is not None:
         return face.reason_invalid
     for gaze in (left, right):

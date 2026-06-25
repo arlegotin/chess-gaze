@@ -260,6 +260,73 @@ def test_recommended_gaze_uses_unigaze_when_head_pose_blocks_geometric_gaze() ->
     assert recommended.method == "appearance_only_unigaze_h14_joint"
 
 
+def test_recommended_gaze_rejects_single_geometric_eye_without_appearance() -> None:
+    left = GazeAngles(
+        valid=True, yaw_radians=0.08, pitch_radians=-0.04, reason_invalid=None
+    )
+    right = GazeAngles(
+        valid=False,
+        yaw_radians=None,
+        pitch_radians=None,
+        reason_invalid=ErrorCode.RIGHT_EYE_NOT_FOUND,
+    )
+    face = FaceModelGaze(
+        valid=False,
+        method="unigaze_h14_joint",
+        pitch_radians=None,
+        yaw_radians=None,
+        unit_vector=None,
+        confidence=None,
+        confidence_source="not_provided_by_unigaze",
+        reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
+    )
+
+    recommended = synthesize_recommended_gaze(
+        left,
+        right,
+        face,
+        thresholds=GazeThresholds(max_pairwise_angle_delta_radians=0.35),
+    )
+
+    assert recommended.gaze.valid is False
+    assert recommended.gaze.reason_invalid is ErrorCode.RIGHT_EYE_NOT_FOUND
+
+
+def test_recommended_gaze_prefers_non_model_reason_when_no_sources_are_valid() -> None:
+    left = GazeAngles(
+        valid=False,
+        yaw_radians=None,
+        pitch_radians=None,
+        reason_invalid=ErrorCode.HEAD_POSE_INVALID,
+    )
+    right = GazeAngles(
+        valid=False,
+        yaw_radians=None,
+        pitch_radians=None,
+        reason_invalid=ErrorCode.HEAD_POSE_INVALID,
+    )
+    face = FaceModelGaze(
+        valid=False,
+        method="unigaze_h14_joint",
+        pitch_radians=None,
+        yaw_radians=None,
+        unit_vector=None,
+        confidence=None,
+        confidence_source="not_provided_by_unigaze",
+        reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
+    )
+
+    recommended = synthesize_recommended_gaze(
+        left,
+        right,
+        face,
+        thresholds=GazeThresholds(max_pairwise_angle_delta_radians=0.35),
+    )
+
+    assert recommended.gaze.valid is False
+    assert recommended.gaze.reason_invalid is ErrorCode.HEAD_POSE_INVALID
+
+
 def test_recommended_gaze_rejects_large_unigaze_geometric_disagreement() -> None:
     left = GazeAngles(
         valid=True, yaw_radians=0.08, pitch_radians=-0.04, reason_invalid=None

@@ -25,6 +25,7 @@ SAMPLED_FRAME_INDICES = {
     Path("artifacts/input/test_2.mp4"): (0, 300, 900, 1500, 1972),
 }
 TEST_0_TRANSFORM_POSE_FRAME_INDICES = (0, 90, 144, 155, 217, 289)
+TEST_0_DOWN_LOOKING_FRAME_INDICES = frozenset(TEST_0_TRANSFORM_POSE_FRAME_INDICES)
 
 
 def test_head_pose_matches_real_video_evidence() -> None:
@@ -195,6 +196,8 @@ def test_head_pose_uses_mediapipe_transform_on_test0_pnp_failure_frames() -> Non
             assert observation.pitch_radians is not None
             assert observation.roll_radians is not None
             assert abs(observation.pitch_radians) < 1.0
+            if frame.frame_index in TEST_0_DOWN_LOOKING_FRAME_INDICES:
+                assert observation.pitch_radians < 0.0
             valid_frame_ids.append(frame.frame_id)
 
         assert valid_frame_ids == [
