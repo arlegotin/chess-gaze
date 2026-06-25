@@ -24,6 +24,7 @@ SAMPLED_FRAME_INDICES = {
     Path("artifacts/input/test_1.mp4"): (0, 300, 900, 1800, 2700, 3600),
     Path("artifacts/input/test_2.mp4"): (0, 300, 900, 1500, 1972),
 }
+TEST_0_TRANSFORM_POSE_FRAME_INDICES = (0, 90, 144, 155, 217, 289)
 
 
 def test_head_pose_matches_real_video_evidence() -> None:
@@ -146,6 +147,66 @@ def test_head_pose_matches_real_video_evidence() -> None:
     print(f"head_pose_valid_counts={valid_counts}")
     print(f"head_pose_invalid_counts={invalid_counts}")
     print(f"representative_head_pose_failures={representative_failures}")
+
+
+def test_head_pose_uses_mediapipe_transform_on_test0_pnp_failure_frames() -> None:
+    video_path = REPO_ROOT / "artifacts/input/test_0.mp4"
+    if not video_path.is_file():
+        pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
+
+    registry = load_model_registry(MODEL_REGISTRY_PATH)
+    model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
+    model_path = MODELS_ROOT / model_entry.expected_relative_path
+    if not model_path.is_file():
+        pytest.skip(
+            "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
+            f"{model_path}"
+        )
+    assert model_entry.checksum_sha256 is not None
+    assert sha256_file(model_path) == model_entry.checksum_sha256
+
+    calibration = default_calibration()
+    observer = MediaPipeFaceObserver(
+        model_asset_path=model_path,
+        calibration=calibration,
+    )
+    try:
+        sampled_frames = _sample_frames(video_path, TEST_0_TRANSFORM_POSE_FRAME_INDICES)
+        valid_frame_ids: list[str] = []
+        for frame in sampled_frames:
+            face_observation = observer.observe(frame.rgb, frame_id=frame.frame_id)
+            assert face_observation.selection.present is True
+            selected_face = _selected_face(face_observation)
+            assert selected_face.facial_transformation_matrix is not None
+
+            observation = estimate_head_pose(
+                selected_face,
+                calibration,
+                ImageSize(
+                    width_px=frame.rgb.shape[1],
+                    height_px=frame.rgb.shape[0],
+                ),
+            )
+
+            assert observation.valid is True
+            assert observation.rotation_matrix is not None
+            assert observation.quaternion_wxyz is not None
+            assert observation.yaw_radians is not None
+            assert observation.pitch_radians is not None
+            assert observation.roll_radians is not None
+            assert abs(observation.pitch_radians) < 1.0
+            valid_frame_ids.append(frame.frame_id)
+
+        assert valid_frame_ids == [
+            "f000000000",
+            "f000000090",
+            "f000000144",
+            "f000000155",
+            "f000000217",
+            "f000000289",
+        ]
+    finally:
+        observer.close()
 
 
 def _selected_face(face_observation: FaceObservation) -> FaceCandidate:
