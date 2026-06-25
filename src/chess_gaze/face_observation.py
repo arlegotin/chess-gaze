@@ -18,6 +18,7 @@ from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 MODEL_SCORE_SELECTION_SOURCE = "model_score_times_area_fraction"
 AREA_ONLY_SELECTION_SOURCE = "area_only_no_model_score"
 MEDIAPIPE_SCORE_SOURCE_UNAVAILABLE = "not_exposed_by_mediapipe_face_landmarker"
+MEDIAPIPE_IMAGE_RUNNING_MODE = "IMAGE"
 DEFAULT_FRAME_ID = "unknown"
 
 
@@ -103,10 +104,16 @@ class MediaPipeFaceObserver:
         model_asset_path: Path | str,
         calibration: CalibrationRecord,
     ) -> None:
+        if calibration.face_landmarker_running_mode != MEDIAPIPE_IMAGE_RUNNING_MODE:
+            raise ValueError(
+                "MediaPipeFaceObserver requires IMAGE running mode, got "
+                f"{calibration.face_landmarker_running_mode!r}"
+            )
+
         self._model_asset_path = Path(model_asset_path)
         self._calibration = calibration
         self.face_landmarker_options = FaceLandmarkerOptionsRecord(
-            running_mode=calibration.face_landmarker_running_mode,
+            running_mode=MEDIAPIPE_IMAGE_RUNNING_MODE,
             num_faces=calibration.max_face_candidates,
             min_face_detection_confidence=calibration.candidate_face_score_min,
             min_face_presence_confidence=calibration.usable_face_score_min,

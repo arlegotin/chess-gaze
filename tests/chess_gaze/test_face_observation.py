@@ -10,6 +10,7 @@ import pytest
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import ErrorCode
 from chess_gaze.face_observation import (
+    MEDIAPIPE_IMAGE_RUNNING_MODE,
     MEDIAPIPE_SCORE_SOURCE_UNAVAILABLE,
     FaceCandidate,
     MediaPipeFaceObserver,
@@ -215,6 +216,18 @@ def test_mediapipe_observer_persists_options_without_importing_mediapipe(
     )
 
 
+def test_mediapipe_observer_rejects_non_image_running_mode() -> None:
+    calibration = default_calibration().model_copy(
+        update={"face_landmarker_running_mode": "VIDEO"}
+    )
+
+    with pytest.raises(ValueError, match="requires IMAGE running mode"):
+        MediaPipeFaceObserver(
+            model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+            calibration=calibration,
+        )
+
+
 def test_mediapipe_observer_configures_image_mode_and_maps_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,7 +261,7 @@ def test_mediapipe_observer_configures_image_mode_and_maps_candidates(
     )
 
     options = captured["options"]
-    assert options.running_mode == "IMAGE"
+    assert options.running_mode == MEDIAPIPE_IMAGE_RUNNING_MODE
     assert options.num_faces == calibration.max_face_candidates
     assert options.min_face_detection_confidence == calibration.candidate_face_score_min
     assert options.min_face_presence_confidence == calibration.usable_face_score_min
@@ -281,6 +294,65 @@ def test_mediapipe_observer_configures_image_mode_and_maps_candidates(
         (0.0, 0.0, 1.0, 0.0),
         (0.0, 0.0, 0.0, 1.0),
     )
+
+
+def test_mediapipe_observer_preserves_multiple_adapter_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": []}
+    fake_mediapipe = build_fake_mediapipe(
+        captured,
+        face_landmarks=[
+            [
+                SimpleNamespace(x=0.10, y=0.10, z=0.0),
+                SimpleNamespace(x=0.20, y=0.20, z=0.0),
+            ],
+            [
+                SimpleNamespace(x=0.30, y=0.30, z=0.0),
+                SimpleNamespace(x=0.80, y=0.80, z=0.0),
+            ],
+        ],
+        face_blendshapes=[
+            [SimpleNamespace(category_name="face0", score=0.10)],
+            [SimpleNamespace(category_name="face1", score=0.20)],
+        ],
+        facial_transformation_matrixes=[
+            np.eye(4, dtype=np.float64),
+            np.eye(4, dtype=np.float64) * 2.0,
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((100, 200, 3), dtype=np.uint8),
+        frame_id="f000000009",
+    )
+
+    assert observation.selection.present is True
+    assert observation.selection.primary_candidate_id == "face_1"
+    candidate_ids = [
+        candidate.candidate_id for candidate in observation.selection.candidates
+    ]
+    assert candidate_ids == [
+        "face_0",
+        "face_1",
+    ]
+    assert ErrorCode.MULTIPLE_FACE_CANDIDATES in {
+        error.code for error in observation.selection.errors
+    }
+    assert [
+        candidate.blendshapes[0].category_name
+        for candidate in observation.selection.candidates
+    ] == ["face0", "face1"]
 
 
 def test_mediapipe_observer_reports_face_not_found_for_empty_results(

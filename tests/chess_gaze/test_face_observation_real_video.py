@@ -25,8 +25,11 @@ SAMPLED_FRAME_INDICES = {
 
 def test_mediapipe_face_observer_matches_real_video_evidence() -> None:
     for video_path in SAMPLED_FRAME_INDICES:
-        if not video_path.is_file():
-            pytest.skip(f"BLOCKED: missing mandatory real-data video: {video_path}")
+        absolute_video_path = REPO_ROOT / video_path
+        if not absolute_video_path.is_file():
+            pytest.skip(
+                f"BLOCKED: missing mandatory real-data video: {absolute_video_path}"
+            )
 
     registry = load_model_registry(MODEL_REGISTRY_PATH)
     model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
@@ -53,7 +56,8 @@ def test_mediapipe_face_observer_matches_real_video_evidence() -> None:
     face_not_found_frames: dict[str, list[str]] = {}
     try:
         for video_path, frame_indices in SAMPLED_FRAME_INDICES.items():
-            sampled_frames = _sample_frames(video_path, frame_indices)
+            absolute_video_path = REPO_ROOT / video_path
+            sampled_frames = _sample_frames(absolute_video_path, frame_indices)
             present_count = 0
             not_found_frame_ids: list[str] = []
 
