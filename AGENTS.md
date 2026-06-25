@@ -63,14 +63,13 @@ When docs change:
 Any task that selects an external model, ML checkpoint, inference library, or
 core technical dependency must perform current primary-source research before
 selection. A citation is not enough. The active spec or ADR must compare viable
-candidates against the actual task requirements, license, checkpoint or package
+candidates against the actual task requirements, checkpoint or package
 availability, maintenance status, runtime constraints, reproducibility, published
 metrics or direct evidence, known limitations, and integration risk.
 
 Evidence hierarchy for model and library claims:
 
-1. Official model cards, papers, repositories, release notes, package metadata,
-   licenses, and checkpoint manifests.
+1. Official model cards, papers, repositories, release notes, package metadata, and checkpoint manifests.
 2. Reproduced benchmarks or independent evaluations with task and data
    conditions that match this repo.
 3. Maintainer issues and discussions for operational risks only.
@@ -94,8 +93,7 @@ Specs and ADRs that make model or library decisions must preserve:
 
 - the selected candidate and rejected serious alternatives;
 - primary-source URLs and verification date;
-- license and intended-use constraints;
-- local asset, checksum, and no-auto-download policy;
+- local asset, checksum;
 - runtime platform assumptions and known incompatibilities;
 - model input/output contract and any unavailable fields, such as confidence;
 - residual uncertainty and how implementation must resolve it before shipping.
