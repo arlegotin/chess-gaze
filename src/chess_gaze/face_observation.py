@@ -23,12 +23,25 @@ DEFAULT_FRAME_ID = "unknown"
 DETECTION_REGION_FULL_FRAME = "full_frame"
 DETECTION_REGION_LEFT_HALF = "left_half"
 DETECTION_REGION_RIGHT_HALF = "right_half"
+DETECTION_REGION_LEFT_TOP = "left_top"
+DETECTION_REGION_RIGHT_TOP = "right_top"
+DETECTION_REGION_LEFT_UPPER_BAND = "left_upper_band"
+DETECTION_REGION_RIGHT_UPPER_BAND = "right_upper_band"
+DETECTION_REGION_RIGHT_UPPER_MIDDLE = "right_upper_middle"
 REGION_REFINEMENT_MIN_IOU = 0.25
 REGION_REFINEMENT_TOP_SHIFT_MIN_PX = 8.0
 REGION_REFINEMENT_TOP_SHIFT_FRACTION = 0.15
 LOW_FULL_FRAME_FACE_TOP_FRACTION = 0.60
 REGION_SEAM_MARGIN_FRACTION = 0.02
 REGION_SEAM_MARGIN_MIN_PX = 4.0
+LARGE_FULL_FRAME_AREA_FRACTION = 0.055
+LARGE_FRAME_MIN_SHORT_SIDE_PX = 360
+PLAUSIBLE_FACE_AREA_MIN_FRACTION = 0.006
+PLAUSIBLE_FACE_AREA_MAX_FRACTION = 0.045
+REFINEMENT_MAX_AREA_RATIO_FOR_LARGE_FULL_FRAME = 0.45
+FOCUSED_REGION_SCORE_MULTIPLIER = 0.1
+RIGHT_UPPER_MIDDLE_TOP_FRACTION = 1.0 / 9.0
+RIGHT_UPPER_MIDDLE_BOTTOM_FRACTION = 43.0 / 72.0
 
 
 @dataclass(frozen=True)
@@ -166,49 +179,51 @@ class MediaPipeFaceObserver:
         image_height_px, image_width_px, _channels = frame.shape
         mp = self._mediapipe_module()
         observation_frame_id = frame_id or DEFAULT_FRAME_ID
-        full_frame_selection: FaceSelection | None = None
         region_selections: list[_RegionSelection] = []
-
-        for region in _detection_regions(
+        regions = _detection_regions(
             image_width_px=int(image_width_px), image_height_px=int(image_height_px)
+        )
+
+        full_frame_region = regions[0]
+        full_frame_selection = self._observe_region(
+            frame,
+            mp,
+            region=full_frame_region,
+            frame_id=observation_frame_id,
+            image_width_px=int(image_width_px),
+            image_height_px=int(image_height_px),
+        )
+        region_selections.append(
+            _RegionSelection(region=full_frame_region, selection=full_frame_selection)
+        )
+
+        if full_frame_selection.present and not _full_frame_needs_region_refinement(
+            full_frame_selection
         ):
-            region_frame = np.ascontiguousarray(
-                frame[
-                    region.y_min_px : region.y_max_px,
-                    region.x_min_px : region.x_max_px,
-                ]
-            )
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=region_frame)
-            result = self._landmarker_instance().detect(mp_image)
-            candidates = _candidates_from_mediapipe_result(
-                result,
+            return FaceObservation(
                 frame_id=observation_frame_id,
                 image_width_px=int(image_width_px),
                 image_height_px=int(image_height_px),
-                detection_region=region,
-                max_face_candidates=self._calibration.max_face_candidates,
+                face_landmarker_options=self.face_landmarker_options,
+                selection=full_frame_selection,
             )
-            selection = select_primary_face(candidates, self._calibration)
+
+        for region in regions[1:3]:
+            selection = self._observe_region(
+                frame,
+                mp,
+                region=region,
+                frame_id=observation_frame_id,
+                image_width_px=int(image_width_px),
+                image_height_px=int(image_height_px),
+            )
             region_selections.append(
                 _RegionSelection(region=region, selection=selection)
             )
-            if region.name == DETECTION_REGION_FULL_FRAME:
-                full_frame_selection = selection
-                if selection.present and not _full_frame_needs_region_refinement(
-                    selection, image_height_px=int(image_height_px)
-                ):
-                    return FaceObservation(
-                        frame_id=observation_frame_id,
-                        image_width_px=int(image_width_px),
-                        image_height_px=int(image_height_px),
-                        face_landmarker_options=self.face_landmarker_options,
-                        selection=selection,
-                    )
-                continue
             if (
-                full_frame_selection is not None
-                and not full_frame_selection.present
+                not full_frame_selection.present
                 and selection.present
+                and not _selection_has_multiple_candidates(selection)
             ):
                 return FaceObservation(
                     frame_id=observation_frame_id,
@@ -218,8 +233,30 @@ class MediaPipeFaceObserver:
                     selection=selection,
                 )
 
-        if full_frame_selection is None:
-            raise AssertionError("full-frame face detection was not attempted")
+        basic_selection = _select_region_refined_face(
+            region_selections, full_frame_selection
+        )
+        if _should_accept_basic_selection(basic_selection, full_frame_selection):
+            return FaceObservation(
+                frame_id=observation_frame_id,
+                image_width_px=int(image_width_px),
+                image_height_px=int(image_height_px),
+                face_landmarker_options=self.face_landmarker_options,
+                selection=basic_selection,
+            )
+
+        for region in regions[3:]:
+            selection = self._observe_region(
+                frame,
+                mp,
+                region=region,
+                frame_id=observation_frame_id,
+                image_width_px=int(image_width_px),
+                image_height_px=int(image_height_px),
+            )
+            region_selections.append(
+                _RegionSelection(region=region, selection=selection)
+            )
 
         selection = _select_region_refined_face(region_selections, full_frame_selection)
         return FaceObservation(
@@ -229,6 +266,34 @@ class MediaPipeFaceObserver:
             face_landmarker_options=self.face_landmarker_options,
             selection=selection,
         )
+
+    def _observe_region(
+        self,
+        frame: npt.NDArray[np.uint8],
+        mp: Any,
+        *,
+        region: _DetectionRegion,
+        frame_id: str,
+        image_width_px: int,
+        image_height_px: int,
+    ) -> FaceSelection:
+        region_frame = np.ascontiguousarray(
+            frame[
+                region.y_min_px : region.y_max_px,
+                region.x_min_px : region.x_max_px,
+            ]
+        )
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=region_frame)
+        result = self._landmarker_instance().detect(mp_image)
+        candidates = _candidates_from_mediapipe_result(
+            result,
+            frame_id=frame_id,
+            image_width_px=image_width_px,
+            image_height_px=image_height_px,
+            detection_region=region,
+            max_face_candidates=self._calibration.max_face_candidates,
+        )
+        return select_primary_face(candidates, self._calibration)
 
     def close(self) -> None:
         if self._landmarker is not None and hasattr(self._landmarker, "close"):
@@ -459,9 +524,7 @@ def _shared_selection_score_source(
     return None
 
 
-def _full_frame_needs_region_refinement(
-    selection: FaceSelection, *, image_height_px: int
-) -> bool:
+def _full_frame_needs_region_refinement(selection: FaceSelection) -> bool:
     if _selection_has_multiple_candidates(selection):
         return True
 
@@ -470,7 +533,10 @@ def _full_frame_needs_region_refinement(
         return False
 
     bbox = selected.bounding_box_image_px
-    if bbox.y_min >= image_height_px * LOW_FULL_FRAME_FACE_TOP_FRACTION:
+    if bbox.y_min >= selected.image_height_px * LOW_FULL_FRAME_FACE_TOP_FRACTION:
+        return True
+
+    if _large_full_frame_candidate(selected):
         return True
 
     return _bbox_height(bbox) < _bbox_width(bbox)
@@ -481,7 +547,7 @@ def _select_region_refined_face(
     full_frame_selection: FaceSelection,
 ) -> FaceSelection:
     if not full_frame_selection.present:
-        return full_frame_selection
+        return _select_fallback_face(region_selections, full_frame_selection)
 
     scored_refinements = [
         (score, region_selection.selection)
@@ -499,6 +565,36 @@ def _select_region_refined_face(
     return full_frame_selection
 
 
+def _select_fallback_face(
+    region_selections: Sequence[_RegionSelection],
+    full_frame_selection: FaceSelection,
+) -> FaceSelection:
+    scored_fallbacks = [
+        (score, region_selection.selection)
+        for region_selection in region_selections
+        if region_selection.region.name != DETECTION_REGION_FULL_FRAME
+        for score in (_fallback_selection_score(region_selection),)
+        if score is not None
+    ]
+    if not scored_fallbacks:
+        return full_frame_selection
+
+    return max(
+        scored_fallbacks,
+        key=lambda item: (item[0], _primary_selection_area(item[1])),
+    )[1]
+
+
+def _should_accept_basic_selection(
+    selection: FaceSelection,
+    full_frame_selection: FaceSelection,
+) -> bool:
+    if full_frame_selection.present:
+        return selection is not full_frame_selection
+
+    return selection.present and not _selection_has_multiple_candidates(selection)
+
+
 def _region_refinement_score(
     region_selection: _RegionSelection, full_frame_selection: FaceSelection
 ) -> float | None:
@@ -508,6 +604,12 @@ def _region_refinement_score(
         return None
     if _candidate_is_near_region_seam(fallback, region_selection.region):
         return None
+
+    large_full_frame_refinement_score = _large_full_frame_refinement_score(
+        fallback, full_primary, region_selection.region
+    )
+    if large_full_frame_refinement_score is not None:
+        return large_full_frame_refinement_score
 
     max_iou = _max_iou_with_full_frame_candidates(fallback, full_frame_selection)
     if max_iou < REGION_REFINEMENT_MIN_IOU:
@@ -532,6 +634,71 @@ def _region_refinement_score(
     if top_shift_px < top_shift_threshold_px:
         return None
     return area * max_iou
+
+
+def _fallback_selection_score(region_selection: _RegionSelection) -> float | None:
+    candidate = _primary_candidate(region_selection.selection)
+    if candidate is None:
+        return None
+    if _candidate_is_near_region_seam(candidate, region_selection.region):
+        return None
+    return _candidate_geometry_score(candidate, region_selection.region)
+
+
+def _large_full_frame_refinement_score(
+    fallback: FaceCandidate,
+    full_primary: FaceCandidate,
+    region: _DetectionRegion,
+) -> float | None:
+    if not _large_full_frame_candidate(full_primary):
+        return None
+    if _bbox_area(fallback.bounding_box_image_px) > (
+        _bbox_area(full_primary.bounding_box_image_px)
+        * REFINEMENT_MAX_AREA_RATIO_FOR_LARGE_FULL_FRAME
+    ):
+        return None
+    if not _candidate_area_is_plausible(fallback):
+        return None
+    return _candidate_geometry_score(fallback, region)
+
+
+def _candidate_geometry_score(
+    candidate: FaceCandidate,
+    region: _DetectionRegion,
+) -> float:
+    area_score = _candidate_area_score(candidate)
+    region_area_fraction = (
+        region.width_px
+        * region.height_px
+        / (candidate.image_width_px * candidate.image_height_px)
+    )
+    focus_score = 1.0 + (FOCUSED_REGION_SCORE_MULTIPLIER / region_area_fraction)
+    return area_score * focus_score
+
+
+def _candidate_area_score(candidate: FaceCandidate) -> float:
+    area_fraction = candidate.area_fraction
+    if area_fraction < PLAUSIBLE_FACE_AREA_MIN_FRACTION:
+        return area_fraction / PLAUSIBLE_FACE_AREA_MIN_FRACTION
+    if area_fraction > PLAUSIBLE_FACE_AREA_MAX_FRACTION:
+        return PLAUSIBLE_FACE_AREA_MAX_FRACTION / area_fraction
+    return 1.0
+
+
+def _candidate_area_is_plausible(candidate: FaceCandidate) -> bool:
+    return (
+        PLAUSIBLE_FACE_AREA_MIN_FRACTION
+        <= candidate.area_fraction
+        <= PLAUSIBLE_FACE_AREA_MAX_FRACTION
+    )
+
+
+def _large_full_frame_candidate(candidate: FaceCandidate) -> bool:
+    short_side = min(candidate.image_width_px, candidate.image_height_px)
+    return (
+        short_side >= LARGE_FRAME_MIN_SHORT_SIDE_PX
+        and candidate.area_fraction > LARGE_FULL_FRAME_AREA_FRACTION
+    )
 
 
 def _primary_selection_area(selection: FaceSelection) -> float:
@@ -632,6 +799,18 @@ def _detection_regions(
     *, image_width_px: int, image_height_px: int
 ) -> tuple[_DetectionRegion, ...]:
     midpoint_x = image_width_px // 2
+    midpoint_y = image_height_px // 2
+    upper_band_y = max(1, round(image_height_px * 0.45))
+    right_upper_middle_y_min = max(
+        0, round(image_height_px * RIGHT_UPPER_MIDDLE_TOP_FRACTION)
+    )
+    right_upper_middle_y_max = min(
+        image_height_px,
+        max(
+            right_upper_middle_y_min + 1,
+            round(image_height_px * RIGHT_UPPER_MIDDLE_BOTTOM_FRACTION),
+        ),
+    )
     return (
         _DetectionRegion(
             name=DETECTION_REGION_FULL_FRAME,
@@ -653,6 +832,41 @@ def _detection_regions(
             y_min_px=0,
             x_max_px=image_width_px,
             y_max_px=image_height_px,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_LEFT_TOP,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=midpoint_x,
+            y_max_px=midpoint_y,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_RIGHT_TOP,
+            x_min_px=midpoint_x,
+            y_min_px=0,
+            x_max_px=image_width_px,
+            y_max_px=midpoint_y,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_LEFT_UPPER_BAND,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=midpoint_x,
+            y_max_px=upper_band_y,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_RIGHT_UPPER_BAND,
+            x_min_px=midpoint_x,
+            y_min_px=0,
+            x_max_px=image_width_px,
+            y_max_px=upper_band_y,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_RIGHT_UPPER_MIDDLE,
+            x_min_px=midpoint_x,
+            y_min_px=right_upper_middle_y_min,
+            x_max_px=image_width_px,
+            y_max_px=right_upper_middle_y_max,
         ),
     )
 
