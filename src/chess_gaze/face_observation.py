@@ -20,6 +20,9 @@ AREA_ONLY_SELECTION_SOURCE = "area_only_no_model_score"
 MEDIAPIPE_SCORE_SOURCE_UNAVAILABLE = "not_exposed_by_mediapipe_face_landmarker"
 MEDIAPIPE_IMAGE_RUNNING_MODE = "IMAGE"
 DEFAULT_FRAME_ID = "unknown"
+DETECTION_REGION_FULL_FRAME = "full_frame"
+DETECTION_REGION_LEFT_HALF = "left_half"
+DETECTION_REGION_RIGHT_HALF = "right_half"
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,23 @@ class FaceObservation:
     selection: FaceSelection
 
 
+@dataclass(frozen=True)
+class _DetectionRegion:
+    name: str
+    x_min_px: int
+    y_min_px: int
+    x_max_px: int
+    y_max_px: int
+
+    @property
+    def width_px(self) -> int:
+        return self.x_max_px - self.x_min_px
+
+    @property
+    def height_px(self) -> int:
+        return self.y_max_px - self.y_min_px
+
+
 class FaceObserver(Protocol):
     def observe(
         self,
@@ -133,23 +153,49 @@ class MediaPipeFaceObserver:
         frame = _validate_rgb_frame(rgb_frame)
         image_height_px, image_width_px, _channels = frame.shape
         mp = self._mediapipe_module()
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
-        result = self._landmarker_instance().detect(mp_image)
         observation_frame_id = frame_id or DEFAULT_FRAME_ID
-        candidates = _candidates_from_mediapipe_result(
-            result,
-            frame_id=observation_frame_id,
-            image_width_px=int(image_width_px),
-            image_height_px=int(image_height_px),
-            max_face_candidates=self._calibration.max_face_candidates,
-        )
+        full_frame_selection: FaceSelection | None = None
+
+        for region in _detection_regions(
+            image_width_px=int(image_width_px), image_height_px=int(image_height_px)
+        ):
+            region_frame = np.ascontiguousarray(
+                frame[
+                    region.y_min_px : region.y_max_px,
+                    region.x_min_px : region.x_max_px,
+                ]
+            )
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=region_frame)
+            result = self._landmarker_instance().detect(mp_image)
+            candidates = _candidates_from_mediapipe_result(
+                result,
+                frame_id=observation_frame_id,
+                image_width_px=int(image_width_px),
+                image_height_px=int(image_height_px),
+                detection_region=region,
+                max_face_candidates=self._calibration.max_face_candidates,
+            )
+            selection = select_primary_face(candidates, self._calibration)
+            if region.name == DETECTION_REGION_FULL_FRAME:
+                full_frame_selection = selection
+            if selection.present:
+                return FaceObservation(
+                    frame_id=observation_frame_id,
+                    image_width_px=int(image_width_px),
+                    image_height_px=int(image_height_px),
+                    face_landmarker_options=self.face_landmarker_options,
+                    selection=selection,
+                )
+
+        if full_frame_selection is None:
+            raise AssertionError("full-frame face detection was not attempted")
 
         return FaceObservation(
             frame_id=observation_frame_id,
             image_width_px=int(image_width_px),
             image_height_px=int(image_height_px),
             face_landmarker_options=self.face_landmarker_options,
-            selection=select_primary_face(candidates, self._calibration),
+            selection=full_frame_selection,
         )
 
     def close(self) -> None:
@@ -395,12 +441,42 @@ def _validate_rgb_frame(
     return np.ascontiguousarray(rgb_frame)
 
 
+def _detection_regions(
+    *, image_width_px: int, image_height_px: int
+) -> tuple[_DetectionRegion, ...]:
+    midpoint_x = image_width_px // 2
+    return (
+        _DetectionRegion(
+            name=DETECTION_REGION_FULL_FRAME,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=image_width_px,
+            y_max_px=image_height_px,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_LEFT_HALF,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=midpoint_x,
+            y_max_px=image_height_px,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_RIGHT_HALF,
+            x_min_px=midpoint_x,
+            y_min_px=0,
+            x_max_px=image_width_px,
+            y_max_px=image_height_px,
+        ),
+    )
+
+
 def _candidates_from_mediapipe_result(
     result: Any,
     *,
     frame_id: str,
     image_width_px: int,
     image_height_px: int,
+    detection_region: _DetectionRegion,
     max_face_candidates: int,
 ) -> tuple[FaceCandidate, ...]:
     face_landmarks = tuple(getattr(result, "face_landmarks", ()) or ())
@@ -415,8 +491,18 @@ def _candidates_from_mediapipe_result(
         if not normalized_landmarks:
             continue
 
-        pixel_landmarks = _pixel_points(
+        region_pixel_landmarks = _pixel_points(
             normalized_landmarks,
+            image_width_px=detection_region.width_px,
+            image_height_px=detection_region.height_px,
+        )
+        pixel_landmarks = _translate_pixel_points(
+            region_pixel_landmarks,
+            offset_x_px=detection_region.x_min_px,
+            offset_y_px=detection_region.y_min_px,
+        )
+        source_normalized_landmarks = _normalize_pixel_points(
+            pixel_landmarks,
             image_width_px=image_width_px,
             image_height_px=image_height_px,
         )
@@ -429,9 +515,9 @@ def _candidates_from_mediapipe_result(
                 candidate_score=None,
                 score_source=MEDIAPIPE_SCORE_SOURCE_UNAVAILABLE,
                 bounding_box_image_px=_bbox_from_points(pixel_landmarks),
-                bounding_box_image_norm=_bbox_from_points(normalized_landmarks),
+                bounding_box_image_norm=_bbox_from_points(source_normalized_landmarks),
                 landmarks_image_px=pixel_landmarks,
-                landmarks_image_norm=normalized_landmarks,
+                landmarks_image_norm=source_normalized_landmarks,
                 blendshapes=_blendshapes_for_candidate(face_blendshapes, index),
                 facial_transformation_matrix=_matrix_for_candidate(
                     facial_transformation_matrixes, index
@@ -466,6 +552,38 @@ def _pixel_points(
             y=point.y * image_height_px,
         )
         for point in normalized_landmarks
+    )
+
+
+def _translate_pixel_points(
+    pixel_landmarks: Sequence[Point2D],
+    *,
+    offset_x_px: int,
+    offset_y_px: int,
+) -> tuple[Point2D, ...]:
+    return tuple(
+        Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=point.x + offset_x_px,
+            y=point.y + offset_y_px,
+        )
+        for point in pixel_landmarks
+    )
+
+
+def _normalize_pixel_points(
+    pixel_landmarks: Sequence[Point2D],
+    *,
+    image_width_px: int,
+    image_height_px: int,
+) -> tuple[Point2D, ...]:
+    return tuple(
+        Point2D(
+            space=CoordinateSpace.NORMALIZED,
+            x=point.x / image_width_px,
+            y=point.y / image_height_px,
+        )
+        for point in pixel_landmarks
     )
 
 

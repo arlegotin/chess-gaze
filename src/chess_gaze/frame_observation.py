@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -31,7 +30,7 @@ from chess_gaze.gaze_observation import (
 )
 from chess_gaze.head_pose import HeadPoseObservation, ImageSize, estimate_head_pose
 
-DEFAULT_RECOMMENDED_GAZE_MAX_PAIRWISE_DELTA_RADIANS = math.pi
+DEFAULT_RECOMMENDED_GAZE_MAX_PAIRWISE_DELTA_RADIANS = 0.35
 
 EyeObserver = Callable[
     [FaceCandidate, npt.NDArray[np.uint8], RunLayout, str], EyePairObservation

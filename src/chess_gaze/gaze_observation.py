@@ -99,7 +99,9 @@ class UniGazeModel:
             raise ValueError("UniGaze pred_gaze must have shape (1, 2)")
 
         pitch_radians = float(pred_gaze[0, 0].detach().cpu())
-        yaw_radians = float(pred_gaze[0, 1].detach().cpu())
+        # UniGaze's reference drawing treats positive yaw as image-left. Frame
+        # records and overlays use positive yaw as image-right.
+        yaw_radians = -float(pred_gaze[0, 1].detach().cpu())
         _require_finite(pitch_radians, "pitch_radians")
         _require_finite(yaw_radians, "yaw_radians")
 
@@ -210,15 +212,32 @@ def synthesize_recommended_gaze(
     *,
     thresholds: GazeThresholds,
 ) -> RecommendedGaze:
-    valid_angles = _valid_angle_pairs(left, right, face)
-    if len(valid_angles) != 3:
-        return _invalid_recommended_gaze(ErrorCode.GAZE_MODEL_FAILED)
+    valid_angles = _valid_angle_sources(left, right, face)
+    if not valid_angles:
+        return _invalid_recommended_gaze(_first_invalid_reason(left, right, face))
+
+    if len(valid_angles) == 1:
+        source, pitch, yaw = valid_angles[0]
+        if source == "single_geometric_eye":
+            return _invalid_recommended_gaze(_first_invalid_reason(left, right, face))
+        return RecommendedGaze(
+            gaze=GazeAngles(
+                valid=True,
+                yaw_radians=yaw,
+                pitch_radians=pitch,
+                reason_invalid=None,
+            ),
+            target_image_px=None,
+            target_board_norm=None,
+            target_square=None,
+            method=source,
+        )
 
     if _max_pairwise_delta(valid_angles) > thresholds.max_pairwise_angle_delta_radians:
         return _invalid_recommended_gaze(ErrorCode.GAZE_ESTIMATORS_DISAGREE)
 
-    pitch = sum(pair[0] for pair in valid_angles) / len(valid_angles)
-    yaw = sum(pair[1] for pair in valid_angles) / len(valid_angles)
+    pitch = sum(pair[1] for pair in valid_angles) / len(valid_angles)
+    yaw = sum(pair[2] for pair in valid_angles) / len(valid_angles)
     return RecommendedGaze(
         gaze=GazeAngles(
             valid=True,
@@ -229,7 +248,7 @@ def synthesize_recommended_gaze(
         target_image_px=None,
         target_board_norm=None,
         target_square=None,
-        method="mean_of_agreeing_left_right_unigaze",
+        method=_mean_method(valid_angles),
     )
 
 
@@ -246,26 +265,53 @@ def pitch_yaw_to_unit_vector(
     )
 
 
-def _valid_angle_pairs(
+def _valid_angle_sources(
     left: GazeAngles, right: GazeAngles, face: FaceModelGaze
-) -> tuple[tuple[float, float], ...]:
-    pairs: list[tuple[float, float]] = []
+) -> tuple[tuple[str, float, float], ...]:
+    pairs: list[tuple[str, float, float]] = []
     for gaze in (left, right):
         if (
             gaze.valid
             and gaze.pitch_radians is not None
             and gaze.yaw_radians is not None
         ):
-            pairs.append((gaze.pitch_radians, gaze.yaw_radians))
+            pairs.append(
+                (
+                    "single_geometric_eye" if len(pairs) == 0 else "geometric_eye_pair",
+                    gaze.pitch_radians,
+                    gaze.yaw_radians,
+                )
+            )
     if face.valid and face.pitch_radians is not None and face.yaw_radians is not None:
-        pairs.append((face.pitch_radians, face.yaw_radians))
+        source = (
+            f"appearance_only_{face.method}"
+            if not pairs
+            else f"appearance_and_geometric_{face.method}"
+        )
+        pairs.append((source, face.pitch_radians, face.yaw_radians))
     return tuple(pairs)
 
 
-def _max_pairwise_delta(angle_pairs: Sequence[tuple[float, float]]) -> float:
+def _mean_method(angle_pairs: Sequence[tuple[str, float, float]]) -> str:
+    has_appearance = any(
+        source.startswith("appearance") for source, _pitch, _yaw in angle_pairs
+    )
+    geometric_count = sum(
+        1 for source, _pitch, _yaw in angle_pairs if "geometric" in source
+    )
+    if has_appearance and geometric_count >= 2:
+        return "mean_of_agreeing_left_right_unigaze"
+    if has_appearance and geometric_count == 1:
+        return "mean_of_agreeing_geometric_unigaze"
+    return "mean_of_agreeing_left_right_geometric"
+
+
+def _max_pairwise_delta(
+    angle_pairs: Sequence[tuple[str, float, float]],
+) -> float:
     max_delta = 0.0
-    for index, (pitch, yaw) in enumerate(angle_pairs):
-        for other_pitch, other_yaw in angle_pairs[index + 1 :]:
+    for index, (_source, pitch, yaw) in enumerate(angle_pairs):
+        for _other_source, other_pitch, other_yaw in angle_pairs[index + 1 :]:
             max_delta = max(
                 max_delta,
                 math.hypot(pitch - other_pitch, yaw - other_yaw),
@@ -286,6 +332,23 @@ def _invalid_recommended_gaze(reason: ErrorCode) -> RecommendedGaze:
         target_square=None,
         method="invalid",
     )
+
+
+def _first_invalid_reason(
+    left: GazeAngles, right: GazeAngles, face: FaceModelGaze
+) -> ErrorCode:
+    for gaze in (left, right):
+        if (
+            gaze.reason_invalid is not None
+            and gaze.reason_invalid is not ErrorCode.GAZE_MODEL_FAILED
+        ):
+            return gaze.reason_invalid
+    if face.reason_invalid is not None:
+        return face.reason_invalid
+    for gaze in (left, right):
+        if gaze.reason_invalid is not None:
+            return gaze.reason_invalid
+    return ErrorCode.GAZE_MODEL_FAILED
 
 
 def _eye_invalid_reason(eye: Any) -> ErrorCode:

@@ -127,6 +127,45 @@ def test_invalid_reprojection_error_produces_head_pose_invalid() -> None:
     assert observation.rotation_matrix is None
 
 
+def test_mediapipe_transform_keeps_pose_valid_when_pnp_reprojection_is_high() -> None:
+    calibration = default_calibration()
+    landmarks = _projected_landmarks(calibration, IMAGE_SIZE)
+    landmarks[calibration.pnp_landmark_indices.chin] = Point2D(
+        space=CoordinateSpace.IMAGE_PX,
+        x=4000.0,
+        y=-3000.0,
+    )
+    expected_yaw = 0.21
+    mediapipe_transform_pitch = 0.12
+    expected_image_pitch = -0.12
+    expected_roll = 0.08
+    face = _face_with_landmarks(
+        landmarks,
+        image_size=IMAGE_SIZE,
+        facial_transformation_matrix=_facial_transform_matrix(
+            expected_yaw,
+            mediapipe_transform_pitch,
+            expected_roll,
+        ),
+    )
+
+    observation = estimate_head_pose(face, calibration, IMAGE_SIZE)
+
+    assert observation.valid is True
+    assert observation.reason_invalid is None
+    assert observation.method == "mediapipe_transform_and_solvepnp_iterative"
+    assert observation.pnp_method == PNP_METHOD_NAME
+    assert observation.reprojection_error_px is not None
+    assert observation.reprojection_error_px > observation.reprojection_error_max_px
+    assert observation.yaw_radians == pytest.approx(expected_yaw)
+    assert observation.pitch_radians == pytest.approx(expected_image_pitch)
+    assert observation.roll_radians == pytest.approx(expected_roll)
+    assert observation.pitch_radians is not None
+    assert abs(observation.pitch_radians) < 1.0
+    assert observation.rotation_matrix is not None
+    assert observation.quaternion_wxyz is not None
+
+
 def test_valid_rotations_are_stored_as_matrix_quaternion_and_angles() -> None:
     calibration = default_calibration()
     face = _face_with_landmarks(
@@ -209,6 +248,31 @@ def _camera_matrix(image_size: ImageSize) -> np.ndarray:
             [0.0, 0.0, 1.0],
         ],
         dtype=np.float64,
+    )
+
+
+def _facial_transform_matrix(
+    yaw_radians: float, pitch_radians: float, roll_radians: float
+) -> tuple[tuple[float, ...], ...]:
+    cy = math.cos(yaw_radians)
+    sy = math.sin(yaw_radians)
+    cp = math.cos(pitch_radians)
+    sp = math.sin(pitch_radians)
+    cr = math.cos(roll_radians)
+    sr = math.sin(roll_radians)
+    rotation = np.asarray(
+        [
+            [cy * cr, (sp * sy * cr) - (cp * sr), (cp * sy * cr) + (sp * sr)],
+            [cy * sr, (sp * sy * sr) + (cp * cr), (cp * sy * sr) - (sp * cr)],
+            [-sy, sp * cy, cp * cy],
+        ],
+        dtype=np.float64,
+    )
+    return (
+        (float(rotation[0, 0]), float(rotation[0, 1]), float(rotation[0, 2]), 0.0),
+        (float(rotation[1, 0]), float(rotation[1, 1]), float(rotation[1, 2]), 0.0),
+        (float(rotation[2, 0]), float(rotation[2, 1]), float(rotation[2, 2]), 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
 
 

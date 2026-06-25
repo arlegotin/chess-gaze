@@ -104,6 +104,7 @@ def estimate_head_pose(
         face.landmarks_image_px, calibration.pnp_landmark_indices
     )
     reprojection_error_max_px = _reprojection_error_max_px(calibration)
+    transform_rotation_matrix = _transform_rotation_matrix(facial_transform)
 
     if facial_transform_error is not None:
         return _invalid_observation(
@@ -117,6 +118,16 @@ def estimate_head_pose(
         )
 
     if len(pnp_landmarks) < PNP_MIN_POINT_COUNT:
+        if transform_rotation_matrix is not None:
+            return _valid_transform_observation(
+                facial_transform=facial_transform,
+                transform_rotation_matrix=transform_rotation_matrix,
+                pnp_landmarks=pnp_landmarks,
+                calibration=calibration,
+                reprojection_error_max_px=reprojection_error_max_px,
+                pnp_method=None,
+                reprojection_error_px=None,
+            )
         return _invalid_observation(
             facial_transform=facial_transform,
             pnp_landmarks=pnp_landmarks,
@@ -147,6 +158,16 @@ def estimate_head_pose(
         flags=cv2.SOLVEPNP_ITERATIVE,
     )
     if not bool(success):
+        if transform_rotation_matrix is not None:
+            return _valid_transform_observation(
+                facial_transform=facial_transform,
+                transform_rotation_matrix=transform_rotation_matrix,
+                pnp_landmarks=pnp_landmarks,
+                calibration=calibration,
+                reprojection_error_max_px=reprojection_error_max_px,
+                pnp_method=PNP_METHOD_NAME,
+                reprojection_error_px=None,
+            )
         return _invalid_observation(
             facial_transform=facial_transform,
             pnp_landmarks=pnp_landmarks,
@@ -161,6 +182,16 @@ def estimate_head_pose(
         cv2.Rodrigues(rotation_vector)[0], dtype=np.float64
     )
     if not _finite_matrix(rotation_matrix_array, expected_shape=(3, 3)):
+        if transform_rotation_matrix is not None:
+            return _valid_transform_observation(
+                facial_transform=facial_transform,
+                transform_rotation_matrix=transform_rotation_matrix,
+                pnp_landmarks=pnp_landmarks,
+                calibration=calibration,
+                reprojection_error_max_px=reprojection_error_max_px,
+                pnp_method=PNP_METHOD_NAME,
+                reprojection_error_px=None,
+            )
         return _invalid_observation(
             facial_transform=facial_transform,
             pnp_landmarks=pnp_landmarks,
@@ -189,6 +220,16 @@ def estimate_head_pose(
         reprojection_error_px is None
         or reprojection_error_px > reprojection_error_max_px
     ):
+        if transform_rotation_matrix is not None:
+            return _valid_transform_observation(
+                facial_transform=facial_transform,
+                transform_rotation_matrix=transform_rotation_matrix,
+                pnp_landmarks=pnp_landmarks,
+                calibration=calibration,
+                reprojection_error_max_px=reprojection_error_max_px,
+                pnp_method=PNP_METHOD_NAME,
+                reprojection_error_px=reprojection_error_px,
+            )
         return _invalid_observation(
             facial_transform=facial_transform,
             pnp_landmarks=pnp_landmarks,
@@ -202,9 +243,17 @@ def estimate_head_pose(
             ),
         )
 
-    rotation_matrix = _matrix_tuple(rotation_matrix_array)
-    quaternion = _quaternion_wxyz(rotation_matrix_array)
-    yaw_radians, pitch_radians, roll_radians = _yaw_pitch_roll(rotation_matrix_array)
+    pose_rotation_matrix_array = (
+        transform_rotation_matrix
+        if transform_rotation_matrix is not None
+        else rotation_matrix_array
+    )
+    rotation_matrix = _matrix_tuple(pose_rotation_matrix_array)
+    quaternion = _quaternion_wxyz(pose_rotation_matrix_array)
+    yaw_radians, pitch_radians, roll_radians = _pose_yaw_pitch_roll(
+        pose_rotation_matrix_array,
+        source_is_mediapipe_transform=transform_rotation_matrix is not None,
+    )
 
     if quaternion is None or not all(
         math.isfinite(value)
@@ -257,6 +306,18 @@ def _facial_transformation_matrix(
         return None, "MediaPipe facial transformation matrix must be finite 4x4."
 
     return _matrix_tuple(matrix_array), None
+
+
+def _transform_rotation_matrix(
+    facial_transform: MatrixTuple | None,
+) -> npt.NDArray[np.float64] | None:
+    if facial_transform is None:
+        return None
+
+    rotation_matrix = np.asarray(facial_transform, dtype=np.float64)[:3, :3]
+    if not _finite_matrix(rotation_matrix, expected_shape=(3, 3)):
+        return None
+    return rotation_matrix
 
 
 def _pnp_landmarks(
@@ -431,6 +492,17 @@ def _yaw_pitch_roll(
     return float(yaw), float(pitch), float(roll)
 
 
+def _pose_yaw_pitch_roll(
+    rotation_matrix: npt.NDArray[np.float64],
+    *,
+    source_is_mediapipe_transform: bool,
+) -> tuple[float, float, float]:
+    yaw, pitch, roll = _yaw_pitch_roll(rotation_matrix)
+    if source_is_mediapipe_transform:
+        return yaw, -pitch, roll
+    return yaw, pitch, roll
+
+
 def _method_name(
     facial_transform: MatrixTuple | None,
 ) -> str:
@@ -477,4 +549,60 @@ def _invalid_observation(
                 message=message,
             ),
         ),
+    )
+
+
+def _valid_transform_observation(
+    *,
+    facial_transform: MatrixTuple | None,
+    transform_rotation_matrix: npt.NDArray[np.float64],
+    pnp_landmarks: tuple[PnPLandmarkEvidence, ...],
+    calibration: CalibrationRecord,
+    reprojection_error_max_px: float,
+    pnp_method: str | None,
+    reprojection_error_px: float | None,
+) -> HeadPoseObservation:
+    rotation_matrix = _matrix_tuple(transform_rotation_matrix)
+    quaternion = _quaternion_wxyz(transform_rotation_matrix)
+    yaw_radians, pitch_radians, roll_radians = _pose_yaw_pitch_roll(
+        transform_rotation_matrix,
+        source_is_mediapipe_transform=True,
+    )
+    if quaternion is None or not all(
+        math.isfinite(value)
+        for value in (*quaternion, yaw_radians, pitch_radians, roll_radians)
+    ):
+        return _invalid_observation(
+            facial_transform=facial_transform,
+            pnp_landmarks=pnp_landmarks,
+            calibration=calibration,
+            reprojection_error_max_px=reprojection_error_max_px,
+            pnp_method=pnp_method,
+            reprojection_error_px=reprojection_error_px,
+            message="MediaPipe facial transform rotation conversion failed.",
+        )
+
+    return HeadPoseObservation(
+        valid=True,
+        method=_method_name(facial_transform),
+        reason_invalid=None,
+        facial_transformation_matrix=facial_transform,
+        pnp_method=pnp_method,
+        pnp_landmarks=pnp_landmarks,
+        pnp_point_count=len(pnp_landmarks),
+        pnp_min_point_count=PNP_MIN_POINT_COUNT,
+        canonical_points_source=CANONICAL_FACE_MODEL_POINTS_SOURCE,
+        camera_intrinsics_policy=calibration.camera_intrinsics_policy,
+        metric_translation_allowed=calibration.metric_translation_allowed,
+        reprojection_error_px=reprojection_error_px,
+        reprojection_error_max_px=reprojection_error_max_px,
+        reprojection_error_threshold_name=PNP_REPROJECTION_ERROR_THRESHOLD_NAME,
+        reprojection_error_threshold_source=PNP_REPROJECTION_ERROR_THRESHOLD_SOURCE,
+        rotation_matrix=rotation_matrix,
+        quaternion_wxyz=quaternion,
+        yaw_radians=yaw_radians,
+        pitch_radians=pitch_radians,
+        roll_radians=roll_radians,
+        translation_camera_3d_m=None,
+        errors=(),
     )

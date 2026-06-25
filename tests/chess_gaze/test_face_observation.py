@@ -385,6 +385,74 @@ def test_mediapipe_observer_reports_face_not_found_for_empty_results(
     }
 
 
+def test_mediapipe_observer_recovers_full_frame_miss_from_right_half_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            _fake_detection_result(
+                face_landmarks=[],
+                face_blendshapes=[],
+                facial_transformation_matrixes=[],
+            ),
+            _fake_detection_result(
+                face_landmarks=[],
+                face_blendshapes=[],
+                facial_transformation_matrixes=[],
+            ),
+            _fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.20, y=0.30, z=0.0),
+                        SimpleNamespace(x=0.60, y=0.70, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [SimpleNamespace(category_name="eyeBlinkLeft", score=0.12)]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((100, 200, 3), dtype=np.uint8),
+        frame_id="f000000080",
+    )
+
+    assert captured["detect_shapes"] == [(100, 200, 3), (100, 100, 3), (100, 100, 3)]
+    assert captured["detect_contiguous"] == [True, True, True]
+    assert observation.selection.present is True
+    assert observation.image_width_px == 200
+    assert observation.image_height_px == 100
+    candidate = observation.selection.candidates[0]
+    assert candidate.frame_id == "f000000080"
+    assert candidate.image_width_px == 200
+    assert candidate.image_height_px == 100
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(120.0)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(30.0)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(160.0)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(70.0)
+    assert candidate.bounding_box_image_norm.x_min == pytest.approx(0.60)
+    assert candidate.bounding_box_image_norm.x_max == pytest.approx(0.80)
+    assert candidate.landmarks_image_px[0].x == pytest.approx(120.0)
+    assert candidate.landmarks_image_px[1].x == pytest.approx(160.0)
+    assert candidate.blendshapes[0].category_name == "eyeBlinkLeft"
+
+
 def build_fake_mediapipe(
     captured: dict[str, Any],
     *,
@@ -408,13 +476,78 @@ def build_fake_mediapipe(
             captured["options"] = options
             return cls()
 
-        def detect(self, image: object) -> SimpleNamespace:
+        def detect(self, image: Any) -> SimpleNamespace:
             captured["image"] = image
             return SimpleNamespace(
                 face_landmarks=face_landmarks,
                 face_blendshapes=face_blendshapes,
                 facial_transformation_matrixes=facial_transformation_matrixes,
             )
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    class FakeImage:
+        def __init__(self, *, image_format: str, data: np.ndarray) -> None:
+            self.image_format = image_format
+            self.data = data
+
+    return SimpleNamespace(
+        tasks=SimpleNamespace(
+            BaseOptions=FakeBaseOptions,
+            vision=SimpleNamespace(
+                FaceLandmarker=FakeFaceLandmarker,
+                FaceLandmarkerOptions=FakeFaceLandmarkerOptions,
+                RunningMode=SimpleNamespace(IMAGE="IMAGE"),
+            ),
+        ),
+        Image=FakeImage,
+        ImageFormat=SimpleNamespace(SRGB="SRGB"),
+    )
+
+
+def _fake_detection_result(
+    *,
+    face_landmarks: list[list[SimpleNamespace]],
+    face_blendshapes: list[list[SimpleNamespace]],
+    facial_transformation_matrixes: list[np.ndarray],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        face_landmarks=face_landmarks,
+        face_blendshapes=face_blendshapes,
+        facial_transformation_matrixes=facial_transformation_matrixes,
+    )
+
+
+def build_sequence_fake_mediapipe(
+    captured: dict[str, Any],
+    *,
+    results: list[SimpleNamespace],
+) -> SimpleNamespace:
+    class FakeBaseOptions:
+        def __init__(self, *, model_asset_path: str) -> None:
+            self.model_asset_path = model_asset_path
+
+    class FakeFaceLandmarkerOptions:
+        def __init__(self, **kwargs: object) -> None:
+            self.__dict__.update(kwargs)
+
+    class FakeFaceLandmarker:
+        @classmethod
+        def create_from_options(
+            cls, options: FakeFaceLandmarkerOptions
+        ) -> FakeFaceLandmarker:
+            captured["options"] = options
+            return cls()
+
+        def detect(self, image: Any) -> SimpleNamespace:
+            captured.setdefault("images", []).append(image)
+            captured["detect_shapes"].append(image.data.shape)
+            captured.setdefault("detect_contiguous", []).append(
+                bool(image.data.flags.c_contiguous)
+            )
+            index = len(captured["detect_shapes"]) - 1
+            return results[index]
 
         def close(self) -> None:
             captured["closed"] = True
