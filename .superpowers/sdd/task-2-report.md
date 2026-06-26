@@ -189,7 +189,7 @@ Output:
 
 ### Commit
 
-- `fdb0b5d` - `fix: make Task 2 inference runtime metadata truthful`
+- `28d64f7` - `fix: make Task 2 inference runtime metadata truthful`
 
 ### Concerns
 
