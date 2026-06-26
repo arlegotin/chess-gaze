@@ -24,10 +24,18 @@ from chess_gaze.scene_calibration import (
     DEFAULT_MONITOR_WIDTH_M,
     default_scene_assumptions,
 )
+from chess_gaze.scene_geometry import (
+    RobustDirectionEstimate,
+    RobustPointEstimate,
+    build_monitor_plane,
+    build_scene_axis_basis,
+)
 from chess_gaze.scene_records import (
     CoordinateFrame3D,
+    SceneAxisBasisRecord,
     SceneEyeMidpointRecord,
     SceneInvalidReason,
+    SceneMonitorPlaneRecord,
     SceneUniGazeRayRecord,
     UnitVector3D,
     Vector3D,
@@ -330,9 +338,8 @@ def _direction_angles_in_degrees(
     )
 
 
-def _scene_center_estimate() -> object:
-    scene_geometry = _scene_geometry()
-    return scene_geometry.RobustPointEstimate(
+def _scene_center_estimate() -> RobustPointEstimate:
+    return RobustPointEstimate(
         point_camera_m=_camera_point(0.0, 0.0, 0.650),
         candidate_count=10,
         finite_candidate_count=10,
@@ -349,10 +356,9 @@ def _scene_center_estimate() -> object:
 
 def _dominant_direction_estimate(
     direction_camera: UnitVector3D | None = None,
-) -> object:
-    scene_geometry = _scene_geometry()
+) -> RobustDirectionEstimate:
     assumptions = default_scene_assumptions()
-    return scene_geometry.RobustDirectionEstimate(
+    return RobustDirectionEstimate(
         direction_camera=direction_camera or _camera_unit_vector(0.0, 0.0, 1.0),
         candidate_count=10,
         finite_candidate_count=10,
@@ -370,20 +376,18 @@ def _dominant_direction_estimate(
     )
 
 
-def _monitor_test_axes() -> object:
-    scene_geometry = _scene_geometry()
+def _monitor_test_axes() -> SceneAxisBasisRecord:
     assumptions = default_scene_assumptions()
-    return scene_geometry.build_scene_axis_basis(
+    return build_scene_axis_basis(
         _dominant_direction_estimate(),
         [_camera_unit_vector(1.0, 0.0, 0.0)],
         assumptions,
     )
 
 
-def _monitor_fixture() -> object:
-    scene_geometry = _scene_geometry()
+def _monitor_fixture() -> SceneMonitorPlaneRecord:
     assumptions = default_scene_assumptions()
-    return scene_geometry.build_monitor_plane(
+    return build_monitor_plane(
         _scene_center_estimate(),
         _dominant_direction_estimate(),
         _monitor_test_axes(),
@@ -1557,12 +1561,8 @@ def test_intersect_ray_with_monitor_reconstructs_frontoparallel_transform() -> N
     assert hit.point_camera_m.y == pytest.approx(expected_hit_xyz[1])
     assert hit.point_camera_m.z == pytest.approx(expected_hit_xyz[2])
     assert hit.point_scene_m is not None
-    assert hit.point_scene_m.x == pytest.approx(
-        monitor.center_scene_m.x + expected_u_m
-    )
-    assert hit.point_scene_m.y == pytest.approx(
-        monitor.center_scene_m.y + expected_v_m
-    )
+    assert hit.point_scene_m.x == pytest.approx(monitor.center_scene_m.x + expected_u_m)
+    assert hit.point_scene_m.y == pytest.approx(monitor.center_scene_m.y + expected_v_m)
     assert hit.point_scene_m.z == pytest.approx(monitor.center_scene_m.z)
 
 
