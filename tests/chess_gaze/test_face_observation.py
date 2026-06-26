@@ -901,7 +901,11 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
                     ]
                 ],
                 face_blendshapes=[
-                    [SimpleNamespace(category_name="left_half_compact_face", score=0.40)]
+                    [
+                        SimpleNamespace(
+                            category_name="left_half_compact_face", score=0.40
+                        )
+                    ]
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
@@ -937,7 +941,7 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
         (540, 960, 3),
         (486, 960, 3),
         (486, 960, 3),
-        (648, 960, 3),
+        (525, 960, 3),
     ]
     assert observation.selection.present is True
     candidate = observation.selection.candidates[0]

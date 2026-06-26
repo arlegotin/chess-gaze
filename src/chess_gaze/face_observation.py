@@ -40,6 +40,10 @@ REGION_CONSENSUS_MIN_IOU = 0.50
 PLAUSIBLE_FACE_AREA_MIN_FRACTION = 0.006
 PLAUSIBLE_FACE_AREA_MAX_FRACTION = 0.045
 REFINEMENT_MAX_AREA_RATIO_FOR_LARGE_FULL_FRAME = 0.45
+OVEREXPANDED_FULL_FRAME_AREA_MIN_FRACTION = 0.030
+OVEREXPANDED_FULL_FRAME_MAX_AREA_RATIO = 0.72
+OVEREXPANDED_FULL_FRAME_MIN_IOU = 0.28
+OVEREXPANDED_FULL_FRAME_MIN_GEOMETRY_SCORE_DELTA = 0.05
 FOCUSED_REGION_SCORE_MULTIPLIER = 0.1
 RIGHT_UPPER_MIDDLE_TOP_FRACTION = 1.0 / 9.0
 RIGHT_UPPER_MIDDLE_BOTTOM_FRACTION = 43.0 / 72.0
@@ -503,6 +507,9 @@ def _full_frame_needs_region_refinement(selection: FaceSelection) -> bool:
     if _large_full_frame_candidate(selected):
         return True
 
+    if _full_frame_candidate_is_overexpanded(selected):
+        return True
+
     return _bbox_height(bbox) < _bbox_width(bbox)
 
 
@@ -586,6 +593,17 @@ def _region_refinement_score(
     ):
         return area * max_iou
 
+    overexpanded_full_frame_refinement_score = (
+        _overexpanded_full_frame_refinement_score(
+            fallback,
+            full_primary,
+            region_selection.region,
+            max_iou,
+        )
+    )
+    if overexpanded_full_frame_refinement_score is not None:
+        return overexpanded_full_frame_refinement_score
+
     top_shift_px = (
         full_primary.bounding_box_image_px.y_min - fallback.bounding_box_image_px.y_min
     )
@@ -642,6 +660,39 @@ def _large_full_frame_refinement_score(
     return _candidate_geometry_score(fallback, region)
 
 
+def _overexpanded_full_frame_refinement_score(
+    fallback: FaceCandidate,
+    full_primary: FaceCandidate,
+    region: _DetectionRegion,
+    max_iou: float,
+) -> float | None:
+    if not _full_frame_candidate_is_overexpanded(full_primary):
+        return None
+    if not _candidate_area_is_plausible(fallback):
+        return None
+    if max_iou < OVEREXPANDED_FULL_FRAME_MIN_IOU:
+        return None
+
+    full_area = _bbox_area(full_primary.bounding_box_image_px)
+    fallback_area = _bbox_area(fallback.bounding_box_image_px)
+    if fallback_area > full_area * OVEREXPANDED_FULL_FRAME_MAX_AREA_RATIO:
+        return None
+
+    full_region = _DetectionRegion(
+        name=DETECTION_REGION_FULL_FRAME,
+        x_min_px=0,
+        y_min_px=0,
+        x_max_px=full_primary.image_width_px,
+        y_max_px=full_primary.image_height_px,
+    )
+    full_score = _candidate_geometry_score(full_primary, full_region)
+    fallback_score = _candidate_geometry_score(fallback, region)
+    if fallback_score - full_score < OVEREXPANDED_FULL_FRAME_MIN_GEOMETRY_SCORE_DELTA:
+        return None
+
+    return fallback_score * max_iou
+
+
 def _candidate_geometry_score(
     candidate: FaceCandidate,
     region: _DetectionRegion,
@@ -678,6 +729,14 @@ def _large_full_frame_candidate(candidate: FaceCandidate) -> bool:
     return (
         short_side >= LARGE_FRAME_MIN_SHORT_SIDE_PX
         and candidate.area_fraction > LARGE_FULL_FRAME_AREA_FRACTION
+    )
+
+
+def _full_frame_candidate_is_overexpanded(candidate: FaceCandidate) -> bool:
+    short_side = min(candidate.image_width_px, candidate.image_height_px)
+    return (
+        short_side >= LARGE_FRAME_MIN_SHORT_SIDE_PX
+        and candidate.area_fraction >= OVEREXPANDED_FULL_FRAME_AREA_MIN_FRACTION
     )
 
 

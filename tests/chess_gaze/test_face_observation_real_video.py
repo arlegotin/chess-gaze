@@ -234,7 +234,7 @@ def test_mediapipe_face_observer_recovers_mix2_reported_visible_faces() -> None:
         observer.close()
 
 
-def test_mediapipe_face_observer_rejects_nakamura_overexpanded_full_frame_faces() -> None:
+def test_mediapipe_observer_rejects_nakamura_overexpanded_faces() -> None:
     video_path = REPO_ROOT / "artifacts/input/nakamura_1.mp4"
     if not video_path.is_file():
         pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
