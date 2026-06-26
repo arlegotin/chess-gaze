@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from chess_gaze.frame_records import EyeRecord, FrameRecord
+from chess_gaze.gaze_observation import pitch_yaw_to_unit_vector
 from chess_gaze.geometry import CoordinateSpace, Point2D
 from chess_gaze.scene_calibration import SceneAssumptions
 from chess_gaze.scene_records import (
@@ -37,10 +38,12 @@ class RobustPointEstimate:
     point_camera_m: Vector3D
     candidate_count: int
     finite_candidate_count: int
+    dropped_non_finite_count: int
     inlier_count: int
     mad_m: tuple[float, float, float]
     thresholds_m: tuple[float, float, float]
     iteration_count: int
+    convergence_tolerance_m: float
     fallback_used: bool
     uncertainty: str
 
@@ -55,6 +58,12 @@ class RobustDirectionEstimate:
     median_angular_residual_radians: float | None
     fallback_used: bool
     uncertainty: str
+
+
+_GEOMETRIC_MEDIAN_MAX_ITERATIONS = 128
+_GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M = 1e-6
+_VECTOR_EPSILON = 1e-8
+_RANSAC_SEED_QUANTILES = (0.0, 0.25, 0.5, 0.75, 1.0)
 
 
 def estimated_camera_model(frame_width: int, frame_height: int) -> SceneCameraModel:
@@ -345,21 +354,265 @@ def robust_scene_center(
     points: Sequence[Vector3D],
     assumptions: SceneAssumptions,
 ) -> RobustPointEstimate:
-    raise NotImplementedError("Task 3 implements robust_scene_center")
+    candidate_count = len(points)
+    finite_points = [point for point in points if _is_finite_vector(point)]
+    finite_candidate_count = len(finite_points)
+    dropped_non_finite_count = candidate_count - finite_candidate_count
+    thresholds = (
+        assumptions.scene_center_min_axis_tolerance_m,
+        assumptions.scene_center_min_axis_tolerance_m,
+        assumptions.scene_center_min_axis_tolerance_m,
+    )
+    mad_m = (0.0, 0.0, 0.0)
+
+    if finite_points:
+        medians = (
+            _median(point.x for point in finite_points),
+            _median(point.y for point in finite_points),
+            _median(point.z for point in finite_points),
+        )
+        mad_m = (
+            _median(abs(point.x - medians[0]) for point in finite_points),
+            _median(abs(point.y - medians[1]) for point in finite_points),
+            _median(abs(point.z - medians[2]) for point in finite_points),
+        )
+        thresholds = tuple(
+            max(
+                3.5 * axis_mad,
+                assumptions.scene_center_min_axis_tolerance_m,
+            )
+            for axis_mad in mad_m
+        )
+        inliers = [
+            point
+            for point in finite_points
+            if abs(point.x - medians[0]) <= thresholds[0]
+            and abs(point.y - medians[1]) <= thresholds[1]
+            and abs(point.z - medians[2]) <= thresholds[2]
+        ]
+    else:
+        inliers = []
+
+    if len(inliers) < assumptions.min_scene_center_inlier_frames:
+        return RobustPointEstimate(
+            point_camera_m=_camera_vector(
+                x=assumptions.default_scene_center_camera_m[0],
+                y=assumptions.default_scene_center_camera_m[1],
+                z=assumptions.default_scene_center_camera_m[2],
+            ),
+            candidate_count=candidate_count,
+            finite_candidate_count=finite_candidate_count,
+            dropped_non_finite_count=dropped_non_finite_count,
+            inlier_count=len(inliers),
+            mad_m=mad_m,
+            thresholds_m=thresholds,
+            iteration_count=0,
+            convergence_tolerance_m=_GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M,
+            fallback_used=True,
+            uncertainty="high",
+        )
+
+    estimate, iteration_count = _geometric_median_camera_point(inliers)
+    return RobustPointEstimate(
+        point_camera_m=estimate,
+        candidate_count=candidate_count,
+        finite_candidate_count=finite_candidate_count,
+        dropped_non_finite_count=dropped_non_finite_count,
+        inlier_count=len(inliers),
+        mad_m=mad_m,
+        thresholds_m=thresholds,
+        iteration_count=iteration_count,
+        convergence_tolerance_m=_GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M,
+        fallback_used=False,
+        uncertainty="medium",
+    )
 
 
 def unigaze_ray_from_frame(
     frame_record: FrameRecord,
     midpoint: SceneEyeMidpointRecord,
 ) -> SceneUniGazeRayRecord:
-    raise NotImplementedError("Task 3 implements unigaze_ray_from_frame")
+    if (
+        not midpoint.valid
+        or midpoint.camera_point_m is None
+        or midpoint.scene_point_m is None
+        or not _is_finite_vector(midpoint.camera_point_m)
+        or not _is_finite_vector(midpoint.scene_point_m)
+    ):
+        return SceneUniGazeRayRecord(
+            valid=False,
+            source="appearance_gaze",
+            origin_camera_m=None,
+            origin_scene_m=None,
+            direction_camera=None,
+            direction_scene=None,
+            direction_source=None,
+            pitch_radians=None,
+            yaw_radians=None,
+            source_reason_invalid=_first_reason(
+                midpoint.source_reason_invalid,
+                "eye midpoint unavailable",
+            ),
+            reason_invalid=SceneInvalidReason.EYE_MIDPOINT_INVALID,
+        )
+
+    appearance_gaze = frame_record.appearance_gaze
+    if (
+        not appearance_gaze.valid
+        or appearance_gaze.pitch_radians is None
+        or appearance_gaze.yaw_radians is None
+    ):
+        source_reason = None
+        if appearance_gaze.reason_invalid is not None:
+            source_reason = appearance_gaze.reason_invalid.value
+        return SceneUniGazeRayRecord(
+            valid=False,
+            source="appearance_gaze",
+            origin_camera_m=None,
+            origin_scene_m=None,
+            direction_camera=None,
+            direction_scene=None,
+            direction_source=None,
+            pitch_radians=None,
+            yaw_radians=None,
+            source_reason_invalid=_first_reason(
+                source_reason,
+                "appearance gaze unavailable",
+            ),
+            reason_invalid=SceneInvalidReason.UNIGAZE_INVALID,
+        )
+
+    direction_xyz = pitch_yaw_to_unit_vector(
+        pitch_radians=appearance_gaze.pitch_radians,
+        yaw_radians=appearance_gaze.yaw_radians,
+    )
+    normalized_direction = _normalize_tuple(direction_xyz)
+    if normalized_direction is None:
+        return SceneUniGazeRayRecord(
+            valid=False,
+            source="appearance_gaze",
+            origin_camera_m=None,
+            origin_scene_m=None,
+            direction_camera=None,
+            direction_scene=None,
+            direction_source=None,
+            pitch_radians=None,
+            yaw_radians=None,
+            source_reason_invalid="appearance gaze direction is non-finite",
+            reason_invalid=SceneInvalidReason.UNIGAZE_INVALID,
+        )
+
+    return SceneUniGazeRayRecord(
+        valid=True,
+        source="appearance_gaze",
+        origin_camera_m=midpoint.camera_point_m,
+        origin_scene_m=midpoint.scene_point_m,
+        direction_camera=_camera_unit_vector(normalized_direction),
+        direction_scene=_scene_unit_vector(normalized_direction),
+        direction_source="appearance_gaze_unigaze_pitch_yaw",
+        pitch_radians=appearance_gaze.pitch_radians,
+        yaw_radians=appearance_gaze.yaw_radians,
+        source_reason_invalid=None,
+        reason_invalid=None,
+    )
 
 
 def robust_main_direction(
     rays: Sequence[SceneUniGazeRayRecord],
     assumptions: SceneAssumptions,
 ) -> RobustDirectionEstimate:
-    raise NotImplementedError("Task 3 implements robust_main_direction")
+    candidate_count = len(rays)
+    candidate_directions: list[tuple[int, tuple[float, float, float]]] = []
+    for frame_order, ray in enumerate(rays):
+        if not ray.valid or ray.direction_camera is None:
+            continue
+        normalized_direction = _normalized_direction(ray.direction_camera)
+        if normalized_direction is None:
+            continue
+        candidate_directions.append((frame_order, normalized_direction))
+
+    finite_candidate_count = len(candidate_directions)
+    best_inlier_indices: list[int] = []
+    best_seed_frame_index = candidate_count + 1
+    best_median_residual: float | None = None
+    best_seed_direction: tuple[float, float, float] | None = None
+
+    for seed_frame_index, seed_direction in _direction_ransac_seeds(
+        candidate_directions
+    ):
+        residuals = [
+            _angular_distance(seed_direction, candidate_direction)
+            for _frame_order, candidate_direction in candidate_directions
+        ]
+        inlier_indices = [
+            index
+            for index, residual in enumerate(residuals)
+            if residual <= assumptions.direction_inlier_angle_radians
+        ]
+        if not inlier_indices:
+            continue
+        median_residual = _median(residuals[index] for index in inlier_indices)
+        if _seed_is_better(
+            candidate_inlier_count=len(inlier_indices),
+            candidate_median_residual=median_residual,
+            candidate_seed_frame_index=seed_frame_index,
+            best_inlier_count=len(best_inlier_indices),
+            best_median_residual=best_median_residual,
+            best_seed_frame_index=best_seed_frame_index,
+        ):
+            best_inlier_indices = inlier_indices
+            best_seed_frame_index = seed_frame_index
+            best_median_residual = median_residual
+            best_seed_direction = seed_direction
+
+    fallback_direction = _camera_unit_vector((0.0, 0.0, 1.0))
+    if (
+        len(best_inlier_indices) < assumptions.min_main_direction_inlier_frames
+        or best_seed_direction is None
+    ):
+        return RobustDirectionEstimate(
+            direction_camera=fallback_direction,
+            candidate_count=candidate_count,
+            finite_candidate_count=finite_candidate_count,
+            inlier_count=len(best_inlier_indices),
+            angle_threshold_radians=assumptions.direction_inlier_angle_radians,
+            median_angular_residual_radians=best_median_residual,
+            fallback_used=True,
+            uncertainty="high",
+        )
+
+    inlier_directions = [
+        candidate_directions[index][1] for index in best_inlier_indices
+    ]
+    mean_direction = _normalize_tuple(
+        (
+            sum(direction[0] for direction in inlier_directions),
+            sum(direction[1] for direction in inlier_directions),
+            sum(direction[2] for direction in inlier_directions),
+        )
+    )
+    if mean_direction is None:
+        return RobustDirectionEstimate(
+            direction_camera=fallback_direction,
+            candidate_count=candidate_count,
+            finite_candidate_count=finite_candidate_count,
+            inlier_count=len(best_inlier_indices),
+            angle_threshold_radians=assumptions.direction_inlier_angle_radians,
+            median_angular_residual_radians=best_median_residual,
+            fallback_used=True,
+            uncertainty="high",
+        )
+
+    return RobustDirectionEstimate(
+        direction_camera=_camera_unit_vector(mean_direction),
+        candidate_count=candidate_count,
+        finite_candidate_count=finite_candidate_count,
+        inlier_count=len(best_inlier_indices),
+        angle_threshold_radians=assumptions.direction_inlier_angle_radians,
+        median_angular_residual_radians=best_median_residual,
+        fallback_used=False,
+        uncertainty="medium",
+    )
 
 
 def build_scene_axis_basis(
@@ -367,7 +620,72 @@ def build_scene_axis_basis(
     eye_pair_right_vectors: Sequence[UnitVector3D],
     assumptions: SceneAssumptions,
 ) -> SceneAxisBasisRecord:
-    raise NotImplementedError("Task 4 implements build_scene_axis_basis")
+    del assumptions
+    fallbacks: list[str] = []
+    forward_direction = _normalized_direction(direction.direction_camera)
+    if forward_direction is None:
+        forward_direction = (0.0, 0.0, 1.0)
+        _append_fallback(
+            fallbacks,
+            "forward_axis_invalid_used_default_forward",
+        )
+    back_direction = _negate_tuple(forward_direction)
+    preferred_right = _preferred_right_direction(eye_pair_right_vectors, fallbacks)
+
+    right_direction = _project_onto_plane(preferred_right, back_direction)
+    if right_direction is None:
+        _append_fallback(
+            fallbacks,
+            "right_axis_parallel_to_forward_used_camera_right",
+        )
+        right_direction = _project_onto_plane((1.0, 0.0, 0.0), back_direction)
+    if right_direction is None:
+        _append_fallback(
+            fallbacks,
+            "right_axis_camera_right_parallel_used_camera_forward",
+        )
+        right_direction = _project_onto_plane((0.0, 0.0, 1.0), back_direction)
+    if right_direction is None:
+        right_direction = _project_onto_plane((0.0, -1.0, 0.0), back_direction)
+    if right_direction is None:
+        right_direction = (1.0, 0.0, 0.0)
+
+    preferred_up = (0.0, -1.0, 0.0)
+    up_direction = _project_onto_plane(preferred_up, back_direction)
+    if up_direction is None:
+        _append_fallback(
+            fallbacks,
+            "up_axis_camera_up_parallel_to_back_used_cross_product",
+        )
+        up_direction = _normalize_tuple(_cross(back_direction, right_direction))
+    if up_direction is None:
+        up_direction = (0.0, 0.0, -1.0)
+
+    right_direction = _normalize_tuple(_cross(up_direction, back_direction))
+    if right_direction is None:
+        right_direction = (1.0, 0.0, 0.0)
+        _append_fallback(
+            fallbacks,
+            "right_axis_cross_product_invalid_used_camera_right",
+        )
+    up_direction = _normalize_tuple(_cross(back_direction, right_direction))
+    if up_direction is None:
+        up_direction = (0.0, 0.0, -1.0)
+        _append_fallback(
+            fallbacks,
+            "up_axis_cross_product_invalid_used_camera_forward",
+        )
+
+    determinant = _determinant(right_direction, up_direction, back_direction)
+    return SceneAxisBasisRecord(
+        right_camera=_camera_unit_vector(right_direction),
+        up_camera=_camera_unit_vector(up_direction),
+        back_camera=_camera_unit_vector(back_direction),
+        forward_camera=_camera_unit_vector(forward_direction),
+        determinant_right_up_back=determinant,
+        convention="right_up_back_columns_right_handed",
+        fallbacks=fallbacks,
+    )
 
 
 def build_monitor_plane(
@@ -520,6 +838,28 @@ def _scene_vector(*, x: float, y: float, z: float) -> Vector3D:
     )
 
 
+def _camera_unit_vector(
+    xyz: tuple[float, float, float],
+) -> UnitVector3D:
+    return UnitVector3D(
+        space=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+        x=xyz[0],
+        y=xyz[1],
+        z=xyz[2],
+    )
+
+
+def _scene_unit_vector(
+    xyz: tuple[float, float, float],
+) -> UnitVector3D:
+    return UnitVector3D(
+        space=CoordinateFrame3D.SCENE_PSEUDO_M,
+        x=xyz[0],
+        y=xyz[1],
+        z=xyz[2],
+    )
+
+
 def _point_in_frame(
     point: Point2D | None,
     camera: SceneCameraModel,
@@ -545,6 +885,261 @@ def _source_reason(eye: EyeRecord) -> str | None:
     if eye.reason_invalid is None:
         return None
     return eye.reason_invalid.value
+
+
+def _is_finite_vector(vector: Vector3D) -> bool:
+    return (
+        math.isfinite(vector.x)
+        and math.isfinite(vector.y)
+        and math.isfinite(vector.z)
+    )
+
+
+def _normalized_direction(
+    vector: UnitVector3D | Vector3D,
+) -> tuple[float, float, float] | None:
+    return _normalize_tuple((vector.x, vector.y, vector.z))
+
+
+def _normalize_tuple(
+    xyz: tuple[float, float, float],
+) -> tuple[float, float, float] | None:
+    if not all(math.isfinite(value) for value in xyz):
+        return None
+    norm = math.sqrt(
+        (xyz[0] * xyz[0]) + (xyz[1] * xyz[1]) + (xyz[2] * xyz[2])
+    )
+    if norm <= _VECTOR_EPSILON:
+        return None
+    return (xyz[0] / norm, xyz[1] / norm, xyz[2] / norm)
+
+
+def _median(values: Sequence[float] | list[float] | tuple[float, ...] | object) -> float:
+    sorted_values = sorted(values)
+    if not sorted_values:
+        raise ValueError("median requires at least one value")
+    midpoint = len(sorted_values) // 2
+    if len(sorted_values) % 2 == 1:
+        return float(sorted_values[midpoint])
+    return float((sorted_values[midpoint - 1] + sorted_values[midpoint]) / 2.0)
+
+
+def _geometric_median_camera_point(
+    points: Sequence[Vector3D],
+) -> tuple[Vector3D, int]:
+    current = (
+        _median(point.x for point in points),
+        _median(point.y for point in points),
+        _median(point.z for point in points),
+    )
+    for iteration_count in range(1, _GEOMETRIC_MEDIAN_MAX_ITERATIONS + 1):
+        numerator = [0.0, 0.0, 0.0]
+        denominator = 0.0
+        for point in points:
+            point_xyz = (point.x, point.y, point.z)
+            distance = _distance(current, point_xyz)
+            if distance <= _GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M:
+                return (
+                    _camera_vector(
+                        x=point.x,
+                        y=point.y,
+                        z=point.z,
+                    ),
+                    iteration_count,
+                )
+            weight = 1.0 / distance
+            numerator[0] += point.x * weight
+            numerator[1] += point.y * weight
+            numerator[2] += point.z * weight
+            denominator += weight
+        next_point = (
+            numerator[0] / denominator,
+            numerator[1] / denominator,
+            numerator[2] / denominator,
+        )
+        if _distance(current, next_point) <= _GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M:
+            return (
+                _camera_vector(
+                    x=next_point[0],
+                    y=next_point[1],
+                    z=next_point[2],
+                ),
+                iteration_count,
+            )
+        current = next_point
+    return (
+        _camera_vector(x=current[0], y=current[1], z=current[2]),
+        _GEOMETRIC_MEDIAN_MAX_ITERATIONS,
+    )
+
+
+def _distance(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> float:
+    return math.sqrt(
+        ((left[0] - right[0]) ** 2)
+        + ((left[1] - right[1]) ** 2)
+        + ((left[2] - right[2]) ** 2)
+    )
+
+
+def _direction_ransac_seeds(
+    candidate_directions: Sequence[tuple[int, tuple[float, float, float]]],
+) -> list[tuple[int, tuple[float, float, float]]]:
+    if not candidate_directions:
+        return []
+    seeds: list[tuple[int, tuple[float, float, float]]] = []
+    used_candidate_indices: set[int] = set()
+    candidate_count = len(candidate_directions)
+    for quantile in _RANSAC_SEED_QUANTILES:
+        candidate_index = round((candidate_count - 1) * quantile)
+        if candidate_index in used_candidate_indices:
+            continue
+        used_candidate_indices.add(candidate_index)
+        seeds.append(candidate_directions[candidate_index])
+
+    median_seed = _normalize_tuple(
+        (
+            _median(direction[0] for _frame_order, direction in candidate_directions),
+            _median(direction[1] for _frame_order, direction in candidate_directions),
+            _median(direction[2] for _frame_order, direction in candidate_directions),
+        )
+    )
+    if median_seed is not None:
+        seeds.append((candidate_directions[-1][0] + 1, median_seed))
+    return seeds
+
+
+def _angular_distance(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> float:
+    dot_product = max(-1.0, min(1.0, _dot(left, right)))
+    return math.acos(dot_product)
+
+
+def _seed_is_better(
+    *,
+    candidate_inlier_count: int,
+    candidate_median_residual: float,
+    candidate_seed_frame_index: int,
+    best_inlier_count: int,
+    best_median_residual: float | None,
+    best_seed_frame_index: int,
+) -> bool:
+    if candidate_inlier_count != best_inlier_count:
+        return candidate_inlier_count > best_inlier_count
+    if best_median_residual is None:
+        return True
+    if not math.isclose(candidate_median_residual, best_median_residual):
+        return candidate_median_residual < best_median_residual
+    return candidate_seed_frame_index < best_seed_frame_index
+
+
+def _preferred_right_direction(
+    eye_pair_right_vectors: Sequence[UnitVector3D],
+    fallbacks: list[str],
+) -> tuple[float, float, float]:
+    valid_vectors = [
+        normalized_direction
+        for vector in eye_pair_right_vectors
+        if (normalized_direction := _normalized_direction(vector)) is not None
+    ]
+    if not valid_vectors:
+        _append_fallback(
+            fallbacks,
+            "right_axis_missing_eye_pair_evidence_used_camera_right",
+        )
+        return (1.0, 0.0, 0.0)
+    mean_direction = _normalize_tuple(
+        (
+            sum(vector[0] for vector in valid_vectors),
+            sum(vector[1] for vector in valid_vectors),
+            sum(vector[2] for vector in valid_vectors),
+        )
+    )
+    if mean_direction is None:
+        _append_fallback(
+            fallbacks,
+            "right_axis_eye_pair_mean_degenerate_used_camera_right",
+        )
+        return (1.0, 0.0, 0.0)
+    return mean_direction
+
+
+def _project_onto_plane(
+    vector: tuple[float, float, float],
+    plane_normal: tuple[float, float, float],
+) -> tuple[float, float, float] | None:
+    projected = _subtract(
+        vector,
+        _scale(plane_normal, _dot(vector, plane_normal)),
+    )
+    return _normalize_tuple(projected)
+
+
+def _dot(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> float:
+    return (
+        (left[0] * right[0])
+        + (left[1] * right[1])
+        + (left[2] * right[2])
+    )
+
+
+def _cross(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        (left[1] * right[2]) - (left[2] * right[1]),
+        (left[2] * right[0]) - (left[0] * right[2]),
+        (left[0] * right[1]) - (left[1] * right[0]),
+    )
+
+
+def _scale(
+    vector: tuple[float, float, float],
+    scalar: float,
+) -> tuple[float, float, float]:
+    return (vector[0] * scalar, vector[1] * scalar, vector[2] * scalar)
+
+
+def _subtract(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        left[0] - right[0],
+        left[1] - right[1],
+        left[2] - right[2],
+    )
+
+
+def _negate_tuple(
+    vector: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (-vector[0], -vector[1], -vector[2])
+
+
+def _determinant(
+    right: tuple[float, float, float],
+    up: tuple[float, float, float],
+    back: tuple[float, float, float],
+) -> float:
+    return (
+        right[0] * ((up[1] * back[2]) - (up[2] * back[1]))
+        - right[1] * ((up[0] * back[2]) - (up[2] * back[0]))
+        + right[2] * ((up[0] * back[1]) - (up[1] * back[0]))
+    )
+
+
+def _append_fallback(fallbacks: list[str], reason: str) -> None:
+    if reason not in fallbacks:
+        fallbacks.append(reason)
 
 
 def _persist_invalid_coordinate_space_diagnostics(
