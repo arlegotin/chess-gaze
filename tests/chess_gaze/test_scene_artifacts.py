@@ -353,6 +353,68 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
     assert viewer_data.summary.valid_monitor_hit_frames == 6
 
 
+def test_scene_frame_direction_maps_positive_pitch_to_scene_up(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    layout = _layout(run_dir)
+    layout.records_dir.mkdir(parents=True)
+    video = VideoManifest(
+        source_path="artifacts/input/synthetic_upward_gaze_source.mp4",
+        source_sha256="b" * 64,
+        frame_width=1920,
+        frame_height=1080,
+        frame_count_decoded=7,
+    )
+    run_manifest = RunManifest(
+        run_id="20260626T123000Z-scene-up",
+        created_at_utc=datetime(2026, 6, 26, 12, 30, tzinfo=UTC).isoformat(),
+        input_path=video.source_path,
+        video=video,
+    )
+    neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
+    upward_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.20)
+    frames = [
+        _frame(index).model_copy(
+            update={
+                "appearance_gaze": neutral_gaze,
+                "geometric_gaze": neutral_gaze,
+                "recommended_gaze": neutral_gaze,
+            }
+        )
+        for index in range(6)
+    ]
+    frames.append(
+        _frame(6).model_copy(
+            update={
+                "appearance_gaze": upward_gaze,
+                "geometric_gaze": upward_gaze,
+                "recommended_gaze": upward_gaze,
+            }
+        )
+    )
+    (run_dir / "run_manifest.json").write_text(
+        run_manifest.model_dump_json(), encoding="utf-8"
+    )
+    (run_dir / "video_manifest.json").write_text(
+        video.model_dump_json(), encoding="utf-8"
+    )
+    (layout.records_dir / "frames.jsonl").write_text(
+        "".join(frame.model_dump_json() + "\n" for frame in frames),
+        encoding="utf-8",
+    )
+
+    result = build_scene_artifacts(layout)
+    records = load_scene_frames(result.paths.scene_frames_jsonl_path)
+    upward_record = records[6]
+
+    assert upward_record.unigaze_ray.valid is True
+    assert upward_record.unigaze_ray.direction_camera is not None
+    assert upward_record.unigaze_ray.direction_scene is not None
+    assert upward_record.unigaze_ray.direction_camera.y < 0.0
+    assert upward_record.unigaze_ray.direction_scene.y > 0.0
+
+
 def test_build_viewer_scene_data_uses_result_manifest_assumptions(
     tmp_path: Path,
 ) -> None:
