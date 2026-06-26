@@ -17,6 +17,8 @@ from chess_gaze.qa_summary import (
     build_qa_summary,
     validate_run_artifacts,
 )
+from chess_gaze.scene_artifacts import build_scene_artifacts, build_viewer_scene_data
+from chess_gaze.scene_records import ViewerSceneData
 
 
 def _point(x: float, y: float) -> Point2D:
@@ -215,6 +217,7 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
         "".join(json.dumps(line) + "\n" for line in error_lines),
         encoding="utf-8",
     )
+    _write_scene_and_viewer_artifacts(layout)
     return layout
 
 
@@ -228,6 +231,8 @@ def _make_layout(tmp_path: Path) -> RunLayout:
     left_eye_crops_dir = eyes_crops_dir / "left"
     right_eye_crops_dir = eyes_crops_dir / "right"
     records_dir = run_dir / "records"
+    scene_dir = run_dir / "scene"
+    viewer_dir = run_dir / "viewer"
     for directory in (
         raw_frames_dir,
         processed_frames_dir,
@@ -235,6 +240,8 @@ def _make_layout(tmp_path: Path) -> RunLayout:
         left_eye_crops_dir,
         right_eye_crops_dir,
         records_dir,
+        scene_dir,
+        viewer_dir,
     ):
         directory.mkdir(parents=True)
     return RunLayout(
@@ -247,6 +254,24 @@ def _make_layout(tmp_path: Path) -> RunLayout:
         left_eye_crops_dir=left_eye_crops_dir,
         right_eye_crops_dir=right_eye_crops_dir,
         records_dir=records_dir,
+    )
+
+
+def _write_scene_and_viewer_artifacts(layout: RunLayout) -> None:
+    scene_result = build_scene_artifacts(layout)
+    viewer_data = build_viewer_scene_data(scene_result)
+    (layout.viewer_dir / "scene-data.json").write_text(
+        json.dumps(
+            viewer_data.model_dump(mode="json", by_alias=True),
+            allow_nan=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (layout.viewer_dir / "index.html").write_text(
+        "<!doctype html><title>Chess Gaze Scene Viewer</title>\n",
+        encoding="utf-8",
     )
 
 
@@ -350,6 +375,100 @@ def test_build_qa_summary_revalidates_counts_rates_errors_and_samples(
     assert summary.artifact_validation.counts_match is True
     assert summary.built_from_disk_at_utc.endswith("Z")
     datetime.fromisoformat(summary.built_from_disk_at_utc.replace("Z", "+00:00"))
+
+
+def test_qa_summary_validates_scene_artifacts_and_counts_scene_bytes(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=5)
+    _write_scene_and_viewer_artifacts(layout)
+
+    validation = validate_run_artifacts(layout)
+    summary = build_qa_summary(layout)
+    viewer_data = ViewerSceneData.model_validate_json(
+        (layout.viewer_dir / "scene-data.json").read_text(encoding="utf-8")
+    )
+
+    assert summary.source_artifacts == validation.source_artifacts
+    assert summary.source_artifacts == summary.artifact_validation.source_artifacts
+    assert {
+        "scene_manifest",
+        "scene_summary",
+        "scene_frames_jsonl",
+        "viewer_index",
+        "viewer_scene_data",
+    }.issubset(summary.source_artifacts)
+    assert summary.counts.decoded_frames == 5
+    assert summary.counts.frame_records == 5
+    assert summary.counts.scene_frame_records == 5
+    assert validation.counts.scene_frame_records == 5
+    assert viewer_data.frame_count == 5
+    scene_frame_lines = (layout.records_dir / "scene_frames.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert [json.loads(line)["frame_index"] for line in scene_frame_lines] == [
+        0,
+        1,
+        2,
+        3,
+        4,
+    ]
+    assert summary.byte_counts.scene_jsonl_bytes == (
+        layout.records_dir / "scene_frames.jsonl"
+    ).stat().st_size
+    assert summary.byte_counts.scene_bytes == sum(
+        path.stat().st_size for path in layout.scene_dir.rglob("*") if path.is_file()
+    )
+    assert summary.byte_counts.viewer_bytes == sum(
+        path.stat().st_size for path in layout.viewer_dir.rglob("*") if path.is_file()
+    )
+    assert summary.byte_counts.total_run_bytes == sum(
+        path.stat().st_size for path in layout.run_dir.rglob("*") if path.is_file()
+    )
+    assert summary.artifact_validation.schema_validation_passed is True
+    assert summary.artifact_validation.counts_match is True
+
+
+def test_qa_summary_reports_missing_or_malformed_scene_artifacts(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=3)
+    _write_scene_and_viewer_artifacts(layout)
+    (layout.scene_dir / "scene_manifest.json").unlink()
+    scene_frame_lines = (layout.records_dir / "scene_frames.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    (layout.records_dir / "scene_frames.jsonl").write_text(
+        scene_frame_lines[1] + "\n",
+        encoding="utf-8",
+    )
+    (layout.viewer_dir / "scene-data.json").write_text(
+        "{malformed-json\n",
+        encoding="utf-8",
+    )
+
+    validation = validate_run_artifacts(layout)
+    summary = build_qa_summary(layout)
+
+    assert validation.schema_validation_passed is False
+    assert validation.counts_match is False
+    assert validation.final_status == "failed"
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.validation_errors == validation.validation_errors
+    assert any(
+        "scene manifest" in error for error in validation.validation_errors
+    )
+    assert any(
+        "Invalid viewer scene data" in error for error in validation.validation_errors
+    )
+    assert any(
+        "scene frame record count does not match decoded frame count: 1 != 3" in error
+        for error in validation.validation_errors
+    )
+    assert any(
+        "scene frame records are not contiguous from decoded frame zero" in error
+        for error in validation.validation_errors
+    )
 
 
 def test_build_qa_summary_does_not_treat_warning_only_records_as_failures(

@@ -19,6 +19,9 @@ from chess_gaze.pipeline import (
     analyze_video,
 )
 from chess_gaze.qa_summary import QASummary
+from chess_gaze.scene_artifacts import (
+    build_scene_artifacts as real_build_scene_artifacts,
+)
 
 
 def make_tiny_video(path: Path, frame_count: int = 3) -> None:
@@ -316,6 +319,112 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
         path.stat().st_size
         for path in result.layout.run_dir.rglob("*")
         if path.is_file()
+    )
+
+
+def test_analyze_video_writes_scene_artifacts_and_viewer_files(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=4)
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert result.scene_manifest_path == result.layout.scene_dir / "scene_manifest.json"
+    assert result.scene_summary_path == result.layout.scene_dir / "scene_summary.json"
+    assert result.scene_frames_jsonl_path == result.layout.records_dir / (
+        "scene_frames.jsonl"
+    )
+    assert result.viewer_index_path == result.layout.viewer_dir / "index.html"
+    assert result.viewer_scene_data_path == result.layout.viewer_dir / "scene-data.json"
+    assert result.scene_manifest_path.is_file()
+    assert result.scene_summary_path.is_file()
+    assert result.scene_frames_jsonl_path.is_file()
+    assert result.viewer_index_path.is_file()
+    assert result.viewer_scene_data_path.is_file()
+
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
+    assert result.validated_record_count == 4
+    assert result.valid_scene_frame_count == 4
+    assert result.valid_monitor_hit_count == 4
+    assert summary.counts.frame_records == 4
+    assert summary.counts.scene_frame_records == 4
+    assert summary.counts.scene_frame_records == summary.counts.decoded_frames
+    assert summary.source_artifacts == summary.artifact_validation.source_artifacts
+    assert {
+        "scene_manifest",
+        "scene_summary",
+        "scene_frames_jsonl",
+        "viewer_index",
+        "viewer_scene_data",
+    }.issubset(summary.source_artifacts)
+    scene_frame_lines = _jsonl(result.scene_frames_jsonl_path)
+    assert [line["frame_index"] for line in scene_frame_lines] == [0, 1, 2, 3]
+    viewer_data = json.loads(result.viewer_scene_data_path.read_text(encoding="utf-8"))
+    assert viewer_data["schema_version"] == "gaze-scene-viewer-data-v1"
+    assert viewer_data["frame_count"] == 4
+    assert summary.byte_counts.scene_jsonl_bytes == (
+        result.scene_frames_jsonl_path.stat().st_size
+    )
+    assert summary.byte_counts.scene_bytes >= (
+        result.scene_manifest_path.stat().st_size
+        + result.scene_summary_path.stat().st_size
+    )
+    assert summary.byte_counts.viewer_bytes >= (
+        result.viewer_index_path.stat().st_size
+        + result.viewer_scene_data_path.stat().st_size
+    )
+    assert summary.byte_counts.total_run_bytes == sum(
+        path.stat().st_size
+        for path in result.layout.run_dir.rglob("*")
+        if path.is_file()
+    )
+
+
+def test_analyze_video_fails_when_scene_artifact_validation_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    def build_then_corrupt_scene_artifacts(layout: object) -> object:
+        scene_result = real_build_scene_artifacts(cast(Any, layout))
+        scene_result.paths.scene_frames_jsonl_path.write_text(
+            '{"frame_id":"f000000000","frame_index":99}\n',
+            encoding="utf-8",
+        )
+        return scene_result
+
+    monkeypatch.setattr(
+        pipeline,
+        "build_scene_artifacts",
+        build_then_corrupt_scene_artifacts,
+        raising=False,
+    )
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+    [run_dir] = (tmp_path / "output" / "tiny" / "runs").iterdir()
+    summary = QASummary.model_validate_json(
+        (run_dir / "qa_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert any(
+        "Invalid scene frame record" in error
+        for error in summary.artifact_validation.validation_errors
     )
 
 

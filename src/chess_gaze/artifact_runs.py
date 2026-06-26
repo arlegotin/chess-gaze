@@ -23,6 +23,14 @@ class RunLayout:
     right_eye_crops_dir: Path
     records_dir: Path
 
+    @property
+    def scene_dir(self) -> Path:
+        return self.run_dir / "scene"
+
+    @property
+    def viewer_dir(self) -> Path:
+        return self.run_dir / "viewer"
+
     def relative_artifact_path(self, artifact_path: Path) -> Path:
         return artifact_path.relative_to(self.run_dir)
 
@@ -54,6 +62,8 @@ def create_run_layout(
     left_eye_crops_dir = eyes_crops_dir / "left"
     right_eye_crops_dir = eyes_crops_dir / "right"
     records_dir = run_dir / "records"
+    scene_dir = run_dir / "scene"
+    viewer_dir = run_dir / "viewer"
 
     for directory in (
         raw_frames_dir,
@@ -62,6 +72,8 @@ def create_run_layout(
         left_eye_crops_dir,
         right_eye_crops_dir,
         records_dir,
+        scene_dir,
+        viewer_dir,
     ):
         directory.mkdir(parents=True, exist_ok=False)
 

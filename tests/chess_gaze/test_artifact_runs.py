@@ -31,9 +31,17 @@ def test_run_layout_is_immutable_and_complete(tmp_path: Path) -> None:
     assert layout.raw_frames_dir.is_dir()
     assert layout.processed_frames_dir.is_dir()
     assert layout.records_dir.is_dir()
+    assert layout.scene_dir.is_dir()
+    assert layout.viewer_dir.is_dir()
     assert layout.face_crops_dir.is_dir()
     assert layout.left_eye_crops_dir.is_dir()
     assert layout.right_eye_crops_dir.is_dir()
+    assert layout.raw_frames_dir == layout.run_dir / "raw_frames"
+    assert layout.processed_frames_dir == layout.run_dir / "processed_frames"
+    assert layout.crops_dir == layout.run_dir / "crops"
+    assert layout.records_dir == layout.run_dir / "records"
+    assert layout.scene_dir == layout.run_dir / "scene"
+    assert layout.viewer_dir == layout.run_dir / "viewer"
 
     with pytest.raises(FrozenInstanceError):
         cast(Any, layout).run_dir = tmp_path

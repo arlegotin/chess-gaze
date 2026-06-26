@@ -20,6 +20,12 @@ from chess_gaze.frame_records import (
     VideoManifest,
 )
 from chess_gaze.geometry import StrictSchemaModel
+from chess_gaze.scene_records import (
+    SceneFrameRecord,
+    SceneManifest,
+    SceneSummary,
+    ViewerSceneData,
+)
 
 QA_SAMPLE_COUNT = 30
 REPRESENTATIVE_FAILURE_COUNT = 20
@@ -30,6 +36,11 @@ SOURCE_ARTIFACTS = {
     "video_manifest": "video_manifest.json",
     "frames_jsonl": "records/frames.jsonl",
     "errors_jsonl": "records/errors.jsonl",
+    "scene_manifest": "scene/scene_manifest.json",
+    "scene_summary": "scene/scene_summary.json",
+    "scene_frames_jsonl": "records/scene_frames.jsonl",
+    "viewer_index": "viewer/index.html",
+    "viewer_scene_data": "viewer/scene-data.json",
     "raw_frames": "raw_frames",
     "processed_frames": "processed_frames",
     "crops": "crops",
@@ -52,6 +63,7 @@ class ArtifactValidationError(RuntimeError):
 class ArtifactCounts(StrictSchemaModel):
     decoded_frames: int
     frame_records: int
+    scene_frame_records: int
     raw_frames: int
     processed_frames: int
     crop_files: int
@@ -62,6 +74,9 @@ class ByteCounts(StrictSchemaModel):
     processed_frames_bytes: int
     crops_bytes: int
     jsonl_bytes: int
+    scene_jsonl_bytes: int
+    scene_bytes: int
+    viewer_bytes: int
     total_run_bytes: int
 
 
@@ -120,9 +135,15 @@ class _LoadedRunArtifacts(StrictSchemaModel):
     video_manifest: VideoManifest
     frame_records: list[FrameRecord]
     error_records: list[FrameErrorRecord]
+    scene_manifest: SceneManifest | None
+    scene_summary: SceneSummary | None
+    scene_frame_records: list[SceneFrameRecord]
+    viewer_scene_data: ViewerSceneData | None
     raw_frame_paths: list[Path]
     processed_frame_paths: list[Path]
     crop_paths: list[Path]
+    scene_paths: list[Path]
+    viewer_paths: list[Path]
     schema_validation_errors: list[str]
 
 
@@ -141,7 +162,7 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
         run_id=loaded.run_manifest.run_id,
         source_video_path=loaded.run_manifest.input_path,
         source_video_sha256=loaded.video_manifest.source_sha256,
-        source_artifacts=dict(SOURCE_ARTIFACTS),
+        source_artifacts=artifact_validation.source_artifacts,
         counts=artifact_validation.counts,
         byte_counts=artifact_validation.byte_counts,
         rates=_detection_rates(loaded.frame_records),
@@ -175,15 +196,52 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
     error_records, frame_error_record_errors = _read_jsonl_model(
         run_layout.records_dir / "errors.jsonl", FrameErrorRecord, "frame error"
     )
+    scene_manifest, scene_manifest_errors = _read_optional_json_model(
+        run_layout.scene_dir / "scene_manifest.json",
+        SceneManifest,
+        "scene manifest",
+    )
+    scene_summary, scene_summary_errors = _read_optional_json_model(
+        run_layout.scene_dir / "scene_summary.json",
+        SceneSummary,
+        "scene summary",
+    )
+    scene_frame_records, scene_frame_record_errors = _read_jsonl_model(
+        run_layout.records_dir / "scene_frames.jsonl",
+        SceneFrameRecord,
+        "scene frame",
+    )
+    viewer_scene_data, viewer_scene_data_errors = _read_optional_json_model(
+        run_layout.viewer_dir / "scene-data.json",
+        ViewerSceneData,
+        "viewer scene data",
+    )
+    viewer_index_errors = _required_file_errors(
+        run_layout.viewer_dir / "index.html", "viewer index"
+    )
     return _LoadedRunArtifacts(
         run_manifest=run_manifest,
         video_manifest=video_manifest,
         frame_records=frame_records,
         error_records=error_records,
+        scene_manifest=scene_manifest,
+        scene_summary=scene_summary,
+        scene_frame_records=scene_frame_records,
+        viewer_scene_data=viewer_scene_data,
         raw_frame_paths=_artifact_files(run_layout.raw_frames_dir),
         processed_frame_paths=_artifact_files(run_layout.processed_frames_dir),
         crop_paths=_artifact_files(run_layout.crops_dir),
-        schema_validation_errors=frame_record_errors + frame_error_record_errors,
+        scene_paths=_artifact_files(run_layout.scene_dir),
+        viewer_paths=_artifact_files(run_layout.viewer_dir),
+        schema_validation_errors=(
+            frame_record_errors
+            + frame_error_record_errors
+            + scene_manifest_errors
+            + scene_summary_errors
+            + scene_frame_record_errors
+            + viewer_scene_data_errors
+            + viewer_index_errors
+        ),
     )
 
 
@@ -192,7 +250,9 @@ def _validate_loaded_run_artifacts(
 ) -> ArtifactValidationResult:
     counts = _artifact_counts(loaded)
     byte_counts = _byte_counts(run_layout, loaded)
-    count_validation_errors = _count_validation_errors(counts, loaded.frame_records)
+    count_validation_errors = _count_validation_errors(
+        counts, loaded.frame_records, loaded.scene_frame_records
+    )
     validation_errors = loaded.schema_validation_errors + count_validation_errors
     final_status: Literal["complete", "failed"] = (
         "complete" if not validation_errors else "failed"
@@ -216,6 +276,20 @@ def _read_json_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) ->
             CliErrorCode.SCHEMA_VALIDATION_FAILED,
             f"Invalid JSON artifact at {path}: {exc}",
         ) from exc
+
+
+def _read_optional_json_model[ModelT: BaseModel](
+    path: Path, model_type: type[ModelT], artifact_name: str
+) -> tuple[ModelT | None, list[str]]:
+    try:
+        return model_type.model_validate_json(path.read_text(encoding="utf-8")), []
+    except (OSError, ValueError) as exc:
+        return None, [
+            (
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Invalid {artifact_name} at {path}: {exc}"
+            )
+        ]
 
 
 def _read_jsonl_model[ModelT: BaseModel](
@@ -246,6 +320,17 @@ def _read_jsonl_model[ModelT: BaseModel](
     return records, validation_errors
 
 
+def _required_file_errors(path: Path, artifact_name: str) -> list[str]:
+    if path.is_file():
+        return []
+    return [
+        (
+            f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+            f"Missing {artifact_name} artifact at {path}"
+        )
+    ]
+
+
 def _artifact_files(directory: Path) -> list[Path]:
     if not directory.exists():
         return []
@@ -256,6 +341,7 @@ def _artifact_counts(loaded: _LoadedRunArtifacts) -> ArtifactCounts:
     return ArtifactCounts(
         decoded_frames=loaded.video_manifest.frame_count_decoded,
         frame_records=len(loaded.frame_records),
+        scene_frame_records=len(loaded.scene_frame_records),
         raw_frames=len(loaded.raw_frame_paths),
         processed_frames=len(loaded.processed_frame_paths),
         crop_files=len(loaded.crop_paths),
@@ -265,11 +351,15 @@ def _artifact_counts(loaded: _LoadedRunArtifacts) -> ArtifactCounts:
 def _byte_counts(run_layout: RunLayout, loaded: _LoadedRunArtifacts) -> ByteCounts:
     frames_jsonl_path = run_layout.records_dir / "frames.jsonl"
     errors_jsonl_path = run_layout.records_dir / "errors.jsonl"
+    scene_frames_jsonl_path = run_layout.records_dir / "scene_frames.jsonl"
     return ByteCounts(
         raw_frames_bytes=_total_file_size(loaded.raw_frame_paths),
         processed_frames_bytes=_total_file_size(loaded.processed_frame_paths),
         crops_bytes=_total_file_size(loaded.crop_paths),
         jsonl_bytes=_total_file_size([frames_jsonl_path, errors_jsonl_path]),
+        scene_jsonl_bytes=_total_file_size([scene_frames_jsonl_path]),
+        scene_bytes=_total_file_size(loaded.scene_paths),
+        viewer_bytes=_total_file_size(loaded.viewer_paths),
         total_run_bytes=_total_file_size(_artifact_files(run_layout.run_dir)),
     )
 
@@ -279,7 +369,9 @@ def _total_file_size(paths: list[Path]) -> int:
 
 
 def _count_validation_errors(
-    counts: ArtifactCounts, frame_records: list[FrameRecord]
+    counts: ArtifactCounts,
+    frame_records: list[FrameRecord],
+    scene_frame_records: list[SceneFrameRecord],
 ) -> list[str]:
     errors: list[str] = []
     if counts.frame_records != counts.decoded_frames:
@@ -297,10 +389,20 @@ def _count_validation_errors(
             "processed frame count does not match decoded frame count: "
             f"{counts.processed_frames} != {counts.decoded_frames}"
         )
+    if counts.scene_frame_records != counts.decoded_frames:
+        errors.append(
+            "scene frame record count does not match decoded frame count: "
+            f"{counts.scene_frame_records} != {counts.decoded_frames}"
+        )
 
     observed_indices = sorted(record.frame_index for record in frame_records)
     if observed_indices != list(range(counts.decoded_frames)):
         errors.append("frame records are not contiguous from decoded frame zero")
+    observed_scene_indices = sorted(
+        record.frame_index for record in scene_frame_records
+    )
+    if observed_scene_indices != list(range(counts.decoded_frames)):
+        errors.append("scene frame records are not contiguous from decoded frame zero")
     return errors
 
 
