@@ -358,6 +358,12 @@ def _dominant_direction_estimate(
         inlier_count=10,
         angle_threshold_radians=assumptions.direction_inlier_angle_radians,
         median_angular_residual_radians=0.01,
+        angular_residual_percentiles_radians={
+            "p50": 0.01,
+            "p75": 0.01,
+            "p90": 0.01,
+            "p95": 0.01,
+        },
         fallback_used=False,
         uncertainty="medium",
     )
@@ -1003,6 +1009,16 @@ def test_robust_main_direction_selects_dominant_cluster_with_outliers() -> None:
     assert estimate.finite_candidate_count == 7
     assert estimate.inlier_count == 5
     assert estimate.fallback_used is False
+    assert set(estimate.angular_residual_percentiles_radians) == {
+        "p50",
+        "p75",
+        "p90",
+        "p95",
+    }
+    assert estimate.angular_residual_percentiles_radians["p95"] is not None
+    assert estimate.angular_residual_percentiles_radians["p95"] >= (
+        estimate.angular_residual_percentiles_radians["p50"] or 0.0
+    )
     assert estimate.direction_camera.x == pytest.approx(expected_x / expected_norm)
     assert estimate.direction_camera.y == pytest.approx(expected_y / expected_norm)
     assert estimate.direction_camera.z == pytest.approx(expected_z / expected_norm)
@@ -1127,6 +1143,12 @@ def test_build_scene_axis_basis_returns_right_handed_orthonormal_columns() -> No
         inlier_count=8,
         angle_threshold_radians=assumptions.direction_inlier_angle_radians,
         median_angular_residual_radians=0.05,
+        angular_residual_percentiles_radians={
+            "p50": 0.05,
+            "p75": 0.05,
+            "p90": 0.05,
+            "p95": 0.05,
+        },
         fallback_used=False,
         uncertainty="medium",
     )
@@ -1175,6 +1197,12 @@ def test_build_scene_axis_basis_records_fallbacks_for_degenerate_right_and_up() 
         inlier_count=8,
         angle_threshold_radians=assumptions.direction_inlier_angle_radians,
         median_angular_residual_radians=0.01,
+        angular_residual_percentiles_radians={
+            "p50": 0.01,
+            "p75": 0.01,
+            "p90": 0.01,
+            "p95": 0.01,
+        },
         fallback_used=False,
         uncertainty="medium",
     )

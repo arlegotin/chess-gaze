@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
@@ -207,8 +209,37 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
         "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
     } <= {assumption.name for assumption in manifest.assumptions}
     assert manifest.robust_estimators.scene_center.candidate_frame_count == 7
+    assert manifest.robust_estimators.scene_center.finite_candidate_frame_count == 7
+    assert manifest.robust_estimators.scene_center.dropped_non_finite_frame_count == 0
     assert manifest.robust_estimators.scene_center.inlier_frame_count >= 5
+    assert manifest.robust_estimators.scene_center.mad_m[0] >= 0.0
+    assert manifest.robust_estimators.scene_center.thresholds_m[0] >= 0.015
+    assert manifest.robust_estimators.scene_center.iteration_count >= 1
+    assert (
+        manifest.robust_estimators.scene_center.convergence_tolerance_m
+        == pytest.approx(1e-6)
+    )
+    assert manifest.robust_estimators.scene_center.uncertainty == "medium"
     assert manifest.robust_estimators.main_unigaze_direction.candidate_frame_count == 6
+    assert (
+        manifest.robust_estimators.main_unigaze_direction.finite_candidate_frame_count
+        == 6
+    )
+    assert (
+        manifest.robust_estimators.main_unigaze_direction
+        .median_angular_residual_radians
+        is not None
+    )
+    assert {
+        "p50",
+        "p75",
+        "p90",
+        "p95",
+    } == set(
+        manifest.robust_estimators.main_unigaze_direction
+        .angular_residual_percentiles_radians
+    )
+    assert manifest.robust_estimators.main_unigaze_direction.uncertainty == "medium"
     assert (
         manifest.monitor_plane.distance_source
         == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"

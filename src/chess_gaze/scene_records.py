@@ -692,16 +692,27 @@ class SceneCoordinateFramesRecord(SceneSchemaModel):
 class SceneCenterEstimatorRecord(SceneSchemaModel):
     method: Literal["geometric_median_after_mad_screen"]
     candidate_frame_count: int
+    finite_candidate_frame_count: int
+    dropped_non_finite_frame_count: int
     inlier_frame_count: int
+    mad_m: tuple[float, float, float]
+    thresholds_m: tuple[float, float, float]
+    iteration_count: int
+    convergence_tolerance_m: float
     fallback_used: bool
+    uncertainty: Literal["low", "medium", "high"]
 
 
 class SceneDirectionEstimatorRecord(SceneSchemaModel):
     method: Literal["angular_ransac_then_normalized_inlier_mean"]
     candidate_frame_count: int
+    finite_candidate_frame_count: int
     inlier_frame_count: int
     inlier_angle_radians: float
+    median_angular_residual_radians: float | None
+    angular_residual_percentiles_radians: dict[str, float | None]
     fallback_used: bool
+    uncertainty: Literal["low", "medium", "high"]
 
 
 class SceneOrientationEstimatorRecord(SceneSchemaModel):

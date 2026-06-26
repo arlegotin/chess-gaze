@@ -468,15 +468,32 @@ def _build_manifest(
             scene_center=SceneCenterEstimatorRecord(
                 method="geometric_median_after_mad_screen",
                 candidate_frame_count=scene_center.candidate_count,
+                finite_candidate_frame_count=scene_center.finite_candidate_count,
+                dropped_non_finite_frame_count=(
+                    scene_center.dropped_non_finite_count
+                ),
                 inlier_frame_count=scene_center.inlier_count,
+                mad_m=scene_center.mad_m,
+                thresholds_m=scene_center.thresholds_m,
+                iteration_count=scene_center.iteration_count,
+                convergence_tolerance_m=scene_center.convergence_tolerance_m,
                 fallback_used=scene_center.fallback_used,
+                uncertainty=scene_center.uncertainty,
             ),
             main_unigaze_direction=SceneDirectionEstimatorRecord(
                 method="angular_ransac_then_normalized_inlier_mean",
                 candidate_frame_count=main_direction.candidate_count,
+                finite_candidate_frame_count=main_direction.finite_candidate_count,
                 inlier_frame_count=main_direction.inlier_count,
                 inlier_angle_radians=main_direction.angle_threshold_radians,
+                median_angular_residual_radians=(
+                    main_direction.median_angular_residual_radians
+                ),
+                angular_residual_percentiles_radians=(
+                    main_direction.angular_residual_percentiles_radians
+                ),
                 fallback_used=main_direction.fallback_used,
+                uncertainty=main_direction.uncertainty,
             ),
             scene_orientation=SceneOrientationEstimatorRecord(
                 method="eye_pair_right_and_head_up_with_camera_axis_fallbacks",

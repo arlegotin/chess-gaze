@@ -223,15 +223,31 @@ def _manifest_payload() -> dict[str, Any]:
             "scene_center": {
                 "method": "geometric_median_after_mad_screen",
                 "candidate_frame_count": 1900,
+                "finite_candidate_frame_count": 1890,
+                "dropped_non_finite_frame_count": 10,
                 "inlier_frame_count": 1850,
+                "mad_m": (0.012, 0.010, 0.08),
+                "thresholds_m": (0.042, 0.035, 0.28),
+                "iteration_count": 18,
+                "convergence_tolerance_m": 0.000001,
                 "fallback_used": False,
+                "uncertainty": "medium",
             },
             "main_unigaze_direction": {
                 "method": "angular_ransac_then_normalized_inlier_mean",
                 "candidate_frame_count": 1800,
+                "finite_candidate_frame_count": 1790,
                 "inlier_frame_count": 1550,
                 "inlier_angle_radians": 0.35,
+                "median_angular_residual_radians": 0.11,
+                "angular_residual_percentiles_radians": {
+                    "p50": 0.11,
+                    "p75": 0.18,
+                    "p90": 0.27,
+                    "p95": 0.31,
+                },
                 "fallback_used": False,
+                "uncertainty": "medium",
             },
             "scene_orientation": {
                 "method": "eye_pair_right_and_head_up_with_camera_axis_fallbacks",
@@ -811,6 +827,16 @@ def test_scene_manifest_serializes_structured_spec_fields() -> None:
     )
     assert payload["coordinate_frames"]["viewer_frame"] == "three_view"
     assert payload["scene_axes_camera"]["forward_camera"]["z"] == 1.0
+    assert (
+        payload["robust_estimators"]["scene_center"]["thresholds_m"]
+        == (0.042, 0.035, 0.28)
+    )
+    assert (
+        payload["robust_estimators"]["main_unigaze_direction"][
+            "angular_residual_percentiles_radians"
+        ]["p95"]
+        == 0.31
+    )
     assert (
         payload["main_monitor_plane"]["distance_source"]
         == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"

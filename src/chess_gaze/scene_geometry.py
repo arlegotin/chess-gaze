@@ -56,6 +56,7 @@ class RobustDirectionEstimate:
     inlier_count: int
     angle_threshold_radians: float
     median_angular_residual_radians: float | None
+    angular_residual_percentiles_radians: dict[str, float | None]
     fallback_used: bool
     uncertainty: str
 
@@ -536,6 +537,7 @@ def robust_main_direction(
     best_seed_frame_index = candidate_count + 1
     best_median_residual: float | None = None
     best_seed_direction: tuple[float, float, float] | None = None
+    best_inlier_residuals: list[float] = []
 
     for seed_frame_index, seed_direction in _direction_ransac_seeds(
         candidate_directions
@@ -564,7 +566,9 @@ def robust_main_direction(
             best_seed_frame_index = seed_frame_index
             best_median_residual = median_residual
             best_seed_direction = seed_direction
+            best_inlier_residuals = [residuals[index] for index in inlier_indices]
 
+    residual_percentiles = _angular_residual_percentiles(best_inlier_residuals)
     fallback_direction = _camera_unit_vector((0.0, 0.0, 1.0))
     if (
         len(best_inlier_indices) < assumptions.min_main_direction_inlier_frames
@@ -577,6 +581,7 @@ def robust_main_direction(
             inlier_count=len(best_inlier_indices),
             angle_threshold_radians=assumptions.direction_inlier_angle_radians,
             median_angular_residual_radians=best_median_residual,
+            angular_residual_percentiles_radians=residual_percentiles,
             fallback_used=True,
             uncertainty="high",
         )
@@ -599,6 +604,7 @@ def robust_main_direction(
             inlier_count=len(best_inlier_indices),
             angle_threshold_radians=assumptions.direction_inlier_angle_radians,
             median_angular_residual_radians=best_median_residual,
+            angular_residual_percentiles_radians=residual_percentiles,
             fallback_used=True,
             uncertainty="high",
         )
@@ -610,6 +616,7 @@ def robust_main_direction(
         inlier_count=len(best_inlier_indices),
         angle_threshold_radians=assumptions.direction_inlier_angle_radians,
         median_angular_residual_radians=best_median_residual,
+        angular_residual_percentiles_radians=residual_percentiles,
         fallback_used=False,
         uncertainty="medium",
     )
@@ -1147,6 +1154,35 @@ def _median(
     if len(sorted_values) % 2 == 1:
         return float(sorted_values[midpoint])
     return float((sorted_values[midpoint - 1] + sorted_values[midpoint]) / 2.0)
+
+
+def _angular_residual_percentiles(
+    residuals: Sequence[float],
+) -> dict[str, float | None]:
+    if not residuals:
+        return {"p50": None, "p75": None, "p90": None, "p95": None}
+
+    sorted_residuals = sorted(residuals)
+    return {
+        "p50": _percentile(sorted_residuals, 50.0),
+        "p75": _percentile(sorted_residuals, 75.0),
+        "p90": _percentile(sorted_residuals, 90.0),
+        "p95": _percentile(sorted_residuals, 95.0),
+    }
+
+
+def _percentile(sorted_values: Sequence[float], percentile: float) -> float:
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+    rank = (percentile / 100.0) * (len(sorted_values) - 1)
+    lower_index = math.floor(rank)
+    upper_index = math.ceil(rank)
+    if lower_index == upper_index:
+        return float(sorted_values[lower_index])
+    lower_value = sorted_values[lower_index]
+    upper_value = sorted_values[upper_index]
+    weight = rank - lower_index
+    return float(lower_value + ((upper_value - lower_value) * weight))
 
 
 def _geometric_median_camera_point(
