@@ -581,6 +581,14 @@ def _region_refinement_score(
     if large_full_frame_refinement_score is not None:
         return large_full_frame_refinement_score
 
+    if _single_full_frame_candidate_is_overexpanded(full_frame_selection):
+        return _overexpanded_full_frame_refinement_score(
+            fallback,
+            full_primary,
+            region_selection.region,
+            _max_iou_with_full_frame_candidates(fallback, full_frame_selection),
+        )
+
     max_iou = _max_iou_with_full_frame_candidates(fallback, full_frame_selection)
     if max_iou < REGION_REFINEMENT_MIN_IOU:
         return None
@@ -592,17 +600,6 @@ def _region_refinement_score(
         full_primary.bounding_box_image_px
     ):
         return area * max_iou
-
-    overexpanded_full_frame_refinement_score = (
-        _overexpanded_full_frame_refinement_score(
-            fallback,
-            full_primary,
-            region_selection.region,
-            max_iou,
-        )
-    )
-    if overexpanded_full_frame_refinement_score is not None:
-        return overexpanded_full_frame_refinement_score
 
     top_shift_px = (
         full_primary.bounding_box_image_px.y_min - fallback.bounding_box_image_px.y_min
@@ -738,6 +735,13 @@ def _full_frame_candidate_is_overexpanded(candidate: FaceCandidate) -> bool:
         short_side >= LARGE_FRAME_MIN_SHORT_SIDE_PX
         and candidate.area_fraction >= OVEREXPANDED_FULL_FRAME_AREA_MIN_FRACTION
     )
+
+
+def _single_full_frame_candidate_is_overexpanded(selection: FaceSelection) -> bool:
+    if _selection_has_multiple_candidates(selection):
+        return False
+    selected = _primary_candidate(selection)
+    return selected is not None and _full_frame_candidate_is_overexpanded(selected)
 
 
 def _max_iou_with_other_region_candidates(
