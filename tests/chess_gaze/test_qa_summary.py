@@ -10,7 +10,12 @@ import pytest
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
-from chess_gaze.frame_records import FrameRecord, RunManifest, VideoManifest
+from chess_gaze.frame_records import (
+    FrameRecord,
+    InferenceRuntimeRecord,
+    RunManifest,
+    VideoManifest,
+)
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.image_io import save_rgb_png
 from chess_gaze.qa_summary import (
@@ -141,6 +146,21 @@ def _eye_payload(present: bool, reason: ErrorCode) -> dict[str, object]:
     }
 
 
+def _external_observer_inference_record() -> InferenceRuntimeRecord:
+    return InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
 def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
     layout = _make_layout(tmp_path)
     video_path = tmp_path / "source.mp4"
@@ -157,6 +177,7 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
             frame_height=8,
             frame_count_decoded=frame_count,
         ),
+        inference=_external_observer_inference_record(),
     )
     (layout.run_dir / "run_manifest.json").write_text(
         run_manifest.model_dump_json(), encoding="utf-8"

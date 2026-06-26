@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import Literal
 
 from pydantic import ConfigDict, model_validator
 
@@ -187,11 +188,26 @@ class VideoManifest(StrictSchemaModel):
     frame_count_decoded: int
 
 
+class InferenceRuntimeRecord(StrictSchemaModel):
+    schema_version: Literal["inference-runtime-v1"] = "inference-runtime-v1"
+    observer_source: Literal["default_model_observer", "external_observer"]
+    unigaze_model_id: str | None
+    unigaze_device: Literal["cpu", "mps", "not_applicable"]
+    unigaze_batch_size: int | None
+    torch_version: str | None
+    torch_mps_available: bool | None
+    mps_fallback_env: str
+    mps_fast_math_env: str
+    mps_prefer_metal_env: str
+    mps_preflight_passed: bool | None
+
+
 class RunManifest(StrictSchemaModel):
     run_id: str
     created_at_utc: str
     input_path: str
     video: VideoManifest
+    inference: InferenceRuntimeRecord
 
 
 class CalibrationRecord(StrictSchemaModel):

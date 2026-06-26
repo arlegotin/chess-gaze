@@ -5,7 +5,13 @@ import pytest
 from pydantic import ValidationError
 
 from chess_gaze.errors import ErrorCode
-from chess_gaze.frame_records import FrameRecord, GazeAngles
+from chess_gaze.frame_records import (
+    FrameRecord,
+    GazeAngles,
+    InferenceRuntimeRecord,
+    RunManifest,
+    VideoManifest,
+)
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 
 
@@ -167,3 +173,68 @@ def test_frame_record_rejects_infinite_head_pose_angle(
 def test_error_code_names_are_stable() -> None:
     assert ErrorCode.FACE_NOT_FOUND.value == "FACE_NOT_FOUND"
     assert ErrorCode.GAZE_ESTIMATORS_DISAGREE.value == "GAZE_ESTIMATORS_DISAGREE"
+
+
+def test_inference_runtime_record_accepts_default_model_observer() -> None:
+    record = InferenceRuntimeRecord(
+        observer_source="default_model_observer",
+        unigaze_model_id="unigaze-h14-joint",
+        unigaze_device="mps",
+        unigaze_batch_size=16,
+        torch_version="2.12.1",
+        torch_mps_available=True,
+        mps_fallback_env="unset",
+        mps_fast_math_env="unset",
+        mps_prefer_metal_env="unset",
+        mps_preflight_passed=True,
+    )
+
+    assert record.schema_version == "inference-runtime-v1"
+    assert record.unigaze_device == "mps"
+
+
+def test_inference_runtime_record_accepts_external_observer() -> None:
+    record = InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+    assert record.observer_source == "external_observer"
+    assert record.unigaze_model_id is None
+
+
+def test_run_manifest_requires_inference_runtime_record() -> None:
+    manifest = RunManifest(
+        run_id="run-1",
+        created_at_utc="2026-06-26T00:00:00Z",
+        input_path="artifacts/input/nakamura_1.mp4",
+        video=VideoManifest(
+            source_path="artifacts/input/nakamura_1.mp4",
+            source_sha256="0" * 64,
+            frame_width=1920,
+            frame_height=1080,
+            frame_count_decoded=1973,
+        ),
+        inference=InferenceRuntimeRecord(
+            observer_source="external_observer",
+            unigaze_model_id=None,
+            unigaze_device="not_applicable",
+            unigaze_batch_size=None,
+            torch_version=None,
+            torch_mps_available=None,
+            mps_fallback_env="not_applicable",
+            mps_fast_math_env="not_applicable",
+            mps_prefer_metal_env="not_applicable",
+            mps_preflight_passed=None,
+        ),
+    )
+
+    assert manifest.inference.observer_source == "external_observer"

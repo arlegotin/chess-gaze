@@ -26,6 +26,7 @@ from chess_gaze.frame_records import (
     ErrorRecord,
     FrameErrorRecord,
     FrameRecord,
+    InferenceRuntimeRecord,
     RunManifest,
 )
 from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
@@ -138,6 +139,21 @@ class _ResolvedRequest:
     unigaze_batch_size: int
 
 
+def _external_observer_inference_record() -> InferenceRuntimeRecord:
+    return InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
 def analyze_video(
     request: AnalyzeRequest, observers: ObserverBundle | None = None
 ) -> AnalyzeResult:
@@ -171,6 +187,7 @@ def analyze_video(
     frames_jsonl_path = layout.records_dir / "frames.jsonl"
     errors_jsonl_path = layout.records_dir / "errors.jsonl"
     qa_summary_path = layout.run_dir / "qa_summary.json"
+    inference = _external_observer_inference_record()
 
     _write_json(
         run_manifest_path,
@@ -179,6 +196,7 @@ def analyze_video(
             created_at_utc=_format_utc(created_at),
             input_path=str(resolved.video_path),
             video=inspection.video_manifest,
+            inference=inference,
         ).model_dump(mode="json"),
     )
     _write_json(calibration_path, calibration.model_dump(mode="json"))

@@ -396,6 +396,38 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     )
 
 
+def test_model_free_observer_run_manifest_records_external_observer(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=1)
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            unigaze_device="mps",
+            unigaze_batch_size=7,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["inference"] == {
+        "schema_version": "inference-runtime-v1",
+        "observer_source": "external_observer",
+        "unigaze_model_id": None,
+        "unigaze_device": "not_applicable",
+        "unigaze_batch_size": None,
+        "torch_version": None,
+        "torch_mps_available": None,
+        "mps_fallback_env": "not_applicable",
+        "mps_fast_math_env": "not_applicable",
+        "mps_prefer_metal_env": "not_applicable",
+        "mps_preflight_passed": None,
+    }
+
+
 def test_analyze_video_fails_when_scene_artifact_validation_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

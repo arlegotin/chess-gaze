@@ -16,6 +16,7 @@ from chess_gaze.frame_records import (
     FrameRecord,
     GazeAngles,
     HeadPoseRecord,
+    InferenceRuntimeRecord,
     RunManifest,
     VideoManifest,
 )
@@ -158,6 +159,21 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
     )
 
 
+def _external_observer_inference_record() -> InferenceRuntimeRecord:
+    return InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
 def _write_minimal_run(run_dir: Path) -> RunLayout:
     layout = _layout(run_dir)
     layout.records_dir.mkdir(parents=True)
@@ -174,6 +190,7 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
         created_at_utc=datetime(2026, 6, 26, 12, tzinfo=UTC).isoformat(),
         input_path=video.source_path,
         video=video,
+        inference=_external_observer_inference_record(),
     )
 
     (run_dir / "run_manifest.json").write_text(
@@ -378,6 +395,7 @@ def test_scene_frame_direction_maps_positive_pitch_to_scene_up(
         created_at_utc=datetime(2026, 6, 26, 12, 30, tzinfo=UTC).isoformat(),
         input_path=video.source_path,
         video=video,
+        inference=_external_observer_inference_record(),
     )
     neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
     upward_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.20)
@@ -442,6 +460,7 @@ def test_scene_frame_direction_maps_image_right_to_streamer_left(
         created_at_utc=datetime(2026, 6, 26, 12, 40, tzinfo=UTC).isoformat(),
         input_path=video.source_path,
         video=video,
+        inference=_external_observer_inference_record(),
     )
     neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
     image_right_gaze = _gaze(valid=True, yaw_radians=0.20, pitch_radians=0.0)
