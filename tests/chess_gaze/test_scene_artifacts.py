@@ -10,6 +10,7 @@ import pytest
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
+    ErrorRecord,
     EyeRecord,
     FaceRecord,
     FrameRecord,
@@ -98,13 +99,13 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
     )
     recommended_gaze = _gaze(valid=True, yaw_radians=0.5, pitch_radians=0.25)
     geometric_gaze = _gaze(valid=True, yaw_radians=yaw, pitch_radians=pitch)
-    errors = []
+    errors: list[ErrorRecord] = []
     if not gaze_valid:
         errors.append(
-            {
-                "code": ErrorCode.GAZE_MODEL_FAILED,
-                "message": "Synthetic appearance gaze intentionally unavailable.",
-            }
+            ErrorRecord(
+                code=ErrorCode.GAZE_MODEL_FAILED,
+                message="Synthetic appearance gaze intentionally unavailable.",
+            )
         )
 
     return FrameRecord(
@@ -226,8 +227,7 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
         == 6
     )
     assert (
-        manifest.robust_estimators.main_unigaze_direction
-        .median_angular_residual_radians
+        manifest.robust_estimators.main_unigaze_direction.median_angular_residual_radians
         is not None
     )
     assert {
@@ -236,13 +236,11 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
         "p90",
         "p95",
     } == set(
-        manifest.robust_estimators.main_unigaze_direction
-        .angular_residual_percentiles_radians
+        manifest.robust_estimators.main_unigaze_direction.angular_residual_percentiles_radians
     )
     assert manifest.robust_estimators.main_unigaze_direction.uncertainty == "medium"
     assert (
-        manifest.monitor_plane.distance_source
-        == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
+        manifest.monitor_plane.distance_source == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
     )
     assert manifest.axis_basis.convention == "right_up_back_columns_right_handed"
     assert manifest.axis_basis.determinant_right_up_back > 0.99
@@ -298,9 +296,7 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
         record.main_monitor_hit.point_scene_m is not None for record in valid_hits
     )
     duplicate_hits = [
-        record.main_monitor_hit
-        for record in records
-        if record.frame_index in (2, 3)
+        record.main_monitor_hit for record in records if record.frame_index in (2, 3)
     ]
     assert duplicate_hits[0].plane_uv_m == duplicate_hits[1].plane_uv_m
 

@@ -403,9 +403,11 @@ def test_qa_summary_validates_scene_artifacts_and_counts_scene_bytes(
     assert summary.counts.scene_frame_records == 5
     assert validation.counts.scene_frame_records == 5
     assert viewer_data.frame_count == 5
-    scene_frame_lines = (layout.records_dir / "scene_frames.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    scene_frame_lines = (
+        (layout.records_dir / "scene_frames.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     assert [json.loads(line)["frame_index"] for line in scene_frame_lines] == [
         0,
         1,
@@ -413,9 +415,10 @@ def test_qa_summary_validates_scene_artifacts_and_counts_scene_bytes(
         3,
         4,
     ]
-    assert summary.byte_counts.scene_jsonl_bytes == (
-        layout.records_dir / "scene_frames.jsonl"
-    ).stat().st_size
+    assert (
+        summary.byte_counts.scene_jsonl_bytes
+        == (layout.records_dir / "scene_frames.jsonl").stat().st_size
+    )
     assert summary.byte_counts.scene_bytes == sum(
         path.stat().st_size for path in layout.scene_dir.rglob("*") if path.is_file()
     )
@@ -435,9 +438,11 @@ def test_qa_summary_reports_missing_or_malformed_scene_artifacts(
     layout = _write_fixture_run(tmp_path, frame_count=3)
     _write_scene_and_viewer_artifacts(layout)
     (layout.scene_dir / "scene_manifest.json").unlink()
-    scene_frame_lines = (layout.records_dir / "scene_frames.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    scene_frame_lines = (
+        (layout.records_dir / "scene_frames.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     (layout.records_dir / "scene_frames.jsonl").write_text(
         scene_frame_lines[1] + "\n",
         encoding="utf-8",
@@ -455,9 +460,7 @@ def test_qa_summary_reports_missing_or_malformed_scene_artifacts(
     assert validation.final_status == "failed"
     assert summary.final_status == "failed"
     assert summary.artifact_validation.validation_errors == validation.validation_errors
-    assert any(
-        "scene manifest" in error for error in validation.validation_errors
-    )
+    assert any("scene manifest" in error for error in validation.validation_errors)
     assert any(
         "Invalid viewer scene data" in error for error in validation.validation_errors
     )

@@ -8,7 +8,12 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from chess_gaze.errors import FrameStatus
 from chess_gaze.geometry import Point2D, StrictSchemaModel
-from chess_gaze.scene_calibration import SceneAssumptionRecord, _validate_finite_triplet
+from chess_gaze.scene_calibration import (
+    SceneAssumptionRecord as SceneAssumptionRecord,
+)
+from chess_gaze.scene_calibration import (
+    _validate_finite_triplet,
+)
 
 
 def _coerce_enum_field(
@@ -404,17 +409,15 @@ class SceneMonitorHitRecord(SceneSchemaModel):
 
     @property
     def u_m(self) -> float | None:
-        plane_uv_m = self.__dict__.get("plane_uv_m")
-        if plane_uv_m is None:
+        if self.plane_uv_m is None:
             return None
-        return plane_uv_m[0]
+        return self.plane_uv_m[0]
 
     @property
     def v_m(self) -> float | None:
-        plane_uv_m = self.__dict__.get("plane_uv_m")
-        if plane_uv_m is None:
+        if self.plane_uv_m is None:
             return None
-        return plane_uv_m[1]
+        return self.plane_uv_m[1]
 
     @field_validator("plane_uv_m", mode="before")
     @classmethod
@@ -476,6 +479,8 @@ class SceneMonitorHitRecord(SceneSchemaModel):
                     "valid monitor hit requires point, uv, t, denominator, "
                     "distance, and bounds flags"
                 )
+            if self.t is None:
+                raise ValueError("valid monitor hit requires t")
             if self.t < 0:
                 raise ValueError("valid monitor hit requires t >= 0")
             if self.reason_invalid is not None:
@@ -677,9 +682,7 @@ class SceneCoordinateFramesRecord(SceneSchemaModel):
     @model_validator(mode="after")
     def validate_semantic_mapping(self) -> SceneCoordinateFramesRecord:
         if self.math_frame != CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M:
-            raise ValueError(
-                "math_frame must be camera_opencv_pseudo_m"
-            )
+            raise ValueError("math_frame must be camera_opencv_pseudo_m")
         if self.scene_frame != CoordinateFrame3D.SCENE_PSEUDO_M:
             raise ValueError("scene_frame must be scene_pseudo_m")
         if self.monitor_frame != CoordinateFrame3D.MONITOR_PLANE_PSEUDO_M:
@@ -826,9 +829,7 @@ class ViewerHitPoint(SceneSchemaModel):
 
 
 class ViewerSceneData(SceneSchemaModel):
-    schema_version: Literal["gaze-scene-viewer-data-v1"] = (
-        "gaze-scene-viewer-data-v1"
-    )
+    schema_version: Literal["gaze-scene-viewer-data-v1"] = "gaze-scene-viewer-data-v1"
     run_id: str
     source_video_stem: str
     frame_count: int

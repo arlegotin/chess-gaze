@@ -451,9 +451,7 @@ def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.0.25", "example.com"])
-def test_static_server_rejects_non_loopback_hosts(
-    tmp_path: Path, host: str
-) -> None:
+def test_static_server_rejects_non_loopback_hosts(tmp_path: Path, host: str) -> None:
     run_dir = tmp_path / "run"
     viewer_dir = run_dir / "viewer"
     viewer_dir.mkdir(parents=True)

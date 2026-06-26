@@ -98,9 +98,7 @@ def write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
     return path
 
 
-def serve_viewer(
-    run_dir: Path, host: str = "127.0.0.1", port: int = 0
-) -> ViewerServer:
+def serve_viewer(run_dir: Path, host: str = "127.0.0.1", port: int = 0) -> ViewerServer:
     bind_host = _validate_loopback_host(host)
     viewer_root = _validate_viewer_run(run_dir)
     handler = _viewer_request_handler(viewer_root)
@@ -182,9 +180,7 @@ def _validate_loopback_host(host: str) -> str:
         ) from exc
 
     if not address.is_loopback:
-        raise ViewerServerError(
-            f"Viewer host must be a loopback address, not {host!r}"
-        )
+        raise ViewerServerError(f"Viewer host must be a loopback address, not {host!r}")
     return normalized
 
 
@@ -197,7 +193,7 @@ class _LockedViewerRequestHandler(SimpleHTTPRequestHandler):
     _viewer_root: Path
 
     def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, directory=str(self._viewer_root), **kwargs)
+        super().__init__(*args, directory=str(self._viewer_root), **kwargs)  # type: ignore[arg-type]
 
     def translate_path(self, path: str) -> str:
         candidate = Path(super().translate_path(path)).resolve()

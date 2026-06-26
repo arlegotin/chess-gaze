@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import math
+from types import ModuleType
 
 import pytest
 
@@ -33,7 +34,7 @@ from chess_gaze.scene_records import (
 )
 
 
-def _scene_geometry():
+def _scene_geometry() -> ModuleType:
     return importlib.import_module("chess_gaze.scene_geometry")
 
 
@@ -243,8 +244,8 @@ def _midpoint_record(
     return SceneEyeMidpointRecord(
         valid=valid,
         origin_policy="both_eyes_required" if valid else None,
-        camera_point_m=camera_point,
-        scene_point_m=scene_point,
+        camera_m=camera_point,
+        scene_m=scene_point,
         pupil_distance_px=120.0 if valid else None,
         estimated_depth_m=0.7 if valid else None,
         source_reason_invalid=None if valid else "midpoint invalid",
@@ -264,7 +265,7 @@ def _ray_record(
             valid=True,
             source="appearance_gaze",
             origin_camera_m=_camera_point(0.0, 0.0, 0.7),
-            origin_scene_m=_scene_point(0.0, 0.0, 0.0),
+            scene_m=_scene_point(0.0, 0.0, 0.0),
             direction_camera=direction_camera,
             direction_scene=UnitVector3D(
                 space=CoordinateFrame3D.SCENE_PSEUDO_M,
@@ -282,7 +283,7 @@ def _ray_record(
         valid=False,
         source="appearance_gaze",
         origin_camera_m=None,
-        origin_scene_m=None,
+        scene_m=None,
         direction_camera=None,
         direction_scene=None,
         direction_source=None,
@@ -303,7 +304,7 @@ def _ray_record_at(
         valid=True,
         source="appearance_gaze",
         origin_camera_m=origin_camera,
-        origin_scene_m=origin_scene or _scene_point(0.0, 0.0, 0.0),
+        scene_m=origin_scene or _scene_point(0.0, 0.0, 0.0),
         direction_camera=direction_camera,
         direction_scene=UnitVector3D(
             space=CoordinateFrame3D.SCENE_PSEUDO_M,
@@ -501,8 +502,7 @@ def test_back_project_eye_points_projects_eyes_and_midpoint_in_camera_space() ->
     assert projection.midpoint.pupil_distance_px == pytest.approx(120.0)
     assert projection.midpoint.estimated_depth_m == pytest.approx(expected_depth)
     assert (
-        projection.diagnostics["depth_source"]
-        == "interpupillary_distance_assumption"
+        projection.diagnostics["depth_source"] == "interpupillary_distance_assumption"
     )
     assert projection.diagnostics["interpupillary_distance_m"] == pytest.approx(0.063)
     assert projection.diagnostics["pupil_distance_px"] == pytest.approx(120.0)
@@ -524,9 +524,7 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
 
     expected_pupil_distance = math.sqrt((120.0**2) + (80.0**2))
     expected_depth = (
-        DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M
-        * 1920.0
-        / expected_pupil_distance
+        DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M * 1920.0 / expected_pupil_distance
     )
 
     assert projection.left_eye.valid is True
@@ -635,8 +633,9 @@ def test_back_project_eye_points_rejects_normalized_pupil_coordinates() -> None:
     assert projection.diagnostics["left_eye_in_frame"] is None
 
 
-def test_back_project_eye_points_marks_midpoint_invalid_when_one_eye_is_missing(
-) -> None:
+def test_back_project_eye_points_marks_midpoint_invalid_when_one_eye_is_missing() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     camera = scene_geometry.estimated_camera_model(1920, 1080)
@@ -655,8 +654,7 @@ def test_back_project_eye_points_marks_midpoint_invalid_when_one_eye_is_missing(
     assert projection.midpoint.source_reason_invalid == "RIGHT_EYE_NOT_FOUND"
 
 
-def test_back_project_eye_points_preserves_out_of_frame_coordinates_in_diagnostics(
-) -> None:
+def test_back_project_eye_points_preserves_oof_diagnostics() -> None:
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     camera = scene_geometry.estimated_camera_model(1920, 1080)
@@ -815,8 +813,7 @@ def test_robust_scene_center_does_not_stop_at_coincident_sample_point() -> None:
         for point in inliers
     )
     sample_sum_distance = sum(
-        math.dist(sample_point, (point.x, point.y, point.z))
-        for point in inliers
+        math.dist(sample_point, (point.x, point.y, point.z)) for point in inliers
     )
     assert returned_sum_distance < sample_sum_distance
 
@@ -931,8 +928,9 @@ def test_unigaze_ray_from_frame_requires_valid_midpoint() -> None:
     assert ray.reason_invalid == SceneInvalidReason.EYE_MIDPOINT_INVALID
 
 
-def test_unigaze_ray_from_frame_marks_invalid_when_appearance_gaze_is_unusable(
-) -> None:
+def test_unigaze_ray_from_frame_marks_invalid_when_appearance_gaze_is_unusable() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     midpoint = _midpoint_record(
         valid=True,
@@ -1171,15 +1169,15 @@ def test_build_scene_axis_basis_returns_right_handed_orthonormal_columns() -> No
     assert math.sqrt((right.x**2) + (right.y**2) + (right.z**2)) == pytest.approx(1.0)
     assert math.sqrt((up.x**2) + (up.y**2) + (up.z**2)) == pytest.approx(1.0)
     assert math.sqrt((back.x**2) + (back.y**2) + (back.z**2)) == pytest.approx(1.0)
-    assert (
-        (right.x * up.x) + (right.y * up.y) + (right.z * up.z)
-    ) == pytest.approx(0.0, abs=1e-6)
+    assert ((right.x * up.x) + (right.y * up.y) + (right.z * up.z)) == pytest.approx(
+        0.0, abs=1e-6
+    )
     assert (
         (right.x * back.x) + (right.y * back.y) + (right.z * back.z)
     ) == pytest.approx(0.0, abs=1e-6)
-    assert (
-        (up.x * back.x) + (up.y * back.y) + (up.z * back.z)
-    ) == pytest.approx(0.0, abs=1e-6)
+    assert ((up.x * back.x) + (up.y * back.y) + (up.z * back.z)) == pytest.approx(
+        0.0, abs=1e-6
+    )
     assert (
         (back.x * forward.x) + (back.y * forward.y) + (back.z * forward.z)
     ) == pytest.approx(-1.0, abs=1e-6)
@@ -1222,8 +1220,7 @@ def test_build_scene_axis_basis_records_fallbacks_for_degenerate_right_and_up() 
         for fallback in axes.fallbacks
     )
     assert any(
-        "up_axis" in fallback and "parallel" in fallback
-        for fallback in axes.fallbacks
+        "up_axis" in fallback and "parallel" in fallback for fallback in axes.fallbacks
     )
 
 
@@ -1292,13 +1289,14 @@ def test_build_monitor_plane_uses_finite_orthonormal_right_and_up_basis() -> Non
         assert (
             (vector.x * normal.x) + (vector.y * normal.y) + (vector.z * normal.z)
         ) == pytest.approx(0.0, abs=1e-6)
-    assert (
-        (right.x * up.x) + (right.y * up.y) + (right.z * up.z)
-    ) == pytest.approx(0.0, abs=1e-6)
+    assert ((right.x * up.x) + (right.y * up.y) + (right.z * up.z)) == pytest.approx(
+        0.0, abs=1e-6
+    )
 
 
-def test_camera_point_to_scene_uses_right_up_back_basis_centered_at_scene_center(
-) -> None:
+def test_camera_point_to_scene_uses_right_up_back_basis_centered_at_scene_center() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     axes = _monitor_test_axes()
 
@@ -1345,8 +1343,7 @@ def test_intersect_ray_with_monitor_persists_valid_hit_geometry_and_bounds() -> 
     assert hit.within_extended_plane is True
 
 
-def test_intersect_ray_with_monitor_reconstructs_rotated_scene_transform_from_monitor(
-) -> None:
+def test_intersect_ray_with_monitor_reconstructs_rotated_transform() -> None:
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     center = scene_geometry.RobustPointEstimate(
@@ -1378,11 +1375,14 @@ def test_intersect_ray_with_monitor_reconstructs_rotated_scene_transform_from_mo
     expected_u_m = 0.18
     expected_v_m = -0.07
     expected_hit_xyz = (
-        monitor.center_camera_m.x + (expected_u_m * axes.right_camera.x)
+        monitor.center_camera_m.x
+        + (expected_u_m * axes.right_camera.x)
         + (expected_v_m * axes.up_camera.x),
-        monitor.center_camera_m.y + (expected_u_m * axes.right_camera.y)
+        monitor.center_camera_m.y
+        + (expected_u_m * axes.right_camera.y)
         + (expected_v_m * axes.up_camera.y),
-        monitor.center_camera_m.z + (expected_u_m * axes.right_camera.z)
+        monitor.center_camera_m.z
+        + (expected_u_m * axes.right_camera.z)
         + (expected_v_m * axes.up_camera.z),
     )
     ray_direction_xyz = (
@@ -1482,8 +1482,9 @@ def test_intersect_ray_with_monitor_rejects_behind_origin_intersection() -> None
     assert hit.t == pytest.approx(-0.700)
 
 
-def test_intersect_ray_with_monitor_rejects_non_finite_t_without_persisting_it(
-) -> None:
+def test_intersect_ray_with_monitor_rejects_non_finite_t_without_persisting_it() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     monitor = _monitor_fixture()
@@ -1501,8 +1502,9 @@ def test_intersect_ray_with_monitor_rejects_non_finite_t_without_persisting_it(
     assert hit.t is None
 
 
-def test_intersect_ray_with_monitor_keeps_physical_out_of_bounds_hit_unclamped(
-) -> None:
+def test_intersect_ray_with_monitor_keeps_physical_out_of_bounds_hit_unclamped() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     monitor = _monitor_fixture()
@@ -1522,8 +1524,9 @@ def test_intersect_ray_with_monitor_keeps_physical_out_of_bounds_hit_unclamped(
     assert hit.within_extended_plane is True
 
 
-def test_intersect_ray_with_monitor_keeps_extended_out_of_bounds_hit_unclamped(
-) -> None:
+def test_intersect_ray_with_monitor_keeps_extended_out_of_bounds_hit_unclamped() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     monitor = _monitor_fixture()

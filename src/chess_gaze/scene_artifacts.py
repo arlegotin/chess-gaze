@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.frame_records import FrameRecord, RunManifest, VideoManifest
@@ -319,8 +320,8 @@ def _final_eye_record(
     return SceneEyeRecord(
         valid=True,
         image_px=eye.image_px,
-        camera_point_m=eye.camera_point_m,
-        scene_point_m=camera_point_to_scene(
+        camera_m=eye.camera_point_m,
+        scene_m=camera_point_to_scene(
             eye.camera_point_m,
             scene_center,
             axis_basis,
@@ -341,8 +342,8 @@ def _final_midpoint_record(
     return SceneEyeMidpointRecord(
         valid=True,
         origin_policy=midpoint.origin_policy,
-        camera_point_m=midpoint.camera_point_m,
-        scene_point_m=camera_point_to_scene(
+        camera_m=midpoint.camera_point_m,
+        scene_m=camera_point_to_scene(
             midpoint.camera_point_m,
             scene_center,
             axis_basis,
@@ -366,7 +367,7 @@ def _final_ray_record(
         valid=True,
         source="appearance_gaze",
         origin_camera_m=ray.origin_camera_m,
-        origin_scene_m=camera_point_to_scene(
+        scene_m=camera_point_to_scene(
             ray.origin_camera_m,
             scene_center,
             axis_basis,
@@ -393,7 +394,7 @@ def _head_record(
         return SceneHeadRecord(
             valid=False,
             ellipsoid_center_camera_m=None,
-            ellipsoid_center_scene_m=None,
+            scene_m=None,
             ellipsoid_radii_m=assumptions.head_ellipsoid_radius_m,
             yaw_radians=None,
             pitch_radians=None,
@@ -415,7 +416,7 @@ def _head_record(
     return SceneHeadRecord(
         valid=True,
         ellipsoid_center_camera_m=head_center_camera,
-        ellipsoid_center_scene_m=camera_point_to_scene(
+        scene_m=camera_point_to_scene(
             head_center_camera,
             scene_center,
             axis_basis,
@@ -469,9 +470,7 @@ def _build_manifest(
                 method="geometric_median_after_mad_screen",
                 candidate_frame_count=scene_center.candidate_count,
                 finite_candidate_frame_count=scene_center.finite_candidate_count,
-                dropped_non_finite_frame_count=(
-                    scene_center.dropped_non_finite_count
-                ),
+                dropped_non_finite_frame_count=(scene_center.dropped_non_finite_count),
                 inlier_frame_count=scene_center.inlier_count,
                 mad_m=scene_center.mad_m,
                 thresholds_m=scene_center.thresholds_m,
@@ -702,7 +701,10 @@ def _eye_pair_right_camera(
 
 
 def _load_json_model[T](path: Path, model_type: type[T]) -> T:
-    return model_type.model_validate_json(path.read_text(encoding="utf-8"))  # type: ignore[attr-defined]
+    return cast(
+        T,
+        model_type.model_validate_json(path.read_text(encoding="utf-8")),  # type: ignore[attr-defined]
+    )
 
 
 def _load_source_frames(path: Path) -> list[FrameRecord]:

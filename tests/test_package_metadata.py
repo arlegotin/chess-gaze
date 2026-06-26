@@ -62,9 +62,7 @@ def test_viewer_assets_are_packaged() -> None:
     ]
 
     copied_files = manifest["copied_files"]
-    assert {
-        copied_file["packaged_path"] for copied_file in copied_files
-    } == {
+    assert {copied_file["packaged_path"] for copied_file in copied_files} == {
         "vendor/three.module.js",
         "vendor/three.core.js",
         "vendor/OrbitControls.js",

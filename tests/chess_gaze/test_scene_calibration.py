@@ -59,7 +59,7 @@ def test_default_scene_assumptions_is_strict_and_frozen() -> None:
         )
 
     with pytest.raises(ValidationError):
-        assumptions.monitor_width_m = 0.5  # type: ignore[misc]
+        assumptions.monitor_width_m = 0.5
 
 
 def test_default_scene_assumptions_persists_metadata_for_every_record() -> None:

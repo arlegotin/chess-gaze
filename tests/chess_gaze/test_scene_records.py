@@ -387,9 +387,7 @@ def test_scene_records_enforce_semantic_coordinate_frames() -> None:
         SceneUniGazeRayRecord.model_validate(
             {
                 **_ray_payload(),
-                "direction_scene": _unit_vector_payload(
-                    space="camera_opencv_pseudo_m"
-                ),
+                "direction_scene": _unit_vector_payload(space="camera_opencv_pseudo_m"),
             }
         )
 
@@ -795,11 +793,9 @@ def test_scene_frame_record_validates_from_json_text_and_round_trips() -> None:
         0.12,
         0.10,
     )
-    assert (
-        SceneFrameRecord.model_validate_json(frame.model_dump_json(by_alias=True))
-        .model_dump(by_alias=True)["head"]["ellipsoid_radii_m"]
-        == (0.09, 0.12, 0.10)
-    )
+    assert SceneFrameRecord.model_validate_json(
+        frame.model_dump_json(by_alias=True)
+    ).model_dump(by_alias=True)["head"]["ellipsoid_radii_m"] == (0.09, 0.12, 0.10)
 
 
 def test_scene_camera_model_requires_approved_policy_literal() -> None:
@@ -827,9 +823,10 @@ def test_scene_manifest_serializes_structured_spec_fields() -> None:
     )
     assert payload["coordinate_frames"]["viewer_frame"] == "three_view"
     assert payload["scene_axes_camera"]["forward_camera"]["z"] == 1.0
-    assert (
-        payload["robust_estimators"]["scene_center"]["thresholds_m"]
-        == (0.042, 0.035, 0.28)
+    assert payload["robust_estimators"]["scene_center"]["thresholds_m"] == (
+        0.042,
+        0.035,
+        0.28,
     )
     assert (
         payload["robust_estimators"]["main_unigaze_direction"][
@@ -857,16 +854,16 @@ def test_structured_nested_models_reject_non_finite_values_and_unknown_keys() ->
         SceneFrameRecord.model_validate(unknown_frame_payload)
 
     manifest_payload = _manifest_payload()
-    manifest_payload["robust_estimators"]["scene_center"][
-        "candidate_frame_count"
-    ] = math.nan
+    manifest_payload["robust_estimators"]["scene_center"]["candidate_frame_count"] = (
+        math.nan
+    )
     with pytest.raises(ValidationError):
         SceneManifest.model_validate(manifest_payload)
 
     unknown_manifest_payload = _manifest_payload()
-    unknown_manifest_payload["robust_estimators"]["scene_center"][
-        "unexpected"
-    ] = "value"
+    unknown_manifest_payload["robust_estimators"]["scene_center"]["unexpected"] = (
+        "value"
+    )
     with pytest.raises(ValidationError):
         SceneManifest.model_validate(unknown_manifest_payload)
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from chess_gaze.frame_records import EyeRecord, FrameRecord
 from chess_gaze.gaze_observation import pitch_yaw_to_unit_vector
@@ -45,7 +46,7 @@ class RobustPointEstimate:
     iteration_count: int
     convergence_tolerance_m: float
     fallback_used: bool
-    uncertainty: str
+    uncertainty: Literal["low", "medium", "high"]
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ class RobustDirectionEstimate:
     median_angular_residual_radians: float | None
     angular_residual_percentiles_radians: dict[str, float | None]
     fallback_used: bool
-    uncertainty: str
+    uncertainty: Literal["low", "medium", "high"]
 
 
 _GEOMETRIC_MEDIAN_MAX_ITERATIONS = 128
@@ -129,23 +130,21 @@ def back_project_eye_points(
             state=left_state,
             point=left_point,
             fallback_reason=(
-                "paired pupil distance unavailable because "
-                "an eye input is non-finite"
+                "paired pupil distance unavailable because an eye input is non-finite"
             ),
         )
         right_eye = _finalize_invalid_eye(
             state=right_state,
             point=right_point,
             fallback_reason=(
-                "paired pupil distance unavailable because "
-                "an eye input is non-finite"
+                "paired pupil distance unavailable because an eye input is non-finite"
             ),
         )
         midpoint = SceneEyeMidpointRecord(
             valid=False,
             origin_policy=None,
-            camera_point_m=None,
-            scene_point_m=None,
+            camera_m=None,
+            scene_m=None,
             pupil_distance_px=None,
             estimated_depth_m=None,
             source_reason_invalid=_first_reason(
@@ -184,8 +183,8 @@ def back_project_eye_points(
         midpoint = SceneEyeMidpointRecord(
             valid=False,
             origin_policy=None,
-            camera_point_m=None,
-            scene_point_m=None,
+            camera_m=None,
+            scene_m=None,
             pupil_distance_px=None,
             estimated_depth_m=None,
             source_reason_invalid=_first_reason(
@@ -202,6 +201,8 @@ def back_project_eye_points(
             diagnostics=diagnostics,
         )
 
+    assert left_state.point is not None
+    assert right_state.point is not None
     pupil_distance_px = math.hypot(
         right_state.point.x - left_state.point.x,
         right_state.point.y - left_state.point.y,
@@ -223,8 +224,8 @@ def back_project_eye_points(
         midpoint = SceneEyeMidpointRecord(
             valid=False,
             origin_policy=None,
-            camera_point_m=None,
-            scene_point_m=None,
+            camera_m=None,
+            scene_m=None,
             pupil_distance_px=None,
             estimated_depth_m=None,
             source_reason_invalid="pupil_distance_px is non-finite",
@@ -252,8 +253,8 @@ def back_project_eye_points(
         midpoint = SceneEyeMidpointRecord(
             valid=False,
             origin_policy=None,
-            camera_point_m=None,
-            scene_point_m=None,
+            camera_m=None,
+            scene_m=None,
             pupil_distance_px=pupil_distance_px,
             estimated_depth_m=None,
             source_reason_invalid=reason,
@@ -287,8 +288,8 @@ def back_project_eye_points(
         midpoint = SceneEyeMidpointRecord(
             valid=False,
             origin_policy=None,
-            camera_point_m=None,
-            scene_point_m=None,
+            camera_m=None,
+            scene_m=None,
             pupil_distance_px=pupil_distance_px,
             estimated_depth_m=None,
             source_reason_invalid=reason,
@@ -312,8 +313,8 @@ def back_project_eye_points(
     left_eye = SceneEyeRecord(
         valid=True,
         image_px=left_state.point,
-        camera_point_m=left_camera,
-        scene_point_m=_scene_vector(
+        camera_m=left_camera,
+        scene_m=_scene_vector(
             x=left_camera.x - midpoint_camera.x,
             y=left_camera.y - midpoint_camera.y,
             z=left_camera.z - midpoint_camera.z,
@@ -324,8 +325,8 @@ def back_project_eye_points(
     right_eye = SceneEyeRecord(
         valid=True,
         image_px=right_state.point,
-        camera_point_m=right_camera,
-        scene_point_m=_scene_vector(
+        camera_m=right_camera,
+        scene_m=_scene_vector(
             x=right_camera.x - midpoint_camera.x,
             y=right_camera.y - midpoint_camera.y,
             z=right_camera.z - midpoint_camera.z,
@@ -336,8 +337,8 @@ def back_project_eye_points(
     midpoint = SceneEyeMidpointRecord(
         valid=True,
         origin_policy="both_eyes_required",
-        camera_point_m=midpoint_camera,
-        scene_point_m=_scene_vector(x=0.0, y=0.0, z=0.0),
+        camera_m=midpoint_camera,
+        scene_m=_scene_vector(x=0.0, y=0.0, z=0.0),
         pupil_distance_px=pupil_distance_px,
         estimated_depth_m=depth_m,
         source_reason_invalid=None,
@@ -377,12 +378,10 @@ def robust_scene_center(
             _median(abs(point.y - medians[1]) for point in finite_points),
             _median(abs(point.z - medians[2]) for point in finite_points),
         )
-        thresholds = tuple(
-            max(
-                3.5 * axis_mad,
-                assumptions.scene_center_min_axis_tolerance_m,
-            )
-            for axis_mad in mad_m
+        thresholds = (
+            max(3.5 * mad_m[0], assumptions.scene_center_min_axis_tolerance_m),
+            max(3.5 * mad_m[1], assumptions.scene_center_min_axis_tolerance_m),
+            max(3.5 * mad_m[2], assumptions.scene_center_min_axis_tolerance_m),
         )
         inliers = [
             point
@@ -444,7 +443,7 @@ def unigaze_ray_from_frame(
             valid=False,
             source="appearance_gaze",
             origin_camera_m=None,
-            origin_scene_m=None,
+            scene_m=None,
             direction_camera=None,
             direction_scene=None,
             direction_source=None,
@@ -470,7 +469,7 @@ def unigaze_ray_from_frame(
             valid=False,
             source="appearance_gaze",
             origin_camera_m=None,
-            origin_scene_m=None,
+            scene_m=None,
             direction_camera=None,
             direction_scene=None,
             direction_source=None,
@@ -493,7 +492,7 @@ def unigaze_ray_from_frame(
             valid=False,
             source="appearance_gaze",
             origin_camera_m=None,
-            origin_scene_m=None,
+            scene_m=None,
             direction_camera=None,
             direction_scene=None,
             direction_source=None,
@@ -507,7 +506,7 @@ def unigaze_ray_from_frame(
         valid=True,
         source="appearance_gaze",
         origin_camera_m=midpoint.camera_point_m,
-        origin_scene_m=midpoint.scene_point_m,
+        scene_m=midpoint.scene_point_m,
         direction_camera=_camera_unit_vector(normalized_direction),
         direction_scene=_scene_unit_vector(normalized_direction),
         direction_source="appearance_gaze_unigaze_pitch_yaw",
@@ -900,8 +899,7 @@ def _eye_projection_state(
             point=point,
             reason_invalid=invalid_reason,
             source_reason_invalid=(
-                "pupil center must use IMAGE_PX, got "
-                f"{point.space.value}"
+                f"pupil center must use IMAGE_PX, got {point.space.value}"
             ),
             coordinate_space=point.space.value,
         )
@@ -955,8 +953,8 @@ def _invalid_eye_record(
     return SceneEyeRecord(
         valid=False,
         image_px=persisted_image,
-        camera_point_m=None,
-        scene_point_m=None,
+        camera_m=None,
+        scene_m=None,
         source_reason_invalid=source_reason_invalid,
         reason_invalid=reason_invalid,
     )
@@ -1038,9 +1036,7 @@ def _invalid_monitor_hit(
         point_scene_m=None,
         plane_uv_m=None,
         ray_t_m=_finite_or_none(t) if t is not None else None,
-        denominator=(
-            _finite_or_none(denominator) if denominator is not None else None
-        ),
+        denominator=(_finite_or_none(denominator) if denominator is not None else None),
         signed_origin_distance_m=(
             _finite_or_none(signed_distance_m)
             if signed_distance_m is not None
@@ -1119,9 +1115,7 @@ def _source_reason(eye: EyeRecord) -> str | None:
 
 def _is_finite_vector(vector: Vector3D) -> bool:
     return (
-        math.isfinite(vector.x)
-        and math.isfinite(vector.y)
-        and math.isfinite(vector.z)
+        math.isfinite(vector.x) and math.isfinite(vector.y) and math.isfinite(vector.z)
     )
 
 
@@ -1136,18 +1130,14 @@ def _normalize_tuple(
 ) -> tuple[float, float, float] | None:
     if not all(math.isfinite(value) for value in xyz):
         return None
-    norm = math.sqrt(
-        (xyz[0] * xyz[0]) + (xyz[1] * xyz[1]) + (xyz[2] * xyz[2])
-    )
+    norm = math.sqrt((xyz[0] * xyz[0]) + (xyz[1] * xyz[1]) + (xyz[2] * xyz[2]))
     if norm <= _VECTOR_EPSILON:
         return None
     return (xyz[0] / norm, xyz[1] / norm, xyz[2] / norm)
 
 
-def _median(
-    values: Sequence[float] | list[float] | tuple[float, ...] | object,
-) -> float:
-    sorted_values = sorted(values)
+def _median(values: Iterable[float]) -> float:
+    sorted_values: list[float] = sorted(values)
     if not sorted_values:
         raise ValueError("median requires at least one value")
     midpoint = len(sorted_values) // 2
@@ -1368,11 +1358,7 @@ def _dot(
     left: tuple[float, float, float],
     right: tuple[float, float, float],
 ) -> float:
-    return (
-        (left[0] * right[0])
-        + (left[1] * right[1])
-        + (left[2] * right[2])
-    )
+    return (left[0] * right[0]) + (left[1] * right[1]) + (left[2] * right[2])
 
 
 def _cross(
