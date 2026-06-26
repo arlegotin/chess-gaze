@@ -1,5 +1,10 @@
 # Nakamura Scene Pitch Coordinate Repair Implementation Plan
 
+> **Superseded 2026-06-26:** This plan repaired pitch/up-down semantics only.
+> Do not use it as current left/right or front/back scene-coordinate guidance.
+> Use `docs/superpowers/plans/2026-06-26-anatomical-scene-coordinate-repair.md`
+> and the active 3D scene spec instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 Status: completed on 2026-06-26. See

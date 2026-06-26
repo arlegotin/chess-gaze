@@ -20,11 +20,12 @@ machine-readable evidence to reconstruct and debug an approximate 3D scene:
 
 - streamer head and eyes through time;
 - a robust scene center based on eye-midpoint positions;
-- a scene coordinate frame with explicit up, right, semantic forward, and
-  transform-back axes;
-- a main-monitor center placed from the dominant UniGaze direction, with a
-  camera-stable plane orientation plus explicit human/setup assumptions where
-  monocular data cannot determine scale or monitor pose;
+- a scene coordinate frame with explicit streamer/anatomical right, up,
+  streamer back, and semantic monitor-forward axes for frontal desktop webcam
+  videos;
+- a main-monitor center placed from the dominant UniGaze direction, with an
+  anatomical frontoparallel plane orientation plus explicit human/setup
+  assumptions where monocular data cannot determine scale or monitor pose;
 - one per-frame scene record for every decoded frame;
 - one monitor-plane hit point for every frame that has a finite UniGaze ray and a
   valid ray-plane intersection;
@@ -166,15 +167,15 @@ All scene records must name the coordinate frame of every 3D value.
 | --- | --- |
 | `image_px` | Source decoded image pixels, origin top-left, x right, y down. |
 | `camera_opencv_pseudo_m` | OpenCV-style camera frame: +X image-right, +Y image-down, +Z camera-forward into the image. Units are pseudo-meters derived from assumptions unless calibration proves metric scale. |
-| `scene_pseudo_m` | Scene frame centered at the robust eye-midpoint center. +X scene-right, +Y scene-up, +Z scene-back in the `right_up_back_columns_right_handed` transform basis. Semantic forward gaze toward the monitor is therefore negative scene Z. Units match `camera_opencv_pseudo_m`. |
-| `monitor_plane_pseudo_m` | Main monitor plane coordinates. +U monitor-right, +V monitor-up, origin at inferred monitor center. |
+| `scene_pseudo_m` | Scene frame centered at the robust eye-midpoint center for a frontal desktop webcam setup. +X is the streamer's anatomical right, +Y is up, and +Z is the streamer's back in the `right_up_back_columns_right_handed` transform basis. In OpenCV camera coordinates this is `right_camera=(-1,0,0)`, `up_camera=(0,-1,0)`, and `back_camera=(0,0,1)`. Semantic forward gaze toward the monitor is therefore negative scene Z. Units match `camera_opencv_pseudo_m`. |
+| `monitor_plane_pseudo_m` | Main monitor plane coordinates. +U follows scene +X / streamer right, +V follows scene +Y / up, origin at inferred monitor center. |
 | `three_view` | Browser display mapping from `scene_pseudo_m`: x stays x, y stays y-up, z is rendered with Three.js camera conventions. |
 
 The mathematical frame is `camera_opencv_pseudo_m`. The viewer frame is only a
 rendering transform. Persist the math values, not only Three.js-ready values.
-Scene X must preserve camera/image horizontal ordering: a camera-right gaze
-direction cannot become scene-left because the estimated dominant gaze direction
-is oblique.
+Positive frame yaw remains image-right for 2D overlays, but in a frontal webcam
+view image-right is the streamer's left and must map to negative scene X.
+Mirror policy is unknown unless an explicit future artifact proves otherwise.
 
 ## Explicit Assumptions And Constants
 
@@ -267,22 +268,22 @@ One JSON object per run:
       "fallback_used": false
     },
     "scene_orientation": {
-      "method": "camera_stable_right_up_back_axes",
+      "method": "anatomical_frontal_webcam_right_up_back_axes",
       "candidate_frame_count": 0,
       "fallbacks": []
     }
   },
   "scene_center_camera_m": [0.0, 0.0, 0.65],
   "scene_axes_camera": {
-    "right": [1.0, 0.0, 0.0],
+    "right": [-1.0, 0.0, 0.0],
     "up": [0.0, -1.0, 0.0],
-    "back": [0.0, 0.0, -1.0],
-    "forward": [0.0, 0.0, 1.0]
+    "back": [0.0, 0.0, 1.0],
+    "forward": [0.0, 0.0, -1.0]
   },
   "main_monitor_plane": {
-    "center_camera_m": [0.0, 0.0, 1.35],
-    "normal_camera": [0.0, 0.0, -1.0],
-    "right_camera": [1.0, 0.0, 0.0],
+    "center_camera_m": [0.0, 0.0, -0.05],
+    "normal_camera": [0.0, 0.0, 1.0],
+    "right_camera": [-1.0, 0.0, 0.0],
     "up_camera": [0.0, -1.0, 0.0],
     "physical_width_m": 0.6,
     "physical_height_m": 0.34,
@@ -531,19 +532,21 @@ center remains auditable.
 
 ### 5. Scene orientation
 
-Build axes in camera coordinates and keep them camera-stable:
+Build axes in camera coordinates and keep them anatomical for a frontal webcam
+setup:
 
-1. `scene_right_camera = [1.0, 0.0, 0.0]`.
+1. `scene_right_camera = [-1.0, 0.0, 0.0]`.
 2. `scene_up_camera = [0.0, -1.0, 0.0]`.
-3. `scene_back_camera = [0.0, 0.0, -1.0]`.
-4. `scene_forward_camera = [0.0, 0.0, 1.0]`.
+3. `scene_back_camera = [0.0, 0.0, 1.0]`.
+4. `scene_forward_camera = [0.0, 0.0, -1.0]`.
 5. Validate finite axes, unit norms, pairwise dot products near zero, and
    determinant near `+1` for `[right, up, back]`.
 
 Do not rotate scene axes from dominant gaze or eye-pair evidence. Eye labels and
 eye-pair ordering remain validation evidence, but they are not a basis-estimation
-input for the scene frame. This keeps camera/image right monotonic with scene
-right and prevents forward depth from changing the horizontal sign.
+input for the scene frame. This keeps the scene human-centered: image-right
+gaze from a face looking toward the camera is streamer's left and therefore
+negative scene X.
 
 Do not infer mirror policy unless explicit evidence exists. Persist
 `mirror_policy="unknown"` when unknown.
@@ -823,8 +826,8 @@ Record the run directory, counts, scene summary, and viewer smoke result.
    screening, or an explicit persisted fallback if too few valid frames exist.
 7. Main-monitor center direction is inferred from robust dominant UniGaze
    direction, or an explicit persisted fallback if too few valid rays exist.
-8. Main-monitor normal is camera-stable `scene_back_camera`, and monitor right
-   and up match the scene right/up axes.
+8. Main-monitor normal is anatomical `scene_back_camera`, and monitor right and
+   up match the scene right/up axes.
 9. Monitor distance, monitor size, IPD, and head dimensions are persisted as
    explicit assumptions with units and uncertainty.
 10. Scene axes are finite, unit-length within tolerance, mutually orthogonal

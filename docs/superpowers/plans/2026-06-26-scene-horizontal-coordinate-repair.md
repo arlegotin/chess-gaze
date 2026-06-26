@@ -1,5 +1,11 @@
 # Scene Horizontal Coordinate Repair Implementation Plan
 
+> **Superseded 2026-06-26:** This plan fixed image-left/image-right ordering
+> but not streamer anatomical left/right or head front/back. Do not use it as
+> current coordinate guidance. Use
+> `docs/superpowers/plans/2026-06-26-anatomical-scene-coordinate-repair.md`
+> and the active 3D scene spec instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Repair the systematic left/right confusion in 3D scene and monitor coordinates by making monitor horizontal coordinates preserve camera image-left/image-right ordering for a fixed eye origin.

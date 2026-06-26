@@ -36,7 +36,7 @@
 - Consumes: `GazeAngles` where positive yaw means image-right and positive pitch means image-up.
 - Produces: `SceneAxisBasisRecord` with +X streamer right, +Y scene up, +Z scene back; `SceneUniGazeRayRecord.direction_scene` where image-right/his-left is negative scene X and monitor-directed gaze is negative scene Z.
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Add tests proving:
 
@@ -47,7 +47,7 @@ Add tests proving:
 - the head ellipsoid center is below and behind the eye midpoint, so eyes are on the front side of the head.
 - `source_artifacts.viewer` points to `viewer/index.html`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -60,7 +60,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest \
 
 Expected: new anatomical tests fail under the current image-side scene basis.
 
-- [ ] **Step 3: Implement the durable boundary fix**
+- [x] **Step 3: Implement the durable boundary fix**
 
 Change the scene conversion boundary:
 
@@ -70,7 +70,7 @@ Change the scene conversion boundary:
 - `_head_record()` continues applying the camera-space offset `(0,+Y,+Z)`, which now maps to scene `(0,-Y,+Z)`: below and behind the eye midpoint.
 - `_build_manifest()` writes `viewer="viewer/index.html"` and an orientation method name that explicitly says anatomical frontal-webcam axes.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -80,7 +80,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py tes
 
 Expected: focused scene and viewer tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit the test and implementation repair with a message describing the anatomical scene-coordinate fix.
 
@@ -95,15 +95,15 @@ Commit the test and implementation repair with a message describing the anatomic
 - Consumes: persisted `scene_pseudo_m` directly.
 - Produces: a default front-of-face viewer camera and axis labels that do not imply blue +Z is gaze direction.
 
-- [ ] **Step 1: Add tests for generated viewer assets**
+- [x] **Step 1: Add tests for generated viewer assets**
 
 Assert the generated viewer labels +X as streamer right and +Z as streamer back, and the default camera starts on the front/monitor side of the scene.
 
-- [ ] **Step 2: Implement viewer changes**
+- [x] **Step 2: Implement viewer changes**
 
 Set the initial Three camera on negative scene Z looking toward the head and monitor, update the key light accordingly, and change the axis legend from generic depth to streamer back/monitor-front language.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 Run `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q`, then commit.
 
@@ -119,15 +119,15 @@ Run `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py 
 - Consumes: root-cause evidence from artifact, code, visual, and third-party documentation analysis.
 - Produces: non-contradictory guidance for future agents and users.
 
-- [ ] **Step 1: Replace stale image-side scene guidance**
+- [x] **Step 1: Replace stale image-side scene guidance**
 
 Update docs so `scene_pseudo_m` says +X is streamer/anatomical right for frontal webcam assumptions, +Y is up, +Z is streamer back, and monitor-directed gaze is negative scene Z.
 
-- [ ] **Step 2: Record root cause and verification**
+- [x] **Step 2: Record root cause and verification**
 
 Write a closeout with the failed prior invariant, exact frame evidence, third-party docs checked, tests run, real Nakamura run ID, and residual uncertainty about mirrored webcam feeds.
 
-- [ ] **Step 3: Commit docs**
+- [x] **Step 3: Commit docs**
 
 Commit documentation updates separately from code.
 
@@ -141,11 +141,11 @@ Commit documentation updates separately from code.
 - Consumes: real input video and local model assets.
 - Produces: a fresh verified run with anatomical scene-coordinate evidence.
 
-- [ ] **Step 1: Rebuild scene artifacts from the existing real run**
+- [x] **Step 1: Rebuild scene artifacts from the existing real run**
 
 Use `build_scene_artifacts()` and `build_scene_viewer()` on the reported run to quickly verify corrected scene data against identical source `frames.jsonl`.
 
-- [ ] **Step 2: Run full real-video analysis**
+- [x] **Step 2: Run full real-video analysis**
 
 Run:
 
@@ -153,7 +153,7 @@ Run:
 MPLCONFIGDIR=/Volumes/git/legotin/chess-gaze/.cache/matplotlib UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 --output-root artifacts/output --models-root models
 ```
 
-- [ ] **Step 3: Numeric audit**
+- [x] **Step 3: Numeric audit**
 
 Verify representative frames:
 
@@ -163,10 +163,10 @@ Verify representative frames:
 - eye midpoint is in front of head center: `eye_midpoint.scene_m.z < head.scene_m.z`.
 - monitor center and hit points are in front of the face: negative scene Z.
 
-- [ ] **Step 4: Browser visual verification**
+- [x] **Step 4: Browser visual verification**
 
 Serve the fresh viewer, capture screenshots for frames 90, 154, 1568, and 1651, and verify the default view, ray, monitor, head, and eyes agree with the processed frames.
 
-- [ ] **Step 5: Final gates**
+- [x] **Step 5: Final gates**
 
 Run focused tests, broad available tests, Ruff, and mypy or report exact remaining failures.

@@ -1,5 +1,11 @@
 # Nakamura Scene Pitch Coordinate Repair Closeout
 
+> **Superseded 2026-06-26:** This closeout only repaired pitch/up-down
+> semantics. Its scene-axis wording predates the anatomical front/back and
+> left/right repair. Current coordinate guidance is in
+> `docs/superpowers/plans/2026-06-26-anatomical-scene-coordinate-repair.md` and
+> `docs/superpowers/closeouts/2026-06-26-anatomical-scene-coordinate-repair.md`.
+
 Date: 2026-06-26
 
 ## Summary
