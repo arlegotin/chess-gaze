@@ -109,3 +109,40 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/
 ```
 
 - `All checks passed!`
+
+## Review Fixes Round 2
+
+- Added a regression test for slanted pupil centers at `(900, 500)` and
+  `(1020, 580)` to lock the required Euclidean inter-pupil distance behavior.
+- Updated `back_project_eye_points()` to use 2D Euclidean pixel distance instead
+  of horizontal delta only.
+- Narrowed the non-positive-distance invalid case to exactly overlapping pupil
+  centers, which is the only zero-distance case under the Task 2 contract.
+
+RED evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- Failed with `1 failed, 8 passed`.
+- The failing test was
+  `test_back_project_eye_points_uses_euclidean_pupil_distance`, and the failure
+  showed the projected `x` coordinate still matched the old horizontal-only
+  depth calculation.
+
+GREEN evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- `9 passed in 0.05s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/chess_gaze/test_scene_geometry.py
+```
+
+- `All checks passed!`

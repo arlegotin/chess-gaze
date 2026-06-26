@@ -192,7 +192,10 @@ def back_project_eye_points(
             diagnostics=diagnostics,
         )
 
-    pupil_distance_px = right_state.point.x - left_state.point.x
+    pupil_distance_px = math.hypot(
+        right_state.point.x - left_state.point.x,
+        right_state.point.y - left_state.point.y,
+    )
     diagnostics["pupil_distance_px"] = pupil_distance_px
 
     if not math.isfinite(pupil_distance_px):

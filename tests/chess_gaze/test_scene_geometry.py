@@ -238,26 +238,70 @@ def test_back_project_eye_points_projects_eyes_and_midpoint_in_camera_space() ->
     assert projection.diagnostics["pupil_distance_px"] == pytest.approx(120.0)
 
 
-@pytest.mark.parametrize(
-    ("left_x", "right_x", "expected_distance"),
-    [
-        (960.0, 960.0, 0.0),
-        (1020.0, 900.0, -120.0),
-    ],
-)
-def test_back_project_eye_points_rejects_non_positive_pupil_distance(
-    left_x: float,
-    right_x: float,
-    expected_distance: float,
-) -> None:
+def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     camera = scene_geometry.estimated_camera_model(1920, 1080)
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(left_x, 540.0),
-            right_eye=_present_eye(right_x, 540.0),
+            left_eye=_present_eye(900.0, 500.0),
+            right_eye=_present_eye(1020.0, 580.0),
+        ),
+        camera,
+        assumptions,
+    )
+
+    expected_pupil_distance = math.sqrt((120.0**2) + (80.0**2))
+    expected_depth = (
+        DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M
+        * 1920.0
+        / expected_pupil_distance
+    )
+
+    assert projection.left_eye.valid is True
+    assert projection.left_eye.camera_point_m is not None
+    assert projection.left_eye.camera_point_m.x == pytest.approx(
+        ((900.0 - 960.0) * expected_depth) / 1920.0
+    )
+    assert projection.left_eye.camera_point_m.y == pytest.approx(
+        ((500.0 - 540.0) * expected_depth) / 1920.0
+    )
+    assert projection.left_eye.camera_point_m.z == pytest.approx(expected_depth)
+
+    assert projection.right_eye.valid is True
+    assert projection.right_eye.camera_point_m is not None
+    assert projection.right_eye.camera_point_m.x == pytest.approx(
+        ((1020.0 - 960.0) * expected_depth) / 1920.0
+    )
+    assert projection.right_eye.camera_point_m.y == pytest.approx(
+        ((580.0 - 540.0) * expected_depth) / 1920.0
+    )
+    assert projection.right_eye.camera_point_m.z == pytest.approx(expected_depth)
+
+    assert projection.midpoint.valid is True
+    assert projection.midpoint.pupil_distance_px == pytest.approx(
+        expected_pupil_distance
+    )
+    assert projection.midpoint.estimated_depth_m == pytest.approx(expected_depth)
+    assert projection.midpoint.camera_point_m is not None
+    assert projection.midpoint.camera_point_m.x == pytest.approx(0.0)
+    assert projection.midpoint.camera_point_m.y == pytest.approx(0.0)
+    assert projection.midpoint.camera_point_m.z == pytest.approx(expected_depth)
+    assert projection.diagnostics["pupil_distance_px"] == pytest.approx(
+        expected_pupil_distance
+    )
+
+
+def test_back_project_eye_points_rejects_overlapping_pupil_distance() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    camera = scene_geometry.estimated_camera_model(1920, 1080)
+
+    projection = scene_geometry.back_project_eye_points(
+        _frame_record(
+            left_eye=_present_eye(960.0, 540.0),
+            right_eye=_present_eye(960.0, 540.0),
         ),
         camera,
         assumptions,
@@ -271,9 +315,7 @@ def test_back_project_eye_points_rejects_non_positive_pupil_distance(
     assert projection.midpoint.reason_invalid == SceneInvalidReason.EYE_MIDPOINT_INVALID
     assert projection.midpoint.source_reason_invalid is not None
     assert "pupil_distance_px" in projection.midpoint.source_reason_invalid
-    assert projection.diagnostics["pupil_distance_px"] == pytest.approx(
-        expected_distance
-    )
+    assert projection.diagnostics["pupil_distance_px"] == pytest.approx(0.0)
 
 
 def test_back_project_eye_points_rejects_non_finite_pupil_input() -> None:
