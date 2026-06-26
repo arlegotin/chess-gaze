@@ -482,7 +482,7 @@ def unigaze_ray_from_frame(
             reason_invalid=SceneInvalidReason.UNIGAZE_INVALID,
         )
 
-    direction_xyz = pitch_yaw_to_unit_vector(
+    direction_xyz = _frame_gaze_angles_to_camera_direction(
         pitch_radians=appearance_gaze.pitch_radians,
         yaw_radians=appearance_gaze.yaw_radians,
     )
@@ -515,6 +515,16 @@ def unigaze_ray_from_frame(
         source_reason_invalid=None,
         reason_invalid=None,
     )
+
+
+def _frame_gaze_angles_to_camera_direction(
+    *, pitch_radians: float, yaw_radians: float
+) -> tuple[float, float, float]:
+    x, image_up_y, z = pitch_yaw_to_unit_vector(
+        pitch_radians=pitch_radians,
+        yaw_radians=yaw_radians,
+    )
+    return (x, -image_up_y, z)
 
 
 def robust_main_direction(

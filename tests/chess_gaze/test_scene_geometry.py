@@ -227,11 +227,11 @@ def _direction_from_pitch_yaw(
     pitch_radians: float,
     yaw_radians: float,
 ) -> UnitVector3D:
-    x, y, z = pitch_yaw_to_unit_vector(
+    x, image_up_y, z = pitch_yaw_to_unit_vector(
         pitch_radians=pitch_radians,
         yaw_radians=yaw_radians,
     )
-    return _camera_unit_vector(x, y, z)
+    return _camera_unit_vector(x, -image_up_y, z)
 
 
 def _midpoint_record(
@@ -845,14 +845,16 @@ def test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze() -> N
         midpoint,
     )
 
-    appearance_vector = pitch_yaw_to_unit_vector(
+    appearance_x, appearance_image_up_y, appearance_z = pitch_yaw_to_unit_vector(
         pitch_radians=0.05,
         yaw_radians=0.10,
     )
-    recommended_vector = pitch_yaw_to_unit_vector(
+    recommended_x, recommended_image_up_y, recommended_z = pitch_yaw_to_unit_vector(
         pitch_radians=-0.30,
         yaw_radians=0.75,
     )
+    appearance_vector = (appearance_x, -appearance_image_up_y, appearance_z)
+    recommended_vector = (recommended_x, -recommended_image_up_y, recommended_z)
 
     assert ray.valid is True
     assert ray.source == "appearance_gaze"
@@ -868,7 +870,74 @@ def test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze() -> N
     assert ray.direction_camera.z != pytest.approx(recommended_vector[2])
 
 
-def test_unigaze_ray_from_frame_matches_pitch_yaw_sign_convention() -> None:
+def test_unigaze_ray_from_frame_maps_positive_pitch_to_camera_up() -> None:
+    scene_geometry = _scene_geometry()
+    midpoint = _midpoint_record(
+        valid=True,
+        camera_point=_camera_point(0.0, 0.0, 0.7),
+        scene_point=_scene_point(0.0, 0.0, 0.0),
+        reason_invalid=None,
+    )
+
+    ray = scene_geometry.unigaze_ray_from_frame(
+        _frame_record_with_gazes(
+            appearance_gaze=_gaze_angles(
+                valid=True,
+                pitch_radians=0.2,
+                yaw_radians=0.0,
+                reason_invalid=None,
+            ),
+            recommended_gaze=_invalid_angles(ErrorCode.GAZE_ESTIMATORS_DISAGREE),
+        ),
+        midpoint,
+    )
+
+    assert ray.valid is True
+    assert ray.direction_camera is not None
+    assert ray.direction_camera.x == pytest.approx(0.0)
+    assert ray.direction_camera.y < 0.0
+    assert ray.direction_camera.z > 0.0
+
+
+def test_unigaze_ray_from_frame_preserves_nakamura_upward_gaze_direction() -> None:
+    scene_geometry = _scene_geometry()
+    midpoint = _midpoint_record(
+        valid=True,
+        camera_point=_camera_point(
+            -0.46211833054305185,
+            0.08590315491459204,
+            1.6175790317537708,
+        ),
+        scene_point=_scene_point(
+            -0.20316321340576493,
+            0.08391311089468123,
+            -0.0871501757382564,
+        ),
+        reason_invalid=None,
+    )
+
+    ray = scene_geometry.unigaze_ray_from_frame(
+        _frame_record_with_gazes(
+            appearance_gaze=_gaze_angles(
+                valid=True,
+                pitch_radians=0.8304274082183838,
+                yaw_radians=-0.42343080043792725,
+                reason_invalid=None,
+            ),
+            recommended_gaze=_invalid_angles(ErrorCode.GAZE_ESTIMATORS_DISAGREE),
+            frame_index=1651,
+        ),
+        midpoint,
+    )
+
+    assert ray.valid is True
+    assert ray.direction_camera is not None
+    assert ray.direction_camera.x < 0.0
+    assert ray.direction_camera.y < 0.0
+    assert ray.direction_camera.z > 0.0
+
+
+def test_unigaze_ray_from_frame_matches_opencv_camera_pitch_yaw_convention() -> None:
     scene_geometry = _scene_geometry()
     midpoint = _midpoint_record(
         valid=True,
@@ -892,14 +961,14 @@ def test_unigaze_ray_from_frame_matches_pitch_yaw_sign_convention() -> None:
         midpoint,
     )
 
-    expected_x, expected_y, expected_z = pitch_yaw_to_unit_vector(
+    expected_x, expected_image_up_y, expected_z = pitch_yaw_to_unit_vector(
         pitch_radians=pitch_radians,
         yaw_radians=yaw_radians,
     )
     assert ray.valid is True
     assert ray.direction_camera is not None
     assert ray.direction_camera.x == pytest.approx(expected_x)
-    assert ray.direction_camera.y == pytest.approx(expected_y)
+    assert ray.direction_camera.y == pytest.approx(-expected_image_up_y)
     assert ray.direction_camera.z == pytest.approx(expected_z)
 
 
