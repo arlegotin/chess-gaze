@@ -34,15 +34,17 @@ PNP_REPROJECTION_ERROR_THRESHOLD_NAME = "PNP_REPROJECTION_ERROR_MAX_PX"
 PNP_REPROJECTION_ERROR_THRESHOLD_SOURCE = "chess_gaze.head_pose"
 CANONICAL_FACE_MODEL_POINTS_SOURCE = "task_9_named_canonical_face_model_mm"
 
+# In this frontal-camera PnP model, positive X projects to image-right.
+# For a streamer facing the camera, image-right is anatomical left.
 CANONICAL_FACE_MODEL_POINTS_MM = {
     "nose_tip": (0.0, 0.0, 0.0),
     "chin": (0.0, -63.6, -12.5),
-    "left_eye_outer": (-43.3, 32.7, -26.0),
-    "right_eye_outer": (43.3, 32.7, -26.0),
-    "left_eye_inner": (-20.0, 32.0, -20.0),
-    "right_eye_inner": (20.0, 32.0, -20.0),
-    "left_mouth_corner": (-28.9, -28.9, -24.1),
-    "right_mouth_corner": (28.9, -28.9, -24.1),
+    "left_eye_outer": (43.3, 32.7, -26.0),
+    "right_eye_outer": (-43.3, 32.7, -26.0),
+    "left_eye_inner": (20.0, 32.0, -20.0),
+    "right_eye_inner": (-20.0, 32.0, -20.0),
+    "left_mouth_corner": (28.9, -28.9, -24.1),
+    "right_mouth_corner": (-28.9, -28.9, -24.1),
 }
 
 

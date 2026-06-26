@@ -6,6 +6,16 @@ from math import dist
 from statistics import median
 from typing import Any
 
+from chess_gaze.face_landmark_indices import (
+    MEDIAPIPE_ANATOMICAL_LEFT_EYE_INNER_INDEX,
+    MEDIAPIPE_ANATOMICAL_LEFT_EYE_OUTER_INDEX,
+    MEDIAPIPE_ANATOMICAL_LEFT_MOUTH_CORNER_INDEX,
+    MEDIAPIPE_ANATOMICAL_RIGHT_EYE_INNER_INDEX,
+    MEDIAPIPE_ANATOMICAL_RIGHT_EYE_OUTER_INDEX,
+    MEDIAPIPE_ANATOMICAL_RIGHT_MOUTH_CORNER_INDEX,
+    MEDIAPIPE_CHIN_INDEX,
+    MEDIAPIPE_NOSE_TIP_INDEX,
+)
 from chess_gaze.frame_records import (
     CalibrationRecord,
     EyeRecord,
@@ -31,14 +41,14 @@ derived_percentile_lower = 0.05
 derived_percentile_upper = 0.95
 
 PNP_LANDMARK_INDICES = PnPLandmarkIndices(
-    nose_tip=1,
-    chin=152,
-    left_eye_outer=33,
-    right_eye_outer=263,
-    left_eye_inner=133,
-    right_eye_inner=362,
-    left_mouth_corner=61,
-    right_mouth_corner=291,
+    nose_tip=MEDIAPIPE_NOSE_TIP_INDEX,
+    chin=MEDIAPIPE_CHIN_INDEX,
+    left_eye_outer=MEDIAPIPE_ANATOMICAL_LEFT_EYE_OUTER_INDEX,
+    right_eye_outer=MEDIAPIPE_ANATOMICAL_RIGHT_EYE_OUTER_INDEX,
+    left_eye_inner=MEDIAPIPE_ANATOMICAL_LEFT_EYE_INNER_INDEX,
+    right_eye_inner=MEDIAPIPE_ANATOMICAL_RIGHT_EYE_INNER_INDEX,
+    left_mouth_corner=MEDIAPIPE_ANATOMICAL_LEFT_MOUTH_CORNER_INDEX,
+    right_mouth_corner=MEDIAPIPE_ANATOMICAL_RIGHT_MOUTH_CORNER_INDEX,
 )
 
 PERCENTILE_POLICY_DESCRIPTION = (

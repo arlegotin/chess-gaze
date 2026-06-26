@@ -173,8 +173,8 @@ def _frame_record_with_gazes(
             landmarks=None,
             reason_invalid=ErrorCode.FACE_NOT_FOUND,
         ),
-        left_eye=_present_eye(900.0, 540.0),
-        right_eye=_present_eye(1020.0, 540.0),
+        left_eye=_present_eye(1020.0, 540.0),
+        right_eye=_present_eye(900.0, 540.0),
         head_pose=HeadPoseRecord(
             valid=False,
             yaw_radians=None,
@@ -426,7 +426,7 @@ def _frame_record_with_non_finite_left_eye() -> FrameRecord:
             reason_invalid=ErrorCode.FACE_NOT_FOUND,
         ),
         left_eye=eye,
-        right_eye=_present_eye(1020.0, 540.0),
+        right_eye=_present_eye(900.0, 540.0),
         head_pose=HeadPoseRecord(
             valid=False,
             yaw_radians=None,
@@ -473,8 +473,8 @@ def test_back_project_eye_points_projects_eyes_and_midpoint_in_camera_space() ->
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(900.0, 540.0),
-            right_eye=_present_eye(1020.0, 540.0),
+            left_eye=_present_eye(1020.0, 540.0),
+            right_eye=_present_eye(900.0, 540.0),
         ),
         camera,
         assumptions,
@@ -487,13 +487,13 @@ def test_back_project_eye_points_projects_eyes_and_midpoint_in_camera_space() ->
     assert projection.left_eye.camera_point_m.space == (
         CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M
     )
-    assert projection.left_eye.camera_point_m.x == pytest.approx(-0.0315)
+    assert projection.left_eye.camera_point_m.x == pytest.approx(0.0315)
     assert projection.left_eye.camera_point_m.y == pytest.approx(0.0)
     assert projection.left_eye.camera_point_m.z == pytest.approx(expected_depth)
 
     assert projection.right_eye.valid is True
     assert projection.right_eye.camera_point_m is not None
-    assert projection.right_eye.camera_point_m.x == pytest.approx(0.0315)
+    assert projection.right_eye.camera_point_m.x == pytest.approx(-0.0315)
     assert projection.right_eye.camera_point_m.y == pytest.approx(0.0)
     assert projection.right_eye.camera_point_m.z == pytest.approx(expected_depth)
 
@@ -519,8 +519,8 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(900.0, 500.0),
-            right_eye=_present_eye(1020.0, 580.0),
+            left_eye=_present_eye(1020.0, 500.0),
+            right_eye=_present_eye(900.0, 580.0),
         ),
         camera,
         assumptions,
@@ -534,7 +534,7 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
     assert projection.left_eye.valid is True
     assert projection.left_eye.camera_point_m is not None
     assert projection.left_eye.camera_point_m.x == pytest.approx(
-        ((900.0 - 960.0) * expected_depth) / 1920.0
+        ((1020.0 - 960.0) * expected_depth) / 1920.0
     )
     assert projection.left_eye.camera_point_m.y == pytest.approx(
         ((500.0 - 540.0) * expected_depth) / 1920.0
@@ -544,7 +544,7 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
     assert projection.right_eye.valid is True
     assert projection.right_eye.camera_point_m is not None
     assert projection.right_eye.camera_point_m.x == pytest.approx(
-        ((1020.0 - 960.0) * expected_depth) / 1920.0
+        ((900.0 - 960.0) * expected_depth) / 1920.0
     )
     assert projection.right_eye.camera_point_m.y == pytest.approx(
         ((580.0 - 540.0) * expected_depth) / 1920.0
@@ -616,7 +616,7 @@ def test_back_project_eye_points_rejects_normalized_pupil_coordinates() -> None:
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
             left_eye=_present_eye_with_pupil(_normalized_point(0.45, 0.50)),
-            right_eye=_present_eye(1020.0, 540.0),
+            right_eye=_present_eye(900.0, 540.0),
         ),
         camera,
         assumptions,
@@ -646,7 +646,7 @@ def test_back_project_eye_points_marks_midpoint_invalid_when_one_eye_is_missing(
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(900.0, 540.0),
+            left_eye=_present_eye(1020.0, 540.0),
             right_eye=_missing_eye(ErrorCode.RIGHT_EYE_NOT_FOUND),
         ),
         camera,
@@ -665,18 +665,18 @@ def test_back_project_eye_points_preserves_oof_diagnostics() -> None:
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(-60.0, 1100.0),
-            right_eye=_present_eye(60.0, 1100.0),
+            left_eye=_present_eye(60.0, 1100.0),
+            right_eye=_present_eye(-60.0, 1100.0),
         ),
         camera,
         assumptions,
     )
 
     assert projection.left_eye.image_px is not None
-    assert projection.left_eye.image_px.x == pytest.approx(-60.0)
+    assert projection.left_eye.image_px.x == pytest.approx(60.0)
     assert projection.left_eye.image_px.y == pytest.approx(1100.0)
     assert projection.right_eye.image_px is not None
-    assert projection.right_eye.image_px.x == pytest.approx(60.0)
+    assert projection.right_eye.image_px.x == pytest.approx(-60.0)
     assert projection.right_eye.image_px.y == pytest.approx(1100.0)
     assert projection.diagnostics["left_eye_in_frame"] is False
     assert projection.diagnostics["right_eye_in_frame"] is False

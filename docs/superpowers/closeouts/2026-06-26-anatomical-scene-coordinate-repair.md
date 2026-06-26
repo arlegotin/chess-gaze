@@ -18,6 +18,11 @@ The fresh verified run is:
 
 `artifacts/output/nakamura_1/runs/20260626T143547Z-da959b18`
 
+Follow-up on 2026-06-26 found this repair fixed scene axes and ray directions
+but did not repair source eye and PnP landmark labels that were still
+image-side. See
+`docs/superpowers/closeouts/2026-06-26-anatomical-eye-label-repair.md`.
+
 ## Root Cause
 
 The previous fix used the wrong invariant. It preserved image-horizontal order
@@ -86,9 +91,9 @@ left/right.
 - Local installed UniGaze package source was checked. It outputs a 2-value gaze
   prediction; this project already normalizes frame-record yaw so positive yaw
   is image-right. The fix does not change that 2D overlay contract.
-- Local MediaPipe usage was checked. Existing `left_eye`/`right_eye` record
-  names remain as current pipeline fields; the scene basis no longer depends on
-  eye ordering, which avoids inferring mirror policy without explicit evidence.
+- Local MediaPipe usage was checked, but this closeout did not yet repair the
+  image-side `left_eye`/`right_eye` source labels. That follow-up was handled in
+  the anatomical eye-label repair closeout.
 
 ## Real-Artifact Evidence
 

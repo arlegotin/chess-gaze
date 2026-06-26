@@ -4,6 +4,10 @@
 
 **Goal:** Build the local `chess-gaze analyze <video_path>` pipeline that decodes every frame, preserves raw evidence, records strict per-frame face/eye/head/gaze observations, and writes QA artifacts without temporal smoothing.
 
+> **Historical note, 2026-06-26:** The original implementation plan used
+> image-side left/right for PnP landmarks. Current behavior follows the
+> streamer's anatomical sides per the canonical frame-gaze analysis spec.
+
 **Architecture:** Implement deep domain modules under `src/chess_gaze/` only where they own real invariants: CLI/preflight, strict record schemas, artifact runs, model assets, video decode, image IO, calibration, observations, visualization, pipeline orchestration, and QA summary. Heavy ML integrations are isolated behind small protocol-style wrappers so deterministic fakes can support TDD, but mandatory real-video verification runs as soon as each subsystem can consume the local verification videos.
 
 **Tech Stack:** Python 3.12, uv, pytest, Ruff, mypy, PyAV, MediaPipe Face Landmarker, OpenCV headless, NumPy, Pydantic v2, Pillow, PyTorch, torchvision, timm, UniGaze `unigaze_h14_joint`, safetensors, huggingface_hub.
@@ -762,7 +766,7 @@ Expected: commit succeeds.
 Create tests asserting:
 
 - all constants from the spec are named and persisted;
-- PnP landmark indices exactly match `nose_tip=1`, `chin=152`, `left_eye_outer=33`, `right_eye_outer=263`, `left_eye_inner=133`, `right_eye_inner=362`, `left_mouth_corner=61`, and `right_mouth_corner=291`;
+- PnP landmark indices exactly match `nose_tip=1`, `chin=152`, `left_eye_outer=263`, `right_eye_outer=33`, `left_eye_inner=362`, `right_eye_inner=133`, `left_mouth_corner=291`, and `right_mouth_corner=61`;
 - `metric_translation_allowed` defaults to false;
 - derived setup constants do not rewrite any per-frame gaze or eye fields.
 

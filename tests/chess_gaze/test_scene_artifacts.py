@@ -142,8 +142,8 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
             ],
             reason_invalid=None,
         ),
-        left_eye=_eye(900.0 + eye_index, 540.0),
-        right_eye=_eye(1020.0 + eye_index, 540.0),
+        left_eye=_eye(1020.0 + eye_index, 540.0),
+        right_eye=_eye(900.0 + eye_index, 540.0),
         head_pose=HeadPoseRecord(
             valid=True,
             yaw_radians=0.0,
@@ -499,6 +499,27 @@ def test_scene_frame_places_eyes_on_front_side_of_head(
     assert record.head.ellipsoid_center_scene_m is not None
     assert record.head.ellipsoid_center_scene_m.y < record.eye_midpoint.scene_point_m.y
     assert record.eye_midpoint.scene_point_m.z < record.head.ellipsoid_center_scene_m.z
+
+
+def test_scene_frame_preserves_anatomical_eye_sides_for_frontal_webcam(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+
+    result = build_scene_artifacts(layout)
+    record = result.frames[0]
+
+    assert record.left_eye.image_px is not None
+    assert record.right_eye.image_px is not None
+    assert record.left_eye.camera_point_m is not None
+    assert record.right_eye.camera_point_m is not None
+    assert record.left_eye.scene_point_m is not None
+    assert record.right_eye.scene_point_m is not None
+    assert record.eye_midpoint.scene_point_m is not None
+    assert record.left_eye.image_px.x > record.right_eye.image_px.x
+    assert record.left_eye.camera_point_m.x > record.right_eye.camera_point_m.x
+    assert record.left_eye.scene_point_m.x < record.eye_midpoint.scene_point_m.x
+    assert record.right_eye.scene_point_m.x > record.eye_midpoint.scene_point_m.x
 
 
 def test_build_viewer_scene_data_uses_result_manifest_assumptions(

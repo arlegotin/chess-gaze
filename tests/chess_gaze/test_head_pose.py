@@ -23,6 +23,30 @@ from chess_gaze.head_pose import (
 IMAGE_SIZE = ImageSize(width_px=640, height_px=480)
 
 
+def test_default_pnp_correspondences_use_streamer_anatomical_sides() -> None:
+    calibration = default_calibration()
+    indices = calibration.pnp_landmark_indices
+
+    assert indices.left_eye_outer == 263
+    assert indices.right_eye_outer == 33
+    assert indices.left_eye_inner == 362
+    assert indices.right_eye_inner == 133
+    assert indices.left_mouth_corner == 291
+    assert indices.right_mouth_corner == 61
+    assert (
+        CANONICAL_FACE_MODEL_POINTS_MM["left_eye_outer"][0]
+        > CANONICAL_FACE_MODEL_POINTS_MM["right_eye_outer"][0]
+    )
+    assert (
+        CANONICAL_FACE_MODEL_POINTS_MM["left_eye_inner"][0]
+        > CANONICAL_FACE_MODEL_POINTS_MM["right_eye_inner"][0]
+    )
+    assert (
+        CANONICAL_FACE_MODEL_POINTS_MM["left_mouth_corner"][0]
+        > CANONICAL_FACE_MODEL_POINTS_MM["right_mouth_corner"][0]
+    )
+
+
 def test_preserves_mediapipe_facial_transformation_matrix() -> None:
     calibration = default_calibration()
     facial_transformation_matrix = (

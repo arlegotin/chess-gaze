@@ -139,8 +139,8 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
             ],
             reason_invalid=None,
         ),
-        left_eye=_eye(900.0 + eye_index, 540.0),
-        right_eye=_eye(1020.0 + eye_index, 540.0),
+        left_eye=_eye(1020.0 + eye_index, 540.0),
+        right_eye=_eye(900.0 + eye_index, 540.0),
         head_pose=HeadPoseRecord(
             valid=True,
             yaw_radians=0.0,
