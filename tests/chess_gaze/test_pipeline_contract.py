@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, TextIO, cast
 
 import av
 import numpy as np
 import pytest
+import torch
 
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import FrameRecord
@@ -425,6 +427,56 @@ def test_model_free_observer_run_manifest_records_external_observer(
         "mps_fast_math_env": "not_applicable",
         "mps_prefer_metal_env": "not_applicable",
         "mps_preflight_passed": None,
+    }
+
+
+def test_default_model_run_manifest_records_truthful_current_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+    monkeypatch.setenv("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    monkeypatch.setenv("PYTORCH_MPS_FAST_MATH", "0")
+    monkeypatch.setenv("PYTORCH_MPS_PREFER_METAL", "1")
+
+    from chess_gaze import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "default_observer_bundle_factory",
+        lambda resolved_assets, calibration, run_layout: ObserverBundle(
+            frame_observer=_fake_record
+        ),
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            models_root=models_root,
+            model_registry_path=registry_path,
+            unigaze_device="mps",
+            unigaze_batch_size=7,
+        )
+    )
+
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["inference"] == {
+        "schema_version": "inference-runtime-v1",
+        "observer_source": "default_model_observer",
+        "unigaze_model_id": "unigaze-h14-joint",
+        "unigaze_device": "cpu",
+        "unigaze_batch_size": 1,
+        "torch_version": torch.__version__,
+        "torch_mps_available": torch.backends.mps.is_available(),
+        "mps_fallback_env": os.environ["PYTORCH_ENABLE_MPS_FALLBACK"],
+        "mps_fast_math_env": os.environ["PYTORCH_MPS_FAST_MATH"],
+        "mps_prefer_metal_env": os.environ["PYTORCH_MPS_PREFER_METAL"],
+        "mps_preflight_passed": False,
     }
 
 

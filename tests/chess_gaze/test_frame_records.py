@@ -175,40 +175,92 @@ def test_error_code_names_are_stable() -> None:
     assert ErrorCode.GAZE_ESTIMATORS_DISAGREE.value == "GAZE_ESTIMATORS_DISAGREE"
 
 
+def _default_model_inference_payload() -> dict[str, object]:
+    return {
+        "observer_source": "default_model_observer",
+        "unigaze_model_id": "unigaze-h14-joint",
+        "unigaze_device": "cpu",
+        "unigaze_batch_size": 1,
+        "torch_version": "2.12.1",
+        "torch_mps_available": False,
+        "mps_fallback_env": "unset",
+        "mps_fast_math_env": "unset",
+        "mps_prefer_metal_env": "unset",
+        "mps_preflight_passed": False,
+    }
+
+
+def _external_observer_inference_payload() -> dict[str, object]:
+    return {
+        "observer_source": "external_observer",
+        "unigaze_model_id": None,
+        "unigaze_device": "not_applicable",
+        "unigaze_batch_size": None,
+        "torch_version": None,
+        "torch_mps_available": None,
+        "mps_fallback_env": "not_applicable",
+        "mps_fast_math_env": "not_applicable",
+        "mps_prefer_metal_env": "not_applicable",
+        "mps_preflight_passed": None,
+    }
+
+
 def test_inference_runtime_record_accepts_default_model_observer() -> None:
-    record = InferenceRuntimeRecord(
-        observer_source="default_model_observer",
-        unigaze_model_id="unigaze-h14-joint",
-        unigaze_device="mps",
-        unigaze_batch_size=16,
-        torch_version="2.12.1",
-        torch_mps_available=True,
-        mps_fallback_env="unset",
-        mps_fast_math_env="unset",
-        mps_prefer_metal_env="unset",
-        mps_preflight_passed=True,
-    )
+    record = InferenceRuntimeRecord(**_default_model_inference_payload())
 
     assert record.schema_version == "inference-runtime-v1"
-    assert record.unigaze_device == "mps"
+    assert record.unigaze_device == "cpu"
 
 
 def test_inference_runtime_record_accepts_external_observer() -> None:
-    record = InferenceRuntimeRecord(
-        observer_source="external_observer",
-        unigaze_model_id=None,
-        unigaze_device="not_applicable",
-        unigaze_batch_size=None,
-        torch_version=None,
-        torch_mps_available=None,
-        mps_fallback_env="not_applicable",
-        mps_fast_math_env="not_applicable",
-        mps_prefer_metal_env="not_applicable",
-        mps_preflight_passed=None,
-    )
+    record = InferenceRuntimeRecord(**_external_observer_inference_payload())
 
     assert record.observer_source == "external_observer"
     assert record.unigaze_model_id is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unigaze_model_id": None},
+        {"unigaze_device": "not_applicable"},
+        {"unigaze_batch_size": None},
+        {"torch_version": None},
+        {"torch_mps_available": None},
+        {"mps_fallback_env": "not_applicable"},
+        {"mps_preflight_passed": None},
+    ],
+)
+def test_inference_runtime_record_rejects_default_model_observer_contradictions(
+    overrides: dict[str, object],
+) -> None:
+    payload = _default_model_inference_payload()
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match="default_model_observer"):
+        InferenceRuntimeRecord(**payload)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unigaze_model_id": "unigaze-h14-joint"},
+        {"unigaze_device": "cpu"},
+        {"unigaze_batch_size": 1},
+        {"torch_version": "2.12.1"},
+        {"torch_mps_available": False},
+        {"mps_fallback_env": "unset"},
+        {"mps_preflight_passed": False},
+    ],
+)
+def test_inference_runtime_record_rejects_external_observer_contradictions(
+    overrides: dict[str, object],
+) -> None:
+    payload = _external_observer_inference_payload()
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match="external_observer"):
+        InferenceRuntimeRecord(**payload)
 
 
 def test_run_manifest_requires_inference_runtime_record() -> None:
@@ -223,18 +275,7 @@ def test_run_manifest_requires_inference_runtime_record() -> None:
             frame_height=1080,
             frame_count_decoded=1973,
         ),
-        inference=InferenceRuntimeRecord(
-            observer_source="external_observer",
-            unigaze_model_id=None,
-            unigaze_device="not_applicable",
-            unigaze_batch_size=None,
-            torch_version=None,
-            torch_mps_available=None,
-            mps_fallback_env="not_applicable",
-            mps_fast_math_env="not_applicable",
-            mps_prefer_metal_env="not_applicable",
-            mps_preflight_passed=None,
-        ),
+        inference=InferenceRuntimeRecord(**_external_observer_inference_payload()),
     )
 
     assert manifest.inference.observer_source == "external_observer"

@@ -201,6 +201,75 @@ class InferenceRuntimeRecord(StrictSchemaModel):
     mps_prefer_metal_env: str
     mps_preflight_passed: bool | None
 
+    @model_validator(mode="after")
+    def validate_runtime_semantics(self) -> InferenceRuntimeRecord:
+        issues: list[str] = []
+
+        if self.observer_source == "external_observer":
+            if self.unigaze_model_id is not None:
+                issues.append(
+                    "external_observer cannot declare a UniGaze model identifier"
+                )
+            if self.unigaze_device != "not_applicable":
+                issues.append(
+                    "external_observer must use unigaze_device=not_applicable"
+                )
+            if self.unigaze_batch_size is not None:
+                issues.append("external_observer cannot declare unigaze_batch_size")
+            if self.torch_version is not None:
+                issues.append("external_observer cannot declare torch_version")
+            if self.torch_mps_available is not None:
+                issues.append("external_observer cannot declare torch_mps_available")
+            if self.mps_fallback_env != "not_applicable":
+                issues.append(
+                    "external_observer must use mps_fallback_env=not_applicable"
+                )
+            if self.mps_fast_math_env != "not_applicable":
+                issues.append(
+                    "external_observer must use mps_fast_math_env=not_applicable"
+                )
+            if self.mps_prefer_metal_env != "not_applicable":
+                issues.append(
+                    "external_observer must use mps_prefer_metal_env=not_applicable"
+                )
+            if self.mps_preflight_passed is not None:
+                issues.append("external_observer cannot declare mps_preflight_passed")
+
+        if self.observer_source == "default_model_observer":
+            if self.unigaze_model_id is None or not self.unigaze_model_id.strip():
+                issues.append(
+                    "default_model_observer requires a UniGaze model identifier"
+                )
+            if self.unigaze_device == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use unigaze_device=not_applicable"
+                )
+            if self.unigaze_batch_size is None:
+                issues.append("default_model_observer requires unigaze_batch_size")
+            if self.torch_version is None or not self.torch_version.strip():
+                issues.append("default_model_observer requires torch_version")
+            if self.torch_mps_available is None:
+                issues.append("default_model_observer requires torch_mps_available")
+            if self.mps_fallback_env == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use mps_fallback_env=not_applicable"
+                )
+            if self.mps_fast_math_env == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use mps_fast_math_env=not_applicable"
+                )
+            if self.mps_prefer_metal_env == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use "
+                    "mps_prefer_metal_env=not_applicable"
+                )
+            if self.mps_preflight_passed is None:
+                issues.append("default_model_observer requires mps_preflight_passed")
+
+        if issues:
+            raise ValueError("; ".join(issues))
+        return self
+
 
 class RunManifest(StrictSchemaModel):
     run_id: str

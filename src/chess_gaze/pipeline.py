@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -154,6 +155,31 @@ def _external_observer_inference_record() -> InferenceRuntimeRecord:
     )
 
 
+def _default_model_observer_inference_record(
+    resolved_assets: list[ResolvedModelAsset],
+) -> InferenceRuntimeRecord:
+    import torch
+
+    unigaze_asset = _asset_by_id(resolved_assets, "unigaze-h14-joint")
+    torch_mps_backend = getattr(torch.backends, "mps", None)
+    torch_mps_available = (
+        bool(torch_mps_backend is not None and torch_mps_backend.is_available())
+    )
+
+    return InferenceRuntimeRecord(
+        observer_source="default_model_observer",
+        unigaze_model_id=unigaze_asset.model_id,
+        unigaze_device="cpu",
+        unigaze_batch_size=1,
+        torch_version=torch.__version__,
+        torch_mps_available=torch_mps_available,
+        mps_fallback_env=os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "unset"),
+        mps_fast_math_env=os.environ.get("PYTORCH_MPS_FAST_MATH", "unset"),
+        mps_prefer_metal_env=os.environ.get("PYTORCH_MPS_PREFER_METAL", "unset"),
+        mps_preflight_passed=False,
+    )
+
+
 def analyze_video(
     request: AnalyzeRequest, observers: ObserverBundle | None = None
 ) -> AnalyzeResult:
@@ -166,10 +192,12 @@ def analyze_video(
         raise PipelineError(exc.code, str(exc)) from exc
 
     resolved_model_assets: list[ResolvedModelAsset] | None = None
+    inference = _external_observer_inference_record()
     if observers is None:
         resolved_model_assets = _validate_model_assets(
             request.model_registry_path, resolved
         )
+        inference = _default_model_observer_inference_record(resolved_model_assets)
 
     _estimate_disk_space(resolved.output_root)
 
@@ -187,7 +215,6 @@ def analyze_video(
     frames_jsonl_path = layout.records_dir / "frames.jsonl"
     errors_jsonl_path = layout.records_dir / "errors.jsonl"
     qa_summary_path = layout.run_dir / "qa_summary.json"
-    inference = _external_observer_inference_record()
 
     _write_json(
         run_manifest_path,
