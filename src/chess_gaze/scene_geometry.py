@@ -914,7 +914,9 @@ def _normalize_tuple(
     return (xyz[0] / norm, xyz[1] / norm, xyz[2] / norm)
 
 
-def _median(values: Sequence[float] | list[float] | tuple[float, ...] | object) -> float:
+def _median(
+    values: Sequence[float] | list[float] | tuple[float, ...] | object,
+) -> float:
     sorted_values = sorted(values)
     if not sorted_values:
         raise ValueError("median requires at least one value")
@@ -935,28 +937,52 @@ def _geometric_median_camera_point(
     for iteration_count in range(1, _GEOMETRIC_MEDIAN_MAX_ITERATIONS + 1):
         numerator = [0.0, 0.0, 0.0]
         denominator = 0.0
+        coincident_count = 0
         for point in points:
             point_xyz = (point.x, point.y, point.z)
             distance = _distance(current, point_xyz)
             if distance <= _GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M:
-                return (
-                    _camera_vector(
-                        x=point.x,
-                        y=point.y,
-                        z=point.z,
-                    ),
-                    iteration_count,
-                )
+                coincident_count += 1
+                continue
             weight = 1.0 / distance
             numerator[0] += point.x * weight
             numerator[1] += point.y * weight
             numerator[2] += point.z * weight
             denominator += weight
+        if denominator <= _VECTOR_EPSILON:
+            return (
+                _camera_vector(x=current[0], y=current[1], z=current[2]),
+                iteration_count,
+            )
         next_point = (
             numerator[0] / denominator,
             numerator[1] / denominator,
             numerator[2] / denominator,
         )
+        if coincident_count > 0:
+            update_distance = _distance(current, next_point)
+            if update_distance <= _GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M:
+                return (
+                    _camera_vector(x=current[0], y=current[1], z=current[2]),
+                    iteration_count,
+                )
+            resultant_norm = denominator * update_distance
+            if resultant_norm <= (
+                coincident_count + _GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M
+            ):
+                return (
+                    _camera_vector(x=current[0], y=current[1], z=current[2]),
+                    iteration_count,
+                )
+            coincidence_weight = coincident_count / resultant_norm
+            next_point = (
+                ((1.0 - coincidence_weight) * next_point[0])
+                + (coincidence_weight * current[0]),
+                ((1.0 - coincidence_weight) * next_point[1])
+                + (coincidence_weight * current[1]),
+                ((1.0 - coincidence_weight) * next_point[2])
+                + (coincidence_weight * current[2]),
+            )
         if _distance(current, next_point) <= _GEOMETRIC_MEDIAN_CONVERGENCE_TOLERANCE_M:
             return (
                 _camera_vector(

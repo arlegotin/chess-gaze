@@ -13,8 +13,8 @@ from chess_gaze.frame_records import (
     GazeAngles,
     HeadPoseRecord,
 )
-from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.gaze_observation import pitch_yaw_to_unit_vector
+from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.scene_calibration import (
     DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M,
     default_scene_assumptions,
@@ -690,6 +690,41 @@ def test_robust_scene_center_drops_non_finite_candidates() -> None:
     assert estimate.fallback_used is False
 
 
+def test_robust_scene_center_does_not_stop_at_coincident_sample_point() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    inliers = [
+        _camera_point(0.0, 0.0, 1.0),
+        _camera_point(0.0, 0.01, 1.0),
+        _camera_point(0.01, 0.0, 1.0),
+        _camera_point(0.01, 0.01, 1.0),
+        _camera_point(0.0, 0.0, 1.0),
+    ]
+
+    estimate = scene_geometry.robust_scene_center(inliers, assumptions)
+
+    returned_point = estimate.point_camera_m
+    sample_point = (0.0, 0.0, 1.0)
+    assert (
+        returned_point.x,
+        returned_point.y,
+        returned_point.z,
+    ) != pytest.approx(sample_point, abs=1e-9)
+
+    returned_sum_distance = sum(
+        math.dist(
+            (returned_point.x, returned_point.y, returned_point.z),
+            (point.x, point.y, point.z),
+        )
+        for point in inliers
+    )
+    sample_sum_distance = sum(
+        math.dist(sample_point, (point.x, point.y, point.z))
+        for point in inliers
+    )
+    assert returned_sum_distance < sample_sum_distance
+
+
 def test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze() -> None:
     scene_geometry = _scene_geometry()
     midpoint = _midpoint_record(
@@ -794,7 +829,10 @@ def test_robust_main_direction_selects_dominant_cluster_with_outliers() -> None:
         _direction_angles_in_degrees(2.0, -1.0),
         _direction_angles_in_degrees(-2.0, 1.0),
     ]
-    rays = [_ray_record(valid=True, direction_camera=direction) for direction in inlier_directions]
+    rays = [
+        _ray_record(valid=True, direction_camera=direction)
+        for direction in inlier_directions
+    ]
     rays.extend(
         [
             _ray_record(
@@ -913,7 +951,10 @@ def test_robust_main_direction_treats_opposite_rays_as_outliers() -> None:
         _direction_angles_in_degrees(3.0),
         _direction_angles_in_degrees(-3.0),
     ]
-    rays = [_ray_record(valid=True, direction_camera=direction) for direction in forward_cluster]
+    rays = [
+        _ray_record(valid=True, direction_camera=direction)
+        for direction in forward_cluster
+    ]
     rays.extend(
         [
             _ray_record(

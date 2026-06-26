@@ -78,3 +78,42 @@ Summary:
 ## Concerns
 
 - No blocking concerns from the scoped Task 3 work.
+
+## Review Fixes
+
+- Review issue fixed: `_geometric_median_camera_point()` no longer returns immediately when the iterate coincides with one or more samples.
+- Added regression coverage for the asymmetric all-inlier set where the component-wise median is a duplicated sample point but not the geometric median.
+- Updated the helper to use modified Weiszfeld coincidence handling:
+  - skip zero-distance terms for the weighted update;
+  - compute the non-zero Weiszfeld update;
+  - shrink the step using the coincidence multiplicity when the iterate sits on one or more samples;
+  - return the current iterate only when the coincidence optimality condition holds or the update is converged.
+
+RED evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- Result: failed as expected.
+- Output: `1 failed, 23 passed in 1.02s`.
+- Failing test: `test_robust_scene_center_does_not_stop_at_coincident_sample_point`
+- Failure mode: `robust_scene_center()` returned exactly `(0.0, 0.0, 1.0)`.
+
+GREEN evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- Result: passed.
+- Output: `24 passed in 0.93s`.
+
+Focused Ruff evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/chess_gaze/test_scene_geometry.py
+```
+
+- Result: passed.
+- Output: `All checks passed!`
