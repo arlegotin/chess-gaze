@@ -6,6 +6,7 @@ from pathlib import Path
 
 from chess_gaze.errors import CliErrorCode
 from chess_gaze.pipeline import AnalyzeRequest, PipelineError, analyze_video
+from chess_gaze.scene_viewer import ViewerServerError, serve_viewer
 
 INPUT_NOT_FOUND_EXIT = 10
 UNSUPPORTED_VIDEO_EXIT = 11
@@ -45,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--output-root", default=None)
     analyze.add_argument("--models-root", default=None)
     analyze.add_argument("--config", default=None)
+    view = subparsers.add_parser("view")
+    view.add_argument("run_dir")
+    view.add_argument("--host", default="127.0.0.1")
+    view.add_argument("--port", type=int, default=0)
     return parser
 
 
@@ -55,9 +60,11 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return system_exit_code(exc)
 
+    if args.command == "view":
+        return _run_view(args, parser)
+
     if args.command != "analyze":
-        parser.print_usage(sys.stderr)
-        return USAGE_EXIT
+        return _usage_error(parser, "unknown command")
 
     video_path = Path(args.video_path)
     if not video_path.is_file():
@@ -82,4 +89,29 @@ def main(argv: list[str] | None = None) -> int:
         return ERROR_EXIT_CODES.get(exc.code, GENERAL_FAILURE_EXIT)
 
     print(result.layout.run_dir)
+    print(f"viewer: {result.viewer_index_path}")
     return 0
+
+
+def _run_view(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    try:
+        server = serve_viewer(Path(args.run_dir), host=args.host, port=args.port)
+    except ViewerServerError as exc:
+        return _usage_error(parser, str(exc))
+    except OSError as exc:
+        return _usage_error(parser, f"Could not start viewer server: {exc}")
+
+    try:
+        print(server.url, flush=True)
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        server.close()
+    return 0
+
+
+def _usage_error(parser: argparse.ArgumentParser, message: str) -> int:
+    parser.print_usage(sys.stderr)
+    print(f"{parser.prog}: error: {message}", file=sys.stderr)
+    return USAGE_EXIT

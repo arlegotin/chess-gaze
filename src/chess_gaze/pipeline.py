@@ -30,6 +30,8 @@ from chess_gaze.model_assets import (
     validate_required_assets,
 )
 from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
+from chess_gaze.scene_artifacts import build_scene_artifacts
+from chess_gaze.scene_viewer import build_scene_viewer
 from chess_gaze.video_decode import (
     DecodedFrame,
     VideoDecodeError,
@@ -96,11 +98,18 @@ class AnalyzeResult:
     video_manifest_path: Path
     frames_jsonl_path: Path
     errors_jsonl_path: Path
+    scene_manifest_path: Path
+    scene_summary_path: Path
+    scene_frames_jsonl_path: Path
+    viewer_index_path: Path
+    viewer_scene_data_path: Path
     qa_summary_path: Path
     decoded_frame_count: int
     validated_record_count: int
     validated_error_count: int
     frame_error_count: int
+    valid_scene_frame_count: int
+    valid_monitor_hit_count: int
 
 
 class PipelineError(RuntimeError):
@@ -197,6 +206,12 @@ def analyze_video(
             observers.close()
 
     try:
+        scene_result = build_scene_artifacts(layout)
+        viewer_result = build_scene_viewer(layout, scene_result)
+    except (OSError, ValueError) as exc:
+        raise PipelineError(CliErrorCode.SCHEMA_VALIDATION_FAILED, str(exc)) from exc
+
+    try:
         qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
     except ArtifactValidationError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
@@ -213,11 +228,18 @@ def analyze_video(
         video_manifest_path=video_manifest_path,
         frames_jsonl_path=frames_jsonl_path,
         errors_jsonl_path=errors_jsonl_path,
+        scene_manifest_path=scene_result.paths.scene_manifest_path,
+        scene_summary_path=scene_result.paths.scene_summary_path,
+        scene_frames_jsonl_path=scene_result.paths.scene_frames_jsonl_path,
+        viewer_index_path=viewer_result.index_path,
+        viewer_scene_data_path=viewer_result.scene_data_path,
         qa_summary_path=qa_summary_path,
         decoded_frame_count=decoded_frame_count,
         validated_record_count=qa_summary.counts.frame_records,
         validated_error_count=sum(qa_summary.errors_by_code.values()),
         frame_error_count=frame_error_count,
+        valid_scene_frame_count=scene_result.scene_frame_count,
+        valid_monitor_hit_count=scene_result.valid_monitor_hit_count,
     )
 
 
@@ -462,7 +484,10 @@ frame_error_writer: FrameErrorWriter = _append_frame_errors
 
 
 def _write_json(path: Path, payload: object) -> None:
-    data = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    data = (
+        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True).encode("utf-8")
+        + b"\n"
+    )
     atomic_write_bytes(path, data)
 
 

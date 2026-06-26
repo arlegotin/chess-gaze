@@ -7,9 +7,37 @@ package instead of accidentally importing Python files from the repository root.
 
 - `pyproject.toml` is the canonical project and tool configuration.
 - `uv.lock` records the resolved local development environment.
-- `src/chess_gaze/` is the importable package. It is metadata-only until the
-  first real runtime behavior is specified.
-- `tests/` contains behavior tests for code in `src/chess_gaze/`.
+- `src/chess_gaze/` is the importable package. Active modules are named after
+  the behavior they own:
+  - `artifact_runs.py` owns run directory layout and artifact-relative paths.
+  - `calibration.py` and `configuration.py` own analysis configuration records.
+  - `video_decode.py`, `image_io.py`, and `visualization.py` own frame IO and
+    processed-frame rendering.
+  - `model_assets.py` and `model_registry.json` own local model trust and
+    checksum validation.
+  - `face_observation.py`, `eye_observation.py`, `head_pose.py`,
+    `gaze_observation.py`, and `frame_observation.py` own per-frame evidence
+    extraction.
+  - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record
+    and primitive geometry contracts.
+  - `scene_calibration.py` owns persisted adult-male, monitor, and robust
+    estimator assumptions.
+  - `scene_records.py` owns strict scene, viewer, and summary schemas.
+  - `scene_geometry.py` owns pseudo-metric back-projection, robust estimators,
+    scene axes, monitor-plane construction, transforms, and ray intersections.
+  - `scene_artifacts.py` owns reading validated frame artifacts and writing
+    scene JSON/JSONL artifacts.
+  - `scene_viewer.py` owns viewer-data generation, packaged static asset
+    copying, and localhost-only static serving.
+  - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration, validation,
+    and command-line entry points.
+- `src/chess_gaze/viewer_assets/` contains package resources for the generated
+  local viewer: HTML, CSS, JavaScript, and vendored Three.js assets. These files
+  are copied into each run's `viewer/` directory; there is no frontend build
+  tree or runtime CDN dependency.
+- `tests/` contains behavior tests for code in `src/chess_gaze/`, with
+  package-path-mirroring tests under `tests/chess_gaze/` and repository
+  packaging checks at top level.
 - `docs/development/architecture/` contains current architecture guidance.
 - `docs/development/decisions/` contains ADRs for architecture-significant
   decisions.

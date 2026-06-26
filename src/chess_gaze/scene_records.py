@@ -1,0 +1,872 @@
+from __future__ import annotations
+
+import math
+from enum import StrEnum
+from typing import Any, Literal
+
+from pydantic import ConfigDict, Field, field_validator, model_validator
+
+from chess_gaze.errors import FrameStatus
+from chess_gaze.geometry import Point2D, StrictSchemaModel
+from chess_gaze.scene_calibration import (
+    SceneAssumptionRecord as SceneAssumptionRecord,
+)
+from chess_gaze.scene_calibration import (
+    _validate_finite_triplet,
+)
+
+
+def _coerce_enum_field(
+    payload: dict[str, Any],
+    *,
+    field_name: str,
+    enum_type: type[StrEnum],
+) -> None:
+    value = payload.get(field_name)
+    if isinstance(value, str):
+        try:
+            payload[field_name] = enum_type(value)
+        except ValueError:
+            return
+
+
+def _require_vector_space(
+    value: Vector3D | UnitVector3D | None,
+    *,
+    expected: CoordinateFrame3D,
+    field_name: str,
+) -> None:
+    if value is not None and value.space != expected:
+        raise ValueError(f"{field_name} must use {expected.value}")
+
+
+class SceneSchemaModel(StrictSchemaModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        populate_by_name=True,
+        use_enum_values=True,
+    )
+
+
+class CoordinateFrame3D(StrEnum):
+    IMAGE_PX = "image_px"
+    CAMERA_OPENCV_PSEUDO_M = "camera_opencv_pseudo_m"
+    SCENE_PSEUDO_M = "scene_pseudo_m"
+    MONITOR_PLANE_PSEUDO_M = "monitor_plane_pseudo_m"
+    THREE_VIEW = "three_view"
+
+
+class SceneInvalidReason(StrEnum):
+    LEFT_EYE_INVALID = "LEFT_EYE_INVALID"
+    RIGHT_EYE_INVALID = "RIGHT_EYE_INVALID"
+    EYE_MIDPOINT_INVALID = "EYE_MIDPOINT_INVALID"
+    UNIGAZE_INVALID = "UNIGAZE_INVALID"
+    RAY_PARALLEL_TO_MONITOR = "RAY_PARALLEL_TO_MONITOR"
+    RAY_COPLANAR_WITH_MONITOR = "RAY_COPLANAR_WITH_MONITOR"
+    RAY_INTERSECTION_NON_FINITE = "RAY_INTERSECTION_NON_FINITE"
+    RAY_INTERSECTION_BEHIND_ORIGIN = "RAY_INTERSECTION_BEHIND_ORIGIN"
+    SCENE_CENTER_INSUFFICIENT_INLIERS = "SCENE_CENTER_INSUFFICIENT_INLIERS"
+    MAIN_DIRECTION_INSUFFICIENT_INLIERS = "MAIN_DIRECTION_INSUFFICIENT_INLIERS"
+    SCENE_AXIS_DEGENERATE = "SCENE_AXIS_DEGENERATE"
+    MONITOR_PLANE_DEGENERATE = "MONITOR_PLANE_DEGENERATE"
+    NON_FINITE_INPUT = "NON_FINITE_INPUT"
+
+
+class Vector3D(SceneSchemaModel):
+    space: CoordinateFrame3D
+    x: float
+    y: float
+    z: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="space",
+            enum_type=CoordinateFrame3D,
+        )
+        return coerced
+
+
+class UnitVector3D(Vector3D):
+    @model_validator(mode="after")
+    def validate_unit_norm(self) -> UnitVector3D:
+        norm = math.sqrt((self.x * self.x) + (self.y * self.y) + (self.z * self.z))
+        if not 0.999 <= norm <= 1.001:
+            raise ValueError("unit vector norm must be within [0.999, 1.001]")
+        return self
+
+
+class SceneCameraModel(SceneSchemaModel):
+    policy: Literal["estimated_pinhole_from_image_size"]
+    frame_width_px: int
+    frame_height_px: int
+    fx_px: float
+    fy_px: float
+    cx_px: float
+    cy_px: float
+    metric_translation_allowed: bool
+    uncertainty: Literal["low", "medium", "high"]
+
+
+class SceneFrameCameraRecord(SceneSchemaModel):
+    fx_px: float
+    fy_px: float
+    cx_px: float
+    cy_px: float
+    depth_source: Literal["interpupillary_distance_assumption"]
+
+
+class SceneFrameDiagnosticsRecord(SceneSchemaModel):
+    warnings: list[str]
+    source_error_codes: list[str]
+
+
+class SceneEyeRecord(SceneSchemaModel):
+    valid: bool
+    image_px: Point2D | None = None
+    camera_point_m: Vector3D | None = Field(default=None, alias="camera_m")
+    scene_point_m: Vector3D | None = Field(default=None, alias="scene_m")
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_eye(self) -> SceneEyeRecord:
+        _require_vector_space(
+            self.camera_point_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="camera_point_m",
+        )
+        _require_vector_space(
+            self.scene_point_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="scene_point_m",
+        )
+        if self.valid:
+            if self.image_px is None or self.camera_point_m is None:
+                raise ValueError("valid eye requires image_px and camera_point_m")
+            if self.reason_invalid is not None:
+                raise ValueError("valid eye cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid eye requires reason_invalid")
+        return self
+
+
+class SceneEyeMidpointRecord(SceneSchemaModel):
+    valid: bool
+    origin_policy: Literal["both_eyes_required"] | None = None
+    camera_point_m: Vector3D | None = Field(default=None, alias="camera_m")
+    scene_point_m: Vector3D | None = Field(default=None, alias="scene_m")
+    pupil_distance_px: float | None = None
+    estimated_depth_m: float | None = None
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_midpoint(self) -> SceneEyeMidpointRecord:
+        _require_vector_space(
+            self.camera_point_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="camera_point_m",
+        )
+        _require_vector_space(
+            self.scene_point_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="scene_point_m",
+        )
+        if self.valid:
+            if (
+                self.camera_point_m is None
+                or self.scene_point_m is None
+                or self.origin_policy is None
+            ):
+                raise ValueError(
+                    "valid eye midpoint requires origin_policy, camera_m, and scene_m"
+                )
+            if self.reason_invalid is not None:
+                raise ValueError("valid eye midpoint cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid eye midpoint requires reason_invalid")
+        return self
+
+
+class SceneHeadRecord(SceneSchemaModel):
+    valid: bool
+    ellipsoid_center_camera_m: Vector3D | None = None
+    ellipsoid_center_scene_m: Vector3D | None = Field(default=None, alias="scene_m")
+    radii_m: tuple[float, float, float] = Field(alias="ellipsoid_radii_m")
+    yaw_radians: float | None = None
+    pitch_radians: float | None = None
+    roll_radians: float | None = None
+    orientation_source: str | None = None
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @field_validator("radii_m", mode="before")
+    @classmethod
+    def coerce_radii_sequence(
+        cls,
+        value: Any,
+    ) -> tuple[float, float, float] | Any:
+        if isinstance(value, list):
+            if len(value) != 3:
+                raise ValueError("radii_m must contain exactly 3 values")
+            return (value[0], value[1], value[2])
+        return value
+
+    @field_validator("radii_m")
+    @classmethod
+    def validate_radii(
+        cls,
+        value: tuple[float, float, float],
+    ) -> tuple[float, float, float]:
+        if len(value) != 3:
+            raise ValueError("radii_m must contain exactly 3 values")
+        return _validate_finite_triplet(value, field_name="radii_m")
+
+    @model_validator(mode="after")
+    def validate_head(self) -> SceneHeadRecord:
+        _require_vector_space(
+            self.ellipsoid_center_camera_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="ellipsoid_center_camera_m",
+        )
+        _require_vector_space(
+            self.ellipsoid_center_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="ellipsoid_center_scene_m",
+        )
+        if self.valid:
+            if (
+                self.ellipsoid_center_scene_m is None
+                and self.ellipsoid_center_camera_m is None
+            ):
+                raise ValueError("valid head requires a persisted ellipsoid center")
+            if self.reason_invalid is not None:
+                raise ValueError("valid head cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid head requires reason_invalid")
+        return self
+
+
+class SceneUniGazeRayRecord(SceneSchemaModel):
+    valid: bool
+    source: Literal["appearance_gaze"]
+    origin_camera_m: Vector3D | None = None
+    origin_scene_m: Vector3D | None = Field(default=None, alias="scene_m")
+    direction_camera: UnitVector3D | None = None
+    direction_scene: UnitVector3D | None = None
+    direction_source: str | None = None
+    pitch_radians: float | None = None
+    yaw_radians: float | None = None
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_ray(self) -> SceneUniGazeRayRecord:
+        _require_vector_space(
+            self.origin_camera_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="origin_camera_m",
+        )
+        _require_vector_space(
+            self.origin_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="origin_scene_m",
+        )
+        _require_vector_space(
+            self.direction_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="direction_camera",
+        )
+        _require_vector_space(
+            self.direction_scene,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="direction_scene",
+        )
+        if self.valid:
+            required_values = (
+                self.origin_camera_m,
+                self.origin_scene_m,
+                self.direction_camera,
+                self.direction_scene,
+                self.direction_source,
+                self.pitch_radians,
+                self.yaw_radians,
+            )
+            if any(value is None for value in required_values):
+                raise ValueError(
+                    "valid unigaze ray requires origins, directions, source, and angles"
+                )
+            if self.reason_invalid is not None:
+                raise ValueError("valid unigaze ray cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid unigaze ray requires reason_invalid")
+        return self
+
+
+class SceneMonitorHitRecord(SceneSchemaModel):
+    valid: bool
+    point_camera_m: Vector3D | None = None
+    point_scene_m: Vector3D | None = None
+    plane_uv_m: tuple[float, float] | None = None
+    t: float | None = Field(default=None, alias="ray_t_m")
+    denominator: float | None = None
+    signed_distance_m: float | None = Field(
+        default=None,
+        alias="signed_origin_distance_m",
+    )
+    within_physical_monitor: bool | None = None
+    within_extended_plane: bool | None = None
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        plane_uv_m = coerced.get("plane_uv_m")
+        if isinstance(plane_uv_m, (list, tuple)) and len(plane_uv_m) == 2:
+            coerced["plane_uv_m"] = (plane_uv_m[0], plane_uv_m[1])
+        elif "u_m" in coerced or "v_m" in coerced:
+            u_m = coerced.get("u_m")
+            v_m = coerced.get("v_m")
+            if u_m is None and v_m is None:
+                coerced["plane_uv_m"] = None
+            else:
+                coerced["plane_uv_m"] = (u_m, v_m)
+        coerced.pop("u_m", None)
+        coerced.pop("v_m", None)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @property
+    def u_m(self) -> float | None:
+        if self.plane_uv_m is None:
+            return None
+        return self.plane_uv_m[0]
+
+    @property
+    def v_m(self) -> float | None:
+        if self.plane_uv_m is None:
+            return None
+        return self.plane_uv_m[1]
+
+    @field_validator("plane_uv_m", mode="before")
+    @classmethod
+    def coerce_plane_uv(
+        cls,
+        value: Any,
+    ) -> tuple[float, float] | None:
+        if value is None:
+            return None
+        if isinstance(value, list):
+            if len(value) != 2:
+                raise ValueError("plane_uv_m must contain exactly 2 values")
+            return (value[0], value[1])
+        if isinstance(value, tuple):
+            if len(value) != 2:
+                raise ValueError("plane_uv_m must contain exactly 2 values")
+            return value
+        raise TypeError("plane_uv_m must be a 2-item tuple or list")
+
+    @field_validator("plane_uv_m")
+    @classmethod
+    def validate_plane_uv(
+        cls,
+        value: tuple[float, float] | None,
+    ) -> tuple[float, float] | None:
+        if value is None:
+            return None
+        if len(value) != 2:
+            raise ValueError("plane_uv_m must contain exactly 2 values")
+        if not math.isfinite(value[0]) or not math.isfinite(value[1]):
+            raise ValueError("plane_uv_m must contain finite values")
+        return value
+
+    @model_validator(mode="after")
+    def validate_hit(self) -> SceneMonitorHitRecord:
+        _require_vector_space(
+            self.point_camera_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="point_camera_m",
+        )
+        _require_vector_space(
+            self.point_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="point_scene_m",
+        )
+        if self.valid:
+            required_values = (
+                self.point_camera_m,
+                self.point_scene_m,
+                self.plane_uv_m,
+                self.t,
+                self.denominator,
+                self.signed_distance_m,
+                self.within_physical_monitor,
+                self.within_extended_plane,
+            )
+            if any(value is None for value in required_values):
+                raise ValueError(
+                    "valid monitor hit requires point, uv, t, denominator, "
+                    "distance, and bounds flags"
+                )
+            if self.t is None:
+                raise ValueError("valid monitor hit requires t")
+            if self.t < 0:
+                raise ValueError("valid monitor hit requires t >= 0")
+            if self.reason_invalid is not None:
+                raise ValueError("valid monitor hit cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid monitor hit requires reason_invalid")
+        return self
+
+
+class SceneAxisBasisRecord(SceneSchemaModel):
+    right_camera: UnitVector3D
+    up_camera: UnitVector3D
+    back_camera: UnitVector3D
+    forward_camera: UnitVector3D
+    determinant_right_up_back: float
+    convention: Literal["right_up_back_columns_right_handed"]
+    fallbacks: list[str]
+
+    @model_validator(mode="after")
+    def validate_axis_basis(self) -> SceneAxisBasisRecord:
+        _require_vector_space(
+            self.right_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="right_camera",
+        )
+        _require_vector_space(
+            self.up_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="up_camera",
+        )
+        _require_vector_space(
+            self.back_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="back_camera",
+        )
+        _require_vector_space(
+            self.forward_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="forward_camera",
+        )
+        computed_determinant = (
+            self.right_camera.x
+            * (
+                (self.up_camera.y * self.back_camera.z)
+                - (self.up_camera.z * self.back_camera.y)
+            )
+            - self.right_camera.y
+            * (
+                (self.up_camera.x * self.back_camera.z)
+                - (self.up_camera.z * self.back_camera.x)
+            )
+            + self.right_camera.z
+            * (
+                (self.up_camera.x * self.back_camera.y)
+                - (self.up_camera.y * self.back_camera.x)
+            )
+        )
+        dot_product = (
+            (self.back_camera.x * self.forward_camera.x)
+            + (self.back_camera.y * self.forward_camera.y)
+            + (self.back_camera.z * self.forward_camera.z)
+        )
+        if abs(dot_product + 1.0) > 0.001:
+            raise ValueError("back_camera must be anti-parallel to forward_camera")
+        if not 0.99 <= computed_determinant <= 1.01:
+            raise ValueError("computed determinant must be near +1")
+        if abs(self.determinant_right_up_back - computed_determinant) > 0.001:
+            raise ValueError(
+                "determinant_right_up_back must match the computed determinant"
+            )
+        return self
+
+
+class SceneMonitorPlaneRecord(SceneSchemaModel):
+    center_camera_m: Vector3D
+    center_scene_m: Vector3D
+    normal_camera: UnitVector3D
+    right_camera: UnitVector3D
+    up_camera: UnitVector3D
+    width_m: float = Field(alias="physical_width_m")
+    height_m: float = Field(alias="physical_height_m")
+    extended_width_m: float
+    extended_height_m: float
+    distance_from_scene_center_m: float
+    distance_source: str | None = None
+
+    @model_validator(mode="after")
+    def validate_spaces(self) -> SceneMonitorPlaneRecord:
+        _require_vector_space(
+            self.center_camera_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="center_camera_m",
+        )
+        _require_vector_space(
+            self.center_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="center_scene_m",
+        )
+        _require_vector_space(
+            self.normal_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="normal_camera",
+        )
+        _require_vector_space(
+            self.right_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="right_camera",
+        )
+        _require_vector_space(
+            self.up_camera,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="up_camera",
+        )
+        return self
+
+
+class SceneFrameRecord(SceneSchemaModel):
+    schema_version: Literal["gaze-scene-frame-v1"] = "gaze-scene-frame-v1"
+    frame_id: str
+    frame_index: int
+    timestamp_seconds: float
+    source_frame_status: FrameStatus
+    valid_for_scene_center: bool
+    valid_for_main_monitor_direction: bool
+    camera: SceneFrameCameraRecord
+    left_eye: SceneEyeRecord
+    right_eye: SceneEyeRecord
+    eye_midpoint: SceneEyeMidpointRecord
+    head: SceneHeadRecord
+    unigaze_ray: SceneUniGazeRayRecord
+    main_monitor_hit: SceneMonitorHitRecord
+    diagnostics: SceneFrameDiagnosticsRecord
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_frame_status(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="source_frame_status",
+            enum_type=FrameStatus,
+        )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_frame_dependencies(self) -> SceneFrameRecord:
+        if self.eye_midpoint.valid and (
+            not self.left_eye.valid or not self.right_eye.valid
+        ):
+            raise ValueError("valid eye midpoint requires both eyes to be valid")
+        if self.valid_for_scene_center and not self.eye_midpoint.valid:
+            raise ValueError(
+                "valid_for_scene_center requires a valid eye_midpoint record"
+            )
+        if self.valid_for_main_monitor_direction and not self.unigaze_ray.valid:
+            raise ValueError(
+                "valid_for_main_monitor_direction requires a valid unigaze_ray record"
+            )
+        if self.main_monitor_hit.valid and not self.unigaze_ray.valid:
+            raise ValueError("valid monitor hit requires a valid unigaze ray")
+        return self
+
+
+class SceneSourceArtifactsRecord(SceneSchemaModel):
+    frame_records: str
+    scene_frame_records: str
+    scene_summary: str
+    viewer: str
+
+
+class SceneCoordinateFramesRecord(SceneSchemaModel):
+    math_frame: CoordinateFrame3D
+    scene_frame: CoordinateFrame3D
+    monitor_frame: CoordinateFrame3D
+    viewer_frame: CoordinateFrame3D
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        for field_name in (
+            "math_frame",
+            "scene_frame",
+            "monitor_frame",
+            "viewer_frame",
+        ):
+            _coerce_enum_field(
+                coerced,
+                field_name=field_name,
+                enum_type=CoordinateFrame3D,
+            )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_semantic_mapping(self) -> SceneCoordinateFramesRecord:
+        if self.math_frame != CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M:
+            raise ValueError("math_frame must be camera_opencv_pseudo_m")
+        if self.scene_frame != CoordinateFrame3D.SCENE_PSEUDO_M:
+            raise ValueError("scene_frame must be scene_pseudo_m")
+        if self.monitor_frame != CoordinateFrame3D.MONITOR_PLANE_PSEUDO_M:
+            raise ValueError("monitor_frame must be monitor_plane_pseudo_m")
+        if self.viewer_frame != CoordinateFrame3D.THREE_VIEW:
+            raise ValueError("viewer_frame must be three_view")
+        return self
+
+
+class SceneCenterEstimatorRecord(SceneSchemaModel):
+    method: Literal["geometric_median_after_mad_screen"]
+    candidate_frame_count: int
+    finite_candidate_frame_count: int
+    dropped_non_finite_frame_count: int
+    inlier_frame_count: int
+    mad_m: tuple[float, float, float]
+    thresholds_m: tuple[float, float, float]
+    iteration_count: int
+    convergence_tolerance_m: float
+    fallback_used: bool
+    uncertainty: Literal["low", "medium", "high"]
+
+    @field_validator("mad_m", "thresholds_m")
+    @classmethod
+    def validate_finite_triplet(
+        cls,
+        value: tuple[float, float, float],
+        info: object,
+    ) -> tuple[float, float, float]:
+        field_name = getattr(info, "field_name", "estimator_triplet")
+        return _validate_finite_triplet(value, field_name=field_name)
+
+
+class SceneDirectionEstimatorRecord(SceneSchemaModel):
+    method: Literal["angular_ransac_then_normalized_inlier_mean"]
+    candidate_frame_count: int
+    finite_candidate_frame_count: int
+    inlier_frame_count: int
+    inlier_angle_radians: float
+    median_angular_residual_radians: float | None
+    angular_residual_percentiles_radians: dict[str, float | None]
+    fallback_used: bool
+    uncertainty: Literal["low", "medium", "high"]
+
+    @field_validator("angular_residual_percentiles_radians")
+    @classmethod
+    def validate_angular_residual_percentiles(
+        cls,
+        value: dict[str, float | None],
+    ) -> dict[str, float | None]:
+        expected_keys = {"p50", "p75", "p90", "p95"}
+        actual_keys = set(value)
+        if actual_keys != expected_keys:
+            raise ValueError(
+                "angular_residual_percentiles_radians must contain exactly "
+                "p50, p75, p90, and p95"
+            )
+        for percentile_name, residual in value.items():
+            if residual is not None and not math.isfinite(residual):
+                raise ValueError(
+                    "angular_residual_percentiles_radians values must be "
+                    f"finite or null, got {percentile_name}={residual!r}"
+                )
+        return value
+
+
+class SceneOrientationEstimatorRecord(SceneSchemaModel):
+    method: Literal["eye_pair_right_and_head_up_with_camera_axis_fallbacks"]
+    candidate_frame_count: int
+    fallbacks: list[str]
+
+
+class SceneRobustEstimatorsRecord(SceneSchemaModel):
+    scene_center: SceneCenterEstimatorRecord
+    main_unigaze_direction: SceneDirectionEstimatorRecord
+    scene_orientation: SceneOrientationEstimatorRecord
+
+
+class SceneViewerDependencyRecord(SceneSchemaModel):
+    library: str
+    version: str
+    source: str
+    license: str
+    dist_integrity: str
+
+
+class SceneManifest(SceneSchemaModel):
+    schema_version: Literal["gaze-scene-manifest-v1"] = "gaze-scene-manifest-v1"
+    run_id: str
+    source_video_path: str
+    source_video_sha256: str
+    source_artifacts: SceneSourceArtifactsRecord
+    coordinate_frames: SceneCoordinateFramesRecord
+    camera_model: SceneCameraModel
+    assumptions: list[SceneAssumptionRecord]
+    robust_estimators: SceneRobustEstimatorsRecord
+    scene_center_camera_m: Vector3D
+    axis_basis: SceneAxisBasisRecord = Field(alias="scene_axes_camera")
+    monitor_plane: SceneMonitorPlaneRecord = Field(alias="main_monitor_plane")
+    viewer_dependency: SceneViewerDependencyRecord = Field(alias="viewer")
+    generated_at_utc: str
+
+    @model_validator(mode="after")
+    def validate_spaces(self) -> SceneManifest:
+        _require_vector_space(
+            self.scene_center_camera_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="scene_center_camera_m",
+        )
+        return self
+
+
+def _coerce_invalid_reason_counts(data: dict[str, int]) -> dict[str, int]:
+    coerced: dict[str, int] = {}
+    for key, value in data.items():
+        coerced[str(SceneInvalidReason(key))] = value
+    return coerced
+
+
+class SceneMonitorHitBoundsRecord(SceneSchemaModel):
+    u_min_m: float
+    u_max_m: float
+    v_min_m: float
+    v_max_m: float
+
+
+class SceneArtifactValidationRecord(SceneSchemaModel):
+    scene_frame_count_matches_decoded: bool
+    viewer_exists: bool
+    scene_manifest_valid: bool
+    scene_summary_valid: bool
+
+
+class SceneSummary(SceneSchemaModel):
+    schema_version: Literal["gaze-scene-summary-v1"] = "gaze-scene-summary-v1"
+    run_id: str
+    decoded_frames: int
+    scene_frame_records: int
+    valid_eye_midpoint_frames: int
+    valid_unigaze_ray_frames: int
+    valid_monitor_hit_frames: int
+    invalid_monitor_hit_reasons: dict[str, int]
+    monitor_hit_bounds: SceneMonitorHitBoundsRecord
+    representative_scene_warning_frame_ids: list[str]
+    artifact_validation: SceneArtifactValidationRecord
+
+    @field_validator("invalid_monitor_hit_reasons", mode="before")
+    @classmethod
+    def validate_invalid_reason_counts(
+        cls,
+        value: Any,
+    ) -> dict[str, int]:
+        if not isinstance(value, dict):
+            raise TypeError("invalid_monitor_hit_reasons must be a dict")
+        return _coerce_invalid_reason_counts(value)
+
+
+class ViewerHitPoint(SceneSchemaModel):
+    frame_id: str
+    frame_index: int
+    point_scene_m: Vector3D
+    u_m: float
+    v_m: float
+    within_physical_monitor: bool
+    within_extended_plane: bool
+
+    @model_validator(mode="after")
+    def validate_spaces(self) -> ViewerHitPoint:
+        _require_vector_space(
+            self.point_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="point_scene_m",
+        )
+        return self
+
+
+class ViewerSceneData(SceneSchemaModel):
+    schema_version: Literal["gaze-scene-viewer-data-v1"] = "gaze-scene-viewer-data-v1"
+    run_id: str
+    source_video_stem: str
+    frame_count: int
+    frames: list[SceneFrameRecord]
+    valid_hit_points: list[ViewerHitPoint]
+    monitor_plane: SceneMonitorPlaneRecord
+    axis_basis: SceneAxisBasisRecord
+    assumptions: list[SceneAssumptionRecord]
+    summary: SceneSummary
