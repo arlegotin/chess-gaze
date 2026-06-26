@@ -87,6 +87,8 @@ def back_project_eye_points(
         "interpupillary_distance_m": assumptions.adult_male_interpupillary_distance_m,
         "pupil_distance_px": None,
         "non_finite_input": False,
+        "invalid_coordinate_space": None,
+        "invalid_coordinate_space_eyes": None,
         "left_eye_in_frame": _point_in_frame(left_point, camera),
         "right_eye_in_frame": _point_in_frame(right_point, camera),
         "left_source_reason_invalid": left_source_reason,
@@ -104,6 +106,11 @@ def back_project_eye_points(
         point=right_point,
         invalid_reason=SceneInvalidReason.RIGHT_EYE_INVALID,
         source_reason=right_source_reason,
+    )
+    _persist_invalid_coordinate_space_diagnostics(
+        diagnostics=diagnostics,
+        left_state=left_state,
+        right_state=right_state,
     )
 
     if left_state.kind == "non_finite" or right_state.kind == "non_finite":
@@ -391,6 +398,7 @@ class _EyeProjectionState:
     point: Point2D | None
     reason_invalid: SceneInvalidReason
     source_reason_invalid: str
+    coordinate_space: str | None
 
 
 def _eye_projection_state(
@@ -409,6 +417,18 @@ def _eye_projection_state(
                 source_reason,
                 "pupil center missing",
             ),
+            coordinate_space=None,
+        )
+    if point.space != CoordinateSpace.IMAGE_PX:
+        return _EyeProjectionState(
+            kind="wrong_space",
+            point=point,
+            reason_invalid=invalid_reason,
+            source_reason_invalid=(
+                "pupil center must use IMAGE_PX, got "
+                f"{point.space.value}"
+            ),
+            coordinate_space=point.space.value,
         )
     if not math.isfinite(point.x) or not math.isfinite(point.y):
         return _EyeProjectionState(
@@ -416,12 +436,14 @@ def _eye_projection_state(
             point=point,
             reason_invalid=SceneInvalidReason.NON_FINITE_INPUT,
             source_reason_invalid="pupil center contains non-finite coordinates",
+            coordinate_space=point.space.value,
         )
     return _EyeProjectionState(
         kind="projectable",
         point=point,
         reason_invalid=invalid_reason,
         source_reason_invalid=_first_reason(source_reason, "eye present"),
+        coordinate_space=point.space.value,
     )
 
 
@@ -499,7 +521,12 @@ def _point_in_frame(
     point: Point2D | None,
     camera: SceneCameraModel,
 ) -> bool | None:
-    if point is None or not math.isfinite(point.x) or not math.isfinite(point.y):
+    if (
+        point is None
+        or point.space != CoordinateSpace.IMAGE_PX
+        or not math.isfinite(point.x)
+        or not math.isfinite(point.y)
+    ):
         return None
     return (
         0.0 <= point.x < camera.frame_width_px
@@ -508,18 +535,39 @@ def _point_in_frame(
 
 
 def _pupil_center(eye: EyeRecord) -> Point2D | None:
-    point = eye.pupil_center
-    if point is None:
-        return None
-    if point.space != CoordinateSpace.IMAGE_PX:
-        return Point2D(space=CoordinateSpace.IMAGE_PX, x=point.x, y=point.y)
-    return point
+    return eye.pupil_center
 
 
 def _source_reason(eye: EyeRecord) -> str | None:
     if eye.reason_invalid is None:
         return None
     return eye.reason_invalid.value
+
+
+def _persist_invalid_coordinate_space_diagnostics(
+    *,
+    diagnostics: dict[str, str | int | float | bool | None],
+    left_state: _EyeProjectionState,
+    right_state: _EyeProjectionState,
+) -> None:
+    invalid_states: list[tuple[str, _EyeProjectionState]] = []
+    if left_state.kind == "wrong_space":
+        invalid_states.append(("left_eye", left_state))
+    if right_state.kind == "wrong_space":
+        invalid_states.append(("right_eye", right_state))
+    if not invalid_states:
+        return
+
+    eye_names = ",".join(name for name, _ in invalid_states)
+    coordinate_spaces = sorted(
+        {
+            state.coordinate_space
+            for _, state in invalid_states
+            if state.coordinate_space is not None
+        }
+    )
+    diagnostics["invalid_coordinate_space_eyes"] = eye_names
+    diagnostics["invalid_coordinate_space"] = ",".join(coordinate_spaces)
 
 
 def _first_reason(*reasons: str | None) -> str:

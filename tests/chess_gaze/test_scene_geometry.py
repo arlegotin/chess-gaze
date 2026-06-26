@@ -29,6 +29,10 @@ def _point(x: float, y: float) -> Point2D:
     return Point2D(space=CoordinateSpace.IMAGE_PX, x=x, y=y)
 
 
+def _normalized_point(x: float, y: float) -> Point2D:
+    return Point2D(space=CoordinateSpace.NORMALIZED, x=x, y=y)
+
+
 def _bbox(center_x: float, center_y: float) -> BBox:
     return BBox(
         space=CoordinateSpace.IMAGE_PX,
@@ -47,6 +51,19 @@ def _present_eye(center_x: float, center_y: float) -> EyeRecord:
         iris_landmarks=[
             _point(center_x - 1.0, center_y),
             _point(center_x + 1.0, center_y),
+        ],
+        reason_invalid=None,
+    )
+
+
+def _present_eye_with_pupil(point: Point2D) -> EyeRecord:
+    return EyeRecord(
+        present=True,
+        bounding_box=_bbox(point.x, point.y),
+        pupil_center=point,
+        iris_landmarks=[
+            point,
+            point,
         ],
         reason_invalid=None,
     )
@@ -275,6 +292,35 @@ def test_back_project_eye_points_rejects_non_finite_pupil_input() -> None:
     assert projection.midpoint.valid is False
     assert projection.midpoint.reason_invalid == SceneInvalidReason.NON_FINITE_INPUT
     assert projection.diagnostics["non_finite_input"] is True
+
+
+def test_back_project_eye_points_rejects_normalized_pupil_coordinates() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    camera = scene_geometry.estimated_camera_model(1920, 1080)
+
+    projection = scene_geometry.back_project_eye_points(
+        _frame_record(
+            left_eye=_present_eye_with_pupil(_normalized_point(0.45, 0.50)),
+            right_eye=_present_eye(1020.0, 540.0),
+        ),
+        camera,
+        assumptions,
+    )
+
+    assert projection.left_eye.valid is False
+    assert projection.left_eye.reason_invalid == SceneInvalidReason.LEFT_EYE_INVALID
+    assert projection.left_eye.camera_point_m is None
+    assert projection.right_eye.valid is False
+    assert projection.right_eye.reason_invalid == SceneInvalidReason.RIGHT_EYE_INVALID
+    assert projection.right_eye.camera_point_m is None
+    assert projection.midpoint.valid is False
+    assert projection.midpoint.reason_invalid == SceneInvalidReason.EYE_MIDPOINT_INVALID
+    assert projection.midpoint.source_reason_invalid is not None
+    assert "NORMALIZED" in projection.midpoint.source_reason_invalid
+    assert projection.diagnostics["invalid_coordinate_space"] == "NORMALIZED"
+    assert projection.diagnostics["invalid_coordinate_space_eyes"] == "left_eye"
+    assert projection.diagnostics["left_eye_in_frame"] is None
 
 
 def test_back_project_eye_points_marks_midpoint_invalid_when_one_eye_is_missing(

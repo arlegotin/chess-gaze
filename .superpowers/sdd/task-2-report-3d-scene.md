@@ -73,3 +73,39 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/
 ## Concerns
 
 - None.
+
+## Review Fixes
+
+- Added a regression test for `CoordinateSpace.NORMALIZED` pupil-center input.
+- Tightened `back_project_eye_points()` so Task 2 rejects non-`IMAGE_PX` pupil
+  centers instead of silently relabeling them.
+- Added diagnostics that persist the offending coordinate space and affected
+  eye names.
+
+RED evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- Failed with `1 failed, 8 passed`.
+- The failing test was
+  `test_back_project_eye_points_rejects_normalized_pupil_coordinates`, and the
+  failure showed the left eye was incorrectly projected as valid from
+  `CoordinateSpace.NORMALIZED`.
+
+GREEN evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- `9 passed in 0.06s`
+
+Focused Ruff:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/chess_gaze/test_scene_geometry.py
+```
+
+- `All checks passed!`
