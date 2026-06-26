@@ -1,12 +1,14 @@
 # chess-gaze
 
-Local Python pipeline for per-frame video evidence used by chess gaze analysis.
+Local Python pipeline for per-frame video evidence and 3D scene artifacts used
+by chess gaze analysis.
 
 The implemented pipeline decodes video, writes strict run artifacts, preserves raw
 and processed frame evidence, and revalidates artifacts into `qa_summary.json`.
 The default CLI path validates local model checksums, runs MediaPipe face
 landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
-checkpoint, and records strict per-frame gaze outputs.
+checkpoint, records strict per-frame gaze outputs, builds pseudo-metric 3D scene
+artifacts, and generates a local browser viewer.
 
 ## Setup
 
@@ -62,7 +64,50 @@ Each completed run contains:
 - `processed_frames/`
 - `records/frames.jsonl`
 - `records/errors.jsonl`
+- `records/scene_frames.jsonl`
+- `scene/scene_manifest.json`
+- `scene/scene_summary.json`
+- `viewer/index.html`
+- `viewer/scene-data.json`
 - `qa_summary.json`
+
+`chess-gaze analyze` prints the run directory and then the generated viewer
+entry point:
+
+```text
+artifacts/output/<video-stem>/runs/<run-id>
+viewer: artifacts/output/<video-stem>/runs/<run-id>/viewer/index.html
+```
+
+Open the viewer through the localhost-only static server:
+
+```sh
+uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>
+```
+
+The command prints a local URL and serves only files under that run's
+`viewer/` directory. It binds to loopback hosts only.
+
+## Scene Artifacts
+
+Scene units are pseudo-metric. Eye depth is inferred from the adult-male
+interpupillary-distance assumption unless future calibration supplies measured
+scale, so absolute distances are useful for reconstruction/debugging but should
+not be treated as measured room geometry.
+
+Persisted scene assumptions include:
+
+- adult-male interpupillary distance: `0.063 m`
+- main-monitor distance from the robust eye-midpoint scene center: `0.700 m`
+- physical monitor size: `0.600 m x 0.340 m`
+- extended monitor plane scale: `3.0`
+- head ellipsoid radii: `0.090 m, 0.120 m, 0.100 m`
+- eye sphere radius: `0.012 m`
+
+Every decoded frame produces one `records/scene_frames.jsonl` record. Every
+valid forward ray-plane intersection produces one persisted gaze hit point.
+Hit points are not merged, sampled, smoothed, clamped to the physical monitor,
+clustered, or replaced by a heatmap.
 
 ## Model Policy
 
