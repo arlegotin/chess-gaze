@@ -752,11 +752,27 @@ def test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze() -> N
         midpoint,
     )
 
+    appearance_vector = pitch_yaw_to_unit_vector(
+        pitch_radians=0.05,
+        yaw_radians=0.10,
+    )
+    recommended_vector = pitch_yaw_to_unit_vector(
+        pitch_radians=-0.30,
+        yaw_radians=0.75,
+    )
+
     assert ray.valid is True
     assert ray.source == "appearance_gaze"
     assert ray.direction_source == "appearance_gaze_unigaze_pitch_yaw"
     assert ray.pitch_radians == pytest.approx(0.05)
     assert ray.yaw_radians == pytest.approx(0.10)
+    assert ray.direction_camera is not None
+    assert ray.direction_camera.x == pytest.approx(appearance_vector[0])
+    assert ray.direction_camera.y == pytest.approx(appearance_vector[1])
+    assert ray.direction_camera.z == pytest.approx(appearance_vector[2])
+    assert ray.direction_camera.x != pytest.approx(recommended_vector[0])
+    assert ray.direction_camera.y != pytest.approx(recommended_vector[1])
+    assert ray.direction_camera.z != pytest.approx(recommended_vector[2])
 
 
 def test_unigaze_ray_from_frame_matches_pitch_yaw_sign_convention() -> None:

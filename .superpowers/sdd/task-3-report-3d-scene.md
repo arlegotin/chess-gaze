@@ -117,3 +117,40 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/
 
 - Result: passed.
 - Output: `All checks passed!`
+
+## Review Fixes Round 2
+
+- Strengthened `test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze` so it now asserts:
+  - `direction_camera` equals `pitch_yaw_to_unit_vector()` for `appearance_gaze`;
+  - `direction_camera` does not match the intentionally different `recommended_gaze` vector.
+- Kept the existing sign-convention test unchanged.
+
+Mutation-style RED evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q -k uses_appearance_gaze_not_recommended_gaze
+```
+
+- Current correct implementation passed immediately after adding the stronger test, so a temporary mutation was used as allowed.
+- Temporary mutation: changed `unigaze_ray_from_frame()` to read `frame_record.recommended_gaze`.
+- Result under mutation: failed as expected.
+- Output: `1 failed, 23 deselected in 0.65s`.
+- Failure mode: the strengthened mixed-gaze test detected `recommended_gaze` values in the returned ray.
+
+GREEN evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- Result: passed.
+- Output: `24 passed in 0.65s`.
+
+Focused Ruff evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/chess_gaze/test_scene_geometry.py
+```
+
+- Result: passed.
+- Output: `All checks passed!`
