@@ -9,6 +9,7 @@ Changed files:
 
 - `src/chess_gaze/cli.py`
 - `src/chess_gaze/scene_viewer.py`
+- `src/chess_gaze/viewer_assets/index.html`
 - `tests/chess_gaze/test_cli.py`
 - `tests/chess_gaze/test_scene_viewer.py`
 - `.superpowers/sdd/task-9-report-3d-scene.md`
@@ -70,7 +71,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_cli.py tests/chess_ga
 Result:
 
 ```text
-22 passed in 1.20s
+22 passed in 2.05s
 ```
 
 Focused Ruff:
@@ -85,11 +86,46 @@ Result:
 All checks passed!
 ```
 
+## Browser Smoke Evidence
+
+Real-video model-free artifact generation:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_artifacts_real_video_contract.py::test_model_free_nakamura_video_scene_artifact_contract -q --basetemp /private/tmp/chess-gaze-task9-smoke-pytest
+```
+
+Result:
+
+```text
+1 passed in 430.61s (0:07:10)
+```
+
+Local viewer command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run chess-gaze view /private/tmp/chess-gaze-task9-smoke-pytest/test_model_free_nakamura_video0/output/nakamura_1/runs/20260626T035309Z-ea063137 --host 127.0.0.1 --port 0
+```
+
+Verified in Chrome DevTools against `http://127.0.0.1:54603/`:
+
+- `index.html`, CSS, JavaScript, vendored Three.js modules, and
+  `scene-data.json` loaded locally with no console errors after the favicon
+  template cleanup.
+- Desktop render was nonblank and showed the head ellipsoid, both eyes, gaze
+  ray, monitor plane, extended plane, axes, current hit, and frame controls.
+- Slider scrub to frame index `100` updated status to `Frame 101 of 1973`.
+- Accumulated mode reported `101 of 1973` while preserving all run hit samples
+  in the hit counter (`1973`).
+- Mobile viewport had no horizontal overflow and kept the scene and controls
+  readable.
+- Wheel zoom changed the screenshot hash while leaving the console clean:
+  `/private/tmp/chess-gaze-task9-wheel-before.png` hash
+  `db309f82af355567ae6dc634389ccf62dd38887052c67bf8700c39e35c3c3dcf`;
+  `/private/tmp/chess-gaze-task9-wheel-after.png` hash
+  `163f71797a1e6f0232ae6a93bdfec0b68caa4e29aa7b75226e3e4b3ad411f689`.
+
 ## Residual Risks
 
-- Browser smoke was intentionally not run in this slice. The main agent still
-  needs to open a generated viewer URL and verify rendering, controls, and
-  mobile/desktop layout behavior.
 - Unit tests cover traversal attempts and root locking, but they do not exhaust
   every URL encoding variant.
 - Real CLI serving was covered through the lower-level server and a monkeypatched

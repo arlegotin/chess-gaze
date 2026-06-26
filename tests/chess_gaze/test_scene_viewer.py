@@ -298,6 +298,7 @@ def test_generated_html_js_and_css_reference_only_local_assets(
 
     html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
     js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    assert 'rel="icon" href="data:,"' in html
     assert 'href="./styles.css"' in html
     assert 'src="./scene_viewer.js"' in html
     assert 'from "./vendor/three.module.js"' in js
