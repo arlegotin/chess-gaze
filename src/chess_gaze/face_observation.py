@@ -572,6 +572,8 @@ def _region_refinement_score(
     if _candidate_is_near_region_seam(fallback, region_selection.region):
         return None
 
+    # Preserve the older consensus repair for genuinely large full-frame faces;
+    # the bounded overexpanded path below handles remaining single-candidate jumps.
     large_full_frame_refinement_score = _large_full_frame_refinement_score(
         fallback,
         full_primary,
