@@ -161,8 +161,16 @@ def test_per_eye_geometric_gaze_uses_independent_eye_offsets() -> None:
         ),
     )
 
-    left = compute_per_eye_geometric_gaze(left_eye, head_pose)
-    right = compute_per_eye_geometric_gaze(right_eye, head_pose)
+    left = compute_per_eye_geometric_gaze(
+        left_eye,
+        head_pose,
+        missing_reason=ErrorCode.LEFT_EYE_NOT_FOUND,
+    )
+    right = compute_per_eye_geometric_gaze(
+        right_eye,
+        head_pose,
+        missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
+    )
 
     assert left.valid is True
     assert right.valid is True
@@ -183,11 +191,33 @@ def test_per_eye_geometric_gaze_accepts_eye_observation_offset_tuple() -> None:
         normalized_iris_offset_xy=(-0.20, 0.10),
     )
 
-    gaze = compute_per_eye_geometric_gaze(eye, head_pose)
+    gaze = compute_per_eye_geometric_gaze(
+        eye,
+        head_pose,
+        missing_reason=ErrorCode.LEFT_EYE_NOT_FOUND,
+    )
 
     assert gaze.valid is True
     assert gaze.yaw_radians == pytest.approx(-0.15)
     assert gaze.pitch_radians == pytest.approx(-0.12)
+
+
+def test_per_eye_geometric_gaze_uses_explicit_missing_eye_reason() -> None:
+    head_pose = SimpleNamespace(
+        valid=True,
+        yaw_radians=0.05,
+        pitch_radians=-0.02,
+    )
+    missing_eye = SimpleNamespace(present=False)
+
+    gaze = compute_per_eye_geometric_gaze(
+        missing_eye,
+        head_pose,
+        missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
+    )
+
+    assert gaze.valid is False
+    assert gaze.reason_invalid is ErrorCode.RIGHT_EYE_NOT_FOUND
 
 
 def test_recommended_gaze_invalid_when_estimators_disagree() -> None:

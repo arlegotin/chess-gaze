@@ -208,6 +208,32 @@ def _eye(
     )
 
 
+def _missing_eye(reason: ErrorCode) -> EyeObservation:
+    return EyeObservation(
+        present=False,
+        confidence=0.0,
+        confidence_source="test",
+        reason_missing=reason,
+        eye_landmarks_image_px=(),
+        eye_landmarks_image_norm=(),
+        iris_present=False,
+        iris_landmarks_image_px=(),
+        iris_landmarks_image_norm=(),
+        iris_center_image_px=None,
+        iris_center_image_norm=None,
+        iris_diameter_px=None,
+        bounding_box_image_px=None,
+        bounding_box_image_norm=None,
+        crop_bbox_image_px=None,
+        eye_crop_path=None,
+        eye_crop_sha256=None,
+        eye_crop_transform_to_image_px=None,
+        normalized_iris_offset_xy=None,
+        eye_open_metric=None,
+        occlusion="unknown",
+    )
+
+
 def _observe_eyes(
     face: FaceCandidate,
     rgb_frame: np.ndarray,
@@ -219,8 +245,24 @@ def _observe_eyes(
         frame_id=frame_id,
         image_width_px=64,
         image_height_px=48,
-        left=_eye(center_x=24.0, center_y=24.0, offset=(0.0, 0.0)),
-        right=_eye(center_x=40.0, center_y=24.0, offset=(0.0, 0.0)),
+        left=_eye(center_x=40.0, center_y=24.0, offset=(0.0, 0.0)),
+        right=_eye(center_x=24.0, center_y=24.0, offset=(0.0, 0.0)),
+    )
+
+
+def _observe_eyes_missing_right(
+    face: FaceCandidate,
+    rgb_frame: np.ndarray,
+    run_layout: RunLayout,
+    frame_id: str,
+) -> EyePairObservation:
+    del face, rgb_frame, run_layout
+    return EyePairObservation(
+        frame_id=frame_id,
+        image_width_px=64,
+        image_height_px=48,
+        left=_eye(center_x=40.0, center_y=24.0, offset=(0.0, 0.0)),
+        right=_missing_eye(ErrorCode.RIGHT_EYE_NOT_FOUND),
     )
 
 
@@ -330,8 +372,9 @@ def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
     assert record.face.present is True
     assert record.face.bounding_box == candidate.bounding_box_image_px
     assert record.left_eye.present is True
-    assert record.left_eye.pupil_center == _point(24.0, 24.0)
+    assert record.left_eye.pupil_center == _point(40.0, 24.0)
     assert record.right_eye.present is True
+    assert record.right_eye.pupil_center == _point(24.0, 24.0)
     assert record.head_pose.valid is True
     assert record.head_pose.yaw_radians == 0.01
     assert record.geometric_gaze.valid is True
@@ -339,6 +382,43 @@ def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
     assert record.appearance_gaze.valid is True
     assert record.recommended_gaze.valid is True
     assert record.errors == []
+
+
+def test_model_backed_frame_observer_preserves_missing_right_eye_reason(
+    tmp_path: Path,
+) -> None:
+    run_layout = RunLayout(
+        run_dir=tmp_path,
+        raw_frames_dir=tmp_path / "raw_frames",
+        processed_frames_dir=tmp_path / "processed_frames",
+        crops_dir=tmp_path / "crops",
+        face_crops_dir=tmp_path / "crops" / "face",
+        eyes_crops_dir=tmp_path / "crops" / "eyes",
+        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
+        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
+        records_dir=tmp_path / "records",
+    )
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=_FakeGazeModel(),
+        calibration=default_calibration(),
+        run_layout=run_layout,
+        eye_observer=_observe_eyes_missing_right,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    record = observer(_observer_frame())
+
+    assert record.status is FrameStatus.ERROR
+    assert record.left_eye.present is True
+    assert record.left_eye.pupil_center == _point(40.0, 24.0)
+    assert record.right_eye.present is False
+    assert record.right_eye.reason_invalid is ErrorCode.RIGHT_EYE_NOT_FOUND
+    assert record.geometric_gaze.valid is False
+    assert record.geometric_gaze.reason_invalid is ErrorCode.RIGHT_EYE_NOT_FOUND
+    assert ErrorCode.RIGHT_EYE_NOT_FOUND in {error.code for error in record.errors}
 
 
 def test_model_backed_frame_observer_records_missing_face_without_later_models(
