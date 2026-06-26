@@ -108,3 +108,47 @@ All checks passed!
 - Task 5 intentionally leaves viewer file generation and `viewer_exists=true` to later viewer integration tasks.
 - Task 5 intentionally leaves pipeline, QA summary, CLI, and `RunLayout.scene_dir`/`viewer_dir` integration to Task 6+.
 - Head ellipsoid placement uses the existing default eye-midpoint offset without per-frame head-local rotation refinement.
+
+## Review Fixes Round 1
+
+Reviewer finding:
+
+- `build_viewer_scene_data(result)` rebuilt assumptions with `default_scene_assumptions()` instead of reflecting `result.manifest.assumptions`, allowing viewer data to silently diverge from persisted/result assumptions.
+
+RED evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_artifacts.py -q
+```
+
+```text
+FAILED tests/chess_gaze/test_scene_artifacts.py::test_build_viewer_scene_data_uses_result_manifest_assumptions
+AssertionError: assert viewer_data.assumptions == modified_result.manifest.assumptions
+1 failed, 2 passed in 1.02s
+```
+
+Fix:
+
+- Added a regression that modifies `SceneArtifactResult.manifest.assumptions` with a sentinel record and different ordering.
+- Changed viewer-data rebuilding to pass through `result.manifest.assumptions` exactly.
+- Adjusted `_viewer_scene_data_from_parts()` to accept `list[SceneAssumptionRecord]` instead of rebuilding from `SceneAssumptions`.
+
+Validation:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_artifacts.py -q
+```
+
+```text
+3 passed in 0.64s
+```
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_artifacts.py tests/chess_gaze/test_scene_artifacts.py tests/chess_gaze/test_scene_artifacts_real_video_contract.py
+```
+
+```text
+All checks passed!
+```
+
+Real-video test was intentionally not rerun for this review fix because only the viewer-data assumption source changed, and the required focused regression covers that behavior without touching the real-video contract.

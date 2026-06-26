@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from chess_gaze.scene_artifacts import (
     build_viewer_scene_data,
     load_scene_frames,
 )
-from chess_gaze.scene_records import SceneManifest, SceneSummary
+from chess_gaze.scene_records import SceneAssumptionRecord, SceneManifest, SceneSummary
 
 
 def _layout(run_dir: Path) -> RunLayout:
@@ -300,3 +301,31 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
     assert viewer_data.monitor_plane == result.manifest.monitor_plane
     assert viewer_data.axis_basis == result.manifest.axis_basis
     assert viewer_data.summary.valid_monitor_hit_frames == 6
+
+
+def test_build_viewer_scene_data_uses_result_manifest_assumptions(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+    result = build_scene_artifacts(layout)
+    manifest_assumptions = [
+        SceneAssumptionRecord(
+            name="REVIEW_SENTINEL_ASSUMPTION",
+            value=123.0,
+            unit="review_unit",
+            source="review_fix",
+            uncertainty="low",
+        ),
+        *reversed(result.manifest.assumptions),
+    ]
+    modified_result = replace(
+        result,
+        manifest=result.manifest.model_copy(
+            update={"assumptions": manifest_assumptions}
+        ),
+    )
+
+    viewer_data = build_viewer_scene_data(modified_result)
+
+    assert viewer_data.assumptions == modified_result.manifest.assumptions
+    assert viewer_data.assumptions != result.viewer_data.assumptions

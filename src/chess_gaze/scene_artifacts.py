@@ -27,6 +27,7 @@ from chess_gaze.scene_geometry import (
 from chess_gaze.scene_records import (
     CoordinateFrame3D,
     SceneArtifactValidationRecord,
+    SceneAssumptionRecord,
     SceneAxisBasisRecord,
     SceneCameraModel,
     SceneCenterEstimatorRecord,
@@ -183,7 +184,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         frames=scene_frames,
         monitor_plane=monitor_plane,
         axis_basis=axis_basis,
-        assumptions=assumptions,
+        assumptions=assumptions.records,
         summary=summary,
     )
 
@@ -219,7 +220,7 @@ def build_viewer_scene_data(result: SceneArtifactResult) -> ViewerSceneData:
         frames=result.frames,
         monitor_plane=result.manifest.monitor_plane,
         axis_basis=result.manifest.axis_basis,
-        assumptions=default_scene_assumptions(),
+        assumptions=result.manifest.assumptions,
         summary=result.summary,
     )
 
@@ -533,7 +534,7 @@ def _viewer_scene_data_from_parts(
     frames: list[SceneFrameRecord],
     monitor_plane: SceneMonitorPlaneRecord,
     axis_basis: SceneAxisBasisRecord,
-    assumptions: SceneAssumptions,
+    assumptions: list[SceneAssumptionRecord],
     summary: SceneSummary,
 ) -> ViewerSceneData:
     return ViewerSceneData(
@@ -544,7 +545,7 @@ def _viewer_scene_data_from_parts(
         valid_hit_points=_valid_hit_points(frames),
         monitor_plane=monitor_plane,
         axis_basis=axis_basis,
-        assumptions=assumptions.records,
+        assumptions=assumptions,
         summary=summary,
     )
 
