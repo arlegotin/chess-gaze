@@ -87,3 +87,54 @@ record because it does not receive the original scene center or axis basis.
 This is consistent with the current monitor schema where `normal_camera` is the
 scene back axis, but future schema changes should preserve that invariant or pass
 the axis basis explicitly.
+
+## Review Fixes Round 1
+
+Reviewer finding:
+
+- Blocking coverage gap: committed tests only exercised default camera-Z
+  forward/right/up fixtures, leaving the persisted monitor transform
+  reconstruction unproved for nontrivial orientation.
+
+Fix:
+
+- Added
+  `test_intersect_ray_with_monitor_reconstructs_rotated_scene_transform_from_monitor`.
+- The regression uses dominant direction `normalized(0.3, -0.2, 0.93)`, a
+  non-default scene center `(0.12, -0.08, 0.77)`, and axes produced by
+  `build_scene_axis_basis()`.
+- The test constructs a known camera-space hit from the persisted monitor center
+  plus `u * right + v * up`, then casts a ray from the scene center to that hit.
+- Assertions cover monitor center, monitor normal, hit `u_m`, `v_m`, camera hit
+  point, and reconstructed `point_scene_m == (u, v, -distance)`.
+
+Initial run with the added regression:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+```text
+37 passed in 1.02s
+```
+
+Mutation-style RED evidence:
+
+- Temporary mutation: flipped reconstructed scene Z in
+  `_camera_point_to_scene_from_monitor`.
+- Command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py::test_intersect_ray_with_monitor_reconstructs_rotated_scene_transform_from_monitor -q
+```
+
+```text
+1 failed in 0.68s
+assert 0.6999999999999998 == -0.7 +/- 7.0e-07
+```
+
+Outcome:
+
+- Mutation was restored.
+- No production defect was exposed; production code did not require a committed
+  change.

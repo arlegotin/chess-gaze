@@ -216,6 +216,11 @@ def _camera_unit_vector(x: float, y: float, z: float) -> UnitVector3D:
     )
 
 
+def _normalized_camera_unit_vector(x: float, y: float, z: float) -> UnitVector3D:
+    norm = math.sqrt((x * x) + (y * y) + (z * z))
+    return _camera_unit_vector(x / norm, y / norm, z / norm)
+
+
 def _direction_from_pitch_yaw(
     *,
     pitch_radians: float,
@@ -1310,6 +1315,89 @@ def test_intersect_ray_with_monitor_persists_valid_hit_geometry_and_bounds() -> 
     assert hit.v_m == pytest.approx(0.10)
     assert hit.within_physical_monitor is True
     assert hit.within_extended_plane is True
+
+
+def test_intersect_ray_with_monitor_reconstructs_rotated_scene_transform_from_monitor(
+) -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    center = scene_geometry.RobustPointEstimate(
+        point_camera_m=_camera_point(0.12, -0.08, 0.77),
+        candidate_count=12,
+        finite_candidate_count=12,
+        dropped_non_finite_count=0,
+        inlier_count=12,
+        mad_m=(0.004, 0.003, 0.005),
+        thresholds_m=(0.015, 0.015, 0.0175),
+        iteration_count=3,
+        convergence_tolerance_m=1e-6,
+        fallback_used=False,
+        uncertainty="medium",
+    )
+    dominant_direction = _normalized_camera_unit_vector(0.3, -0.2, 0.93)
+    direction = _dominant_direction_estimate(dominant_direction)
+    axes = scene_geometry.build_scene_axis_basis(
+        direction,
+        [_camera_unit_vector(1.0, 0.0, 0.0)],
+        assumptions,
+    )
+    monitor = scene_geometry.build_monitor_plane(
+        center,
+        direction,
+        axes,
+        assumptions,
+    )
+    expected_u_m = 0.18
+    expected_v_m = -0.07
+    expected_hit_xyz = (
+        monitor.center_camera_m.x + (expected_u_m * axes.right_camera.x)
+        + (expected_v_m * axes.up_camera.x),
+        monitor.center_camera_m.y + (expected_u_m * axes.right_camera.y)
+        + (expected_v_m * axes.up_camera.y),
+        monitor.center_camera_m.z + (expected_u_m * axes.right_camera.z)
+        + (expected_v_m * axes.up_camera.z),
+    )
+    ray_direction_xyz = (
+        expected_hit_xyz[0] - center.point_camera_m.x,
+        expected_hit_xyz[1] - center.point_camera_m.y,
+        expected_hit_xyz[2] - center.point_camera_m.z,
+    )
+    ray_direction = _normalized_camera_unit_vector(*ray_direction_xyz)
+    ray = _ray_record_at(
+        origin_camera=center.point_camera_m,
+        direction_camera=ray_direction,
+        origin_scene=_scene_point(0.0, 0.0, 0.0),
+    )
+
+    hit = scene_geometry.intersect_ray_with_monitor(ray, monitor, assumptions)
+
+    assert monitor.center_camera_m.x == pytest.approx(
+        center.point_camera_m.x
+        + (dominant_direction.x * DEFAULT_MONITOR_DISTANCE_FROM_EYES_M)
+    )
+    assert monitor.center_camera_m.y == pytest.approx(
+        center.point_camera_m.y
+        + (dominant_direction.y * DEFAULT_MONITOR_DISTANCE_FROM_EYES_M)
+    )
+    assert monitor.center_camera_m.z == pytest.approx(
+        center.point_camera_m.z
+        + (dominant_direction.z * DEFAULT_MONITOR_DISTANCE_FROM_EYES_M)
+    )
+    assert monitor.normal_camera.x == pytest.approx(-dominant_direction.x)
+    assert monitor.normal_camera.y == pytest.approx(-dominant_direction.y)
+    assert monitor.normal_camera.z == pytest.approx(-dominant_direction.z)
+
+    assert hit.valid is True
+    assert hit.u_m == pytest.approx(expected_u_m)
+    assert hit.v_m == pytest.approx(expected_v_m)
+    assert hit.point_camera_m is not None
+    assert hit.point_camera_m.x == pytest.approx(expected_hit_xyz[0])
+    assert hit.point_camera_m.y == pytest.approx(expected_hit_xyz[1])
+    assert hit.point_camera_m.z == pytest.approx(expected_hit_xyz[2])
+    assert hit.point_scene_m is not None
+    assert hit.point_scene_m.x == pytest.approx(expected_u_m)
+    assert hit.point_scene_m.y == pytest.approx(expected_v_m)
+    assert hit.point_scene_m.z == pytest.approx(-DEFAULT_MONITOR_DISTANCE_FROM_EYES_M)
 
 
 def test_intersect_ray_with_monitor_rejects_parallel_non_coplanar_ray() -> None:
