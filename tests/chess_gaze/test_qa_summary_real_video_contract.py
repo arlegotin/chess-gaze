@@ -41,8 +41,8 @@ def _deterministic_real_video_record(frame: ObserverFrame) -> FrameRecord:
         width * 0.70 + x_shift,
         height * 0.82 + y_shift,
     )
-    left_pupil = _point(width * 0.40 + x_shift, height * 0.42 + y_shift)
-    right_pupil = _point(width * 0.55 + x_shift, height * 0.42 + y_shift)
+    left_pupil = _point(width * 0.55 + x_shift, height * 0.42 + y_shift)
+    right_pupil = _point(width * 0.40 + x_shift, height * 0.42 + y_shift)
     left_eye = {
         "present": True,
         "bounding_box": _box(
@@ -90,8 +90,8 @@ def _deterministic_real_video_record(frame: ObserverFrame) -> FrameRecord:
                 "present": True,
                 "bounding_box": face_box,
                 "landmarks": [
-                    _point(width * 0.40 + x_shift, height * 0.38 + y_shift),
                     _point(width * 0.55 + x_shift, height * 0.38 + y_shift),
+                    _point(width * 0.40 + x_shift, height * 0.38 + y_shift),
                     _point(width * 0.48 + x_shift, height * 0.54 + y_shift),
                 ],
                 "reason_invalid": None,

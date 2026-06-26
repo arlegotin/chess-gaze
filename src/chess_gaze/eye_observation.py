@@ -11,13 +11,13 @@ import numpy.typing as npt
 
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import ErrorCode
-from chess_gaze.face_observation import FaceCandidate
 from chess_gaze.face_landmark_indices import (
     MEDIAPIPE_ANATOMICAL_LEFT_EYE_CONTOUR_INDICES,
     MEDIAPIPE_ANATOMICAL_LEFT_IRIS_INDICES,
     MEDIAPIPE_ANATOMICAL_RIGHT_EYE_CONTOUR_INDICES,
     MEDIAPIPE_ANATOMICAL_RIGHT_IRIS_INDICES,
 )
+from chess_gaze.face_observation import FaceCandidate
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.image_io import save_rgb_png
 

@@ -1123,7 +1123,7 @@ Expected: commit succeeds.
 
 **Interfaces:**
 - Consumes: eye observations, head pose, model assets, and image crops
-- Produces: `compute_per_eye_geometric_gaze(eye: EyeObservation, head_pose: HeadPoseObservation) -> GazeAngles`
+- Produces: `compute_per_eye_geometric_gaze(eye: EyeObservation, head_pose: HeadPoseObservation, *, missing_reason: ErrorCode) -> GazeAngles`
 - Produces: `UniGazeModel.from_local_asset(asset: ResolvedModelAsset, device: str) -> UniGazeModel`
 - Produces: `UniGazeModel.predict(normalized_batch: torch.Tensor) -> FaceModelGaze`
 - Produces: `synthesize_recommended_gaze(left: GazeAngles, right: GazeAngles, face: FaceModelGaze, thresholds: GazeThresholds) -> RecommendedGaze`

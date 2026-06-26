@@ -34,8 +34,8 @@ def _deterministic_valid_scene_record(frame: ObserverFrame) -> FrameRecord:
     height = float(frame.rgb.shape[0])
     x_shift = float(frame.frame_index % 23)
     y_shift = float(frame.frame_index % 13)
-    left_pupil = _point(width * 0.42 + x_shift, height * 0.43 + y_shift)
-    right_pupil = _point(width * 0.57 + x_shift, height * 0.43 + y_shift)
+    left_pupil = _point(width * 0.57 + x_shift, height * 0.43 + y_shift)
+    right_pupil = _point(width * 0.42 + x_shift, height * 0.43 + y_shift)
     yaw = 0.0
     pitch = 0.0
     gaze = {
@@ -60,8 +60,8 @@ def _deterministic_valid_scene_record(frame: ObserverFrame) -> FrameRecord:
                     height * 0.82 + y_shift,
                 ),
                 "landmarks": [
-                    _point(width * 0.42 + x_shift, height * 0.38 + y_shift),
                     _point(width * 0.57 + x_shift, height * 0.38 + y_shift),
+                    _point(width * 0.42 + x_shift, height * 0.38 + y_shift),
                     _point(width * 0.50 + x_shift, height * 0.54 + y_shift),
                 ],
                 "reason_invalid": None,

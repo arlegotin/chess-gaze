@@ -98,8 +98,8 @@ def _valid_record(
     face_top = height * 0.18
     face_right = width * 0.72
     face_bottom = height * 0.78
-    left_x = width * 0.42
-    right_x = width * 0.58
+    left_x = width * 0.58
+    right_x = width * 0.42
     eye_y = height * 0.42
     iris_radius = max(3.0, min(width, height) * 0.018)
 
