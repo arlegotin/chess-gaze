@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -222,6 +222,22 @@ def build_viewer_scene_data(result: SceneArtifactResult) -> ViewerSceneData:
         axis_basis=result.manifest.axis_basis,
         assumptions=result.manifest.assumptions,
         summary=result.summary,
+    )
+
+
+def scene_result_with_viewer_exists(
+    result: SceneArtifactResult, *, viewer_exists: bool
+) -> SceneArtifactResult:
+    artifact_validation = result.summary.artifact_validation.model_copy(
+        update={"viewer_exists": viewer_exists}
+    )
+    summary = result.summary.model_copy(
+        update={"artifact_validation": artifact_validation}
+    )
+    return replace(
+        result,
+        summary=summary,
+        viewer_data=build_viewer_scene_data(replace(result, summary=summary)),
     )
 
 

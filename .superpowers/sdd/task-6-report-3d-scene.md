@@ -109,6 +109,74 @@ All checks passed!
   Task 7/8 still need packaged static assets and the interactive UI.
 - QA currently validates viewer index existence only; strict viewer HTML asset
   validation belongs with the viewer asset tasks.
-- `build_scene_artifacts()` still writes `SceneSummary.artifact_validation`
-  before viewer generation, so the persisted scene summary may report
-  `viewer_exists=False` until a later task updates scene summary semantics.
+- Standalone `build_scene_artifacts()` still reports `viewer_exists=False` when
+  no viewer has been generated. Integrated pipeline runs rewrite final scene and
+  viewer metadata after viewer generation.
+
+## Review Fixes Round 1
+
+Reviewer finding:
+
+- Completed integrated runs persisted contradictory viewer validation state:
+  `qa_summary.final_status == "complete"` while `scene/scene_summary.json` and
+  embedded `viewer/scene-data.json.summary` still reported
+  `artifact_validation.viewer_exists=False`.
+
+RED command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py::test_analyze_video_writes_scene_artifacts_and_viewer_files -q
+```
+
+RED output:
+
+```text
+F                                                                        [100%]
+E       AssertionError: assert False is True
+1 failed in 1.44s
+```
+
+Fix:
+
+- Added `scene_result_with_viewer_exists()` in `scene_artifacts.py` to update
+  scene summary validation state immutably and rebuild viewer data from the
+  updated summary.
+- Updated `pipeline.analyze_video()` to write viewer index, mark the scene
+  result as having a viewer, rewrite `scene/scene_summary.json`, then write
+  `viewer/scene-data.json` before building QA.
+- Extended the integrated pipeline test to assert final persisted
+  `scene_summary.json`, embedded viewer summary, and QA status are consistent.
+
+Validation:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py::test_analyze_video_writes_scene_artifacts_and_viewer_files -q
+```
+
+```text
+.                                                                        [100%]
+1 passed in 0.94s
+```
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_artifact_runs.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_qa_summary.py -q
+```
+
+```text
+........................                                                 [100%]
+24 passed in 1.49s
+```
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/artifact_runs.py src/chess_gaze/pipeline.py src/chess_gaze/qa_summary.py tests/chess_gaze/test_artifact_runs.py tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_qa_summary.py tests/chess_gaze/test_scene_artifacts_real_video_contract.py
+```
+
+```text
+All checks passed!
+```
+
+Real-video checkpoint:
+
+- Intentionally skipped for this review fix. The change only rewrites scene
+  summary/viewer metadata after viewer placeholder generation; it does not
+  change frame decoding, scene geometry generation, or hit generation.

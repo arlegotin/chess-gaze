@@ -30,7 +30,10 @@ from chess_gaze.model_assets import (
     validate_required_assets,
 )
 from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
-from chess_gaze.scene_artifacts import build_scene_artifacts, build_viewer_scene_data
+from chess_gaze.scene_artifacts import (
+    build_scene_artifacts,
+    scene_result_with_viewer_exists,
+)
 from chess_gaze.scene_records import ViewerSceneData
 from chess_gaze.video_decode import (
     DecodedFrame,
@@ -207,11 +210,19 @@ def analyze_video(
 
     try:
         scene_result = build_scene_artifacts(layout)
+        viewer_index_path = _write_viewer_index_placeholder(layout.viewer_dir)
+        scene_result = scene_result_with_viewer_exists(
+            scene_result,
+            viewer_exists=True,
+        )
+        _write_json(
+            scene_result.paths.scene_summary_path,
+            scene_result.summary.model_dump(mode="json", by_alias=True),
+        )
         viewer_scene_data_path = _write_viewer_scene_data(
             layout.viewer_dir,
-            build_viewer_scene_data(scene_result),
+            scene_result.viewer_data,
         )
-        viewer_index_path = _write_viewer_index_placeholder(layout.viewer_dir)
     except (OSError, ValueError) as exc:
         raise PipelineError(CliErrorCode.SCHEMA_VALIDATION_FAILED, str(exc)) from exc
 

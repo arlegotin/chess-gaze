@@ -22,6 +22,7 @@ from chess_gaze.qa_summary import QASummary
 from chess_gaze.scene_artifacts import (
     build_scene_artifacts as real_build_scene_artifacts,
 )
+from chess_gaze.scene_records import SceneSummary, ViewerSceneData
 
 
 def make_tiny_video(path: Path, frame_count: int = 3) -> None:
@@ -368,6 +369,15 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     viewer_data = json.loads(result.viewer_scene_data_path.read_text(encoding="utf-8"))
     assert viewer_data["schema_version"] == "gaze-scene-viewer-data-v1"
     assert viewer_data["frame_count"] == 4
+    scene_summary = SceneSummary.model_validate_json(
+        result.scene_summary_path.read_text(encoding="utf-8")
+    )
+    viewer_scene_data = ViewerSceneData.model_validate_json(
+        result.viewer_scene_data_path.read_text(encoding="utf-8")
+    )
+    assert scene_summary.artifact_validation.viewer_exists is True
+    assert viewer_scene_data.summary.artifact_validation.viewer_exists is True
+    assert summary.final_status == "complete"
     assert summary.byte_counts.scene_jsonl_bytes == (
         result.scene_frames_jsonl_path.stat().st_size
     )
