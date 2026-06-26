@@ -166,10 +166,10 @@ def _hit_payload(valid: bool = True) -> dict[str, Any]:
 
 def _axis_basis_payload() -> dict[str, Any]:
     return {
-        "right_camera": _unit_vector_payload(x=1.0, y=0.0, z=0.0),
+        "right_camera": _unit_vector_payload(x=-1.0, y=0.0, z=0.0),
         "up_camera": _unit_vector_payload(x=0.0, y=-1.0, z=0.0),
-        "back_camera": _unit_vector_payload(x=0.0, y=0.0, z=-1.0),
-        "forward_camera": _unit_vector_payload(x=0.0, y=0.0, z=1.0),
+        "back_camera": _unit_vector_payload(x=0.0, y=0.0, z=1.0),
+        "forward_camera": _unit_vector_payload(x=0.0, y=0.0, z=-1.0),
         "determinant_right_up_back": 1.0,
         "convention": "right_up_back_columns_right_handed",
         "fallbacks": [],
@@ -182,11 +182,11 @@ def _monitor_plane_payload() -> dict[str, Any]:
         "center_scene_m": _vector_payload(
             x=0.0,
             y=0.0,
-            z=0.7,
+            z=-0.7,
             space="scene_pseudo_m",
         ),
-        "normal_camera": _unit_vector_payload(x=0.0, y=0.0, z=-1.0),
-        "right_camera": _unit_vector_payload(x=1.0, y=0.0, z=0.0),
+        "normal_camera": _unit_vector_payload(x=0.0, y=0.0, z=1.0),
+        "right_camera": _unit_vector_payload(x=-1.0, y=0.0, z=0.0),
         "up_camera": _unit_vector_payload(x=0.0, y=-1.0, z=0.0),
         "width_m": 0.6,
         "height_m": 0.34,
@@ -269,7 +269,7 @@ def _manifest_payload() -> dict[str, Any]:
                 "uncertainty": "medium",
             },
             "scene_orientation": {
-                "method": "camera_stable_right_up_back_axes",
+                "method": "anatomical_frontal_webcam_right_up_back_axes",
                 "candidate_frame_count": 0,
                 "fallbacks": [],
             },
@@ -493,7 +493,7 @@ def test_scene_axis_basis_rejects_parallel_back_and_negative_determinant() -> No
         SceneAxisBasisRecord.model_validate(
             {
                 **_axis_basis_payload(),
-                "back_camera": _unit_vector_payload(x=0.0, y=0.0, z=1.0),
+                "back_camera": _unit_vector_payload(x=0.0, y=0.0, z=-1.0),
             }
         )
 
@@ -841,7 +841,7 @@ def test_scene_manifest_serializes_structured_spec_fields() -> None:
         == "records/scene_frames.jsonl"
     )
     assert payload["coordinate_frames"]["viewer_frame"] == "three_view"
-    assert payload["scene_axes_camera"]["forward_camera"]["z"] == 1.0
+    assert payload["scene_axes_camera"]["forward_camera"]["z"] == -1.0
     assert payload["robust_estimators"]["scene_center"]["thresholds_m"] == (
         0.042,
         0.035,

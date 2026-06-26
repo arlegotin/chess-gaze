@@ -487,6 +487,21 @@ def test_generated_js_contains_mode_names(
     assert "Accumulated" in js
 
 
+def test_generated_viewer_uses_front_camera_and_anatomical_axis_labels(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "camera.position.set(0, 0.28, -1.6)" in js
+    assert "controls.target.set(0, 0, 0)" in js
+    assert "X streamer right" in html
+    assert "Y scene up" in html
+    assert "Z streamer back" in html
+    assert "Z scene depth" not in html
+
+
 def test_generated_index_import_map_resolves_pinned_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:

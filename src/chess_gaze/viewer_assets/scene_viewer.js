@@ -71,16 +71,16 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(COLORS.background);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 20);
-camera.position.set(0.35, 0.28, 1.6);
+camera.position.set(0, 0.28, -1.6);
 
 const controls = new OrbitControls(camera, elements.canvas);
 controls.enableDamping = true;
-controls.target.set(0, 0, 0.45);
+controls.target.set(0, 0, 0);
 controls.update();
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0xc7d1dd, 2.4));
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
-keyLight.position.set(1.5, 1.8, 2.2);
+keyLight.position.set(-1.0, 1.8, -2.2);
 scene.add(keyLight);
 
 const groups = {

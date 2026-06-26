@@ -462,7 +462,7 @@ def _build_manifest(
             frame_records="records/frames.jsonl",
             scene_frame_records="records/scene_frames.jsonl",
             scene_summary="scene/scene_summary.json",
-            viewer="viewer/scene-data.json",
+            viewer="viewer/index.html",
         ),
         coordinate_frames=SceneCoordinateFramesRecord(
             math_frame=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
@@ -502,7 +502,7 @@ def _build_manifest(
                 uncertainty=main_direction.uncertainty,
             ),
             scene_orientation=SceneOrientationEstimatorRecord(
-                method="camera_stable_right_up_back_axes",
+                method="anatomical_frontal_webcam_right_up_back_axes",
                 candidate_frame_count=0,
                 fallbacks=axis_basis.fallbacks,
             ),

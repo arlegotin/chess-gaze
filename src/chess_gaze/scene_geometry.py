@@ -524,7 +524,7 @@ def _frame_gaze_angles_to_camera_direction(
         pitch_radians=pitch_radians,
         yaw_radians=yaw_radians,
     )
-    return (x, -image_up_y, z)
+    return (x, -image_up_y, -z)
 
 
 def robust_main_direction(
@@ -578,7 +578,7 @@ def robust_main_direction(
             best_inlier_residuals = [residuals[index] for index in inlier_indices]
 
     residual_percentiles = _angular_residual_percentiles(best_inlier_residuals)
-    fallback_direction = _camera_unit_vector((0.0, 0.0, 1.0))
+    fallback_direction = _camera_unit_vector((0.0, 0.0, -1.0))
     if (
         len(best_inlier_indices) < assumptions.min_main_direction_inlier_frames
         or best_seed_direction is None
@@ -638,10 +638,10 @@ def build_scene_axis_basis(
 ) -> SceneAxisBasisRecord:
     del direction, eye_pair_right_vectors, assumptions
     fallbacks: list[str] = []
-    right_direction = (1.0, 0.0, 0.0)
+    right_direction = (-1.0, 0.0, 0.0)
     up_direction = (0.0, -1.0, 0.0)
-    back_direction = (0.0, 0.0, -1.0)
-    forward_direction = (0.0, 0.0, 1.0)
+    back_direction = (0.0, 0.0, 1.0)
+    forward_direction = (0.0, 0.0, -1.0)
 
     determinant = _determinant(right_direction, up_direction, back_direction)
     return SceneAxisBasisRecord(
