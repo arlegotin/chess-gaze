@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import chess_gaze.scene_viewer as scene_viewer
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
@@ -23,7 +26,10 @@ from chess_gaze.frame_records import (
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.scene_artifacts import build_scene_artifacts
 from chess_gaze.scene_records import SceneSummary, ViewerSceneData
-from chess_gaze.scene_viewer import build_scene_viewer, write_viewer_scene_data
+from chess_gaze.scene_viewer import (
+    build_scene_viewer,
+    write_viewer_scene_data,
+)
 
 
 def _layout(run_dir: Path) -> RunLayout:
@@ -418,3 +424,44 @@ def test_write_viewer_scene_data_writes_supplied_viewer_data(
         path.read_text(encoding="utf-8")
     )
     assert written_viewer_data.run_id == "changed"
+
+
+def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    viewer_dir = run_dir / "viewer"
+    viewer_dir.mkdir(parents=True)
+    (viewer_dir / "index.html").write_text("<!doctype html>viewer", encoding="utf-8")
+    (viewer_dir / "scene-data.json").write_text('{"ok": true}', encoding="utf-8")
+
+    server = scene_viewer.serve_viewer(run_dir)
+    try:
+        assert server.url.startswith("http://127.0.0.1:")
+
+        with urllib.request.urlopen(server.url, timeout=2) as response:
+            assert response.status == 200
+            assert response.read().decode("utf-8") == "<!doctype html>viewer"
+
+        scene_data_url = f"{server.url}scene-data.json"
+        with urllib.request.urlopen(scene_data_url, timeout=2) as response:
+            assert response.status == 200
+            assert json.loads(response.read().decode("utf-8")) == {"ok": True}
+    finally:
+        server.close()
+
+
+def test_static_server_does_not_escape_viewer_root(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    viewer_dir = run_dir / "viewer"
+    viewer_dir.mkdir(parents=True)
+    (run_dir / "secret.txt").write_text("outside viewer", encoding="utf-8")
+    (viewer_dir / "index.html").write_text("<!doctype html>viewer", encoding="utf-8")
+    (viewer_dir / "scene-data.json").write_text("{}", encoding="utf-8")
+
+    server = scene_viewer.serve_viewer(run_dir)
+    try:
+        for traversal_path in ("../secret.txt", "%2e%2e/secret.txt"):
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(f"{server.url}{traversal_path}", timeout=2)
+            assert exc_info.value.code in {403, 404}
+    finally:
+        server.close()
