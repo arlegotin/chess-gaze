@@ -24,6 +24,25 @@ from chess_gaze.scene_records import (
     ViewerSceneData,
 )
 
+THREE_VERSION = "0.185.0"
+THREE_MODULE_URL = (
+    f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/build/three.module.js"
+)
+THREE_CORE_URL = (
+    f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/build/three.core.js"
+)
+THREE_ADDONS_URL = f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/"
+ORBIT_CONTROLS_URL = (
+    f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/controls/"
+    "OrbitControls.js"
+)
+EXPECTED_MODULE_URLS = {
+    "three": THREE_MODULE_URL,
+    "three/core": THREE_CORE_URL,
+    "three/addons/": THREE_ADDONS_URL,
+    "three/addons/controls/OrbitControls.js": ORBIT_CONTROLS_URL,
+}
+
 
 def _point2d_payload(x: float = 10.0, y: float = 20.0) -> dict[str, Any]:
     return Point2D(space=CoordinateSpace.IMAGE_PX, x=x, y=y).model_dump()
@@ -840,6 +859,25 @@ def test_scene_manifest_serializes_structured_spec_fields() -> None:
     )
     assert payload["viewer"]["version"] == "0.185.0"
     assert payload["generated_at_utc"] == "2026-06-26T12:00:00Z"
+
+
+def test_scene_manifest_accepts_remote_viewer_dependency_provenance() -> None:
+    manifest = SceneManifest.model_validate(
+        {
+            **_manifest_payload(),
+            "viewer": {
+                **_manifest_payload()["viewer"],
+                "cdn_provider": "cdn.jsdelivr.net",
+                "module_urls": EXPECTED_MODULE_URLS,
+            },
+        }
+    )
+
+    assert manifest.viewer_dependency.cdn_provider == "cdn.jsdelivr.net"
+    assert manifest.viewer_dependency.module_urls == EXPECTED_MODULE_URLS
+    payload = manifest.model_dump(by_alias=True)
+    assert payload["viewer"]["cdn_provider"] == "cdn.jsdelivr.net"
+    assert payload["viewer"]["module_urls"] == EXPECTED_MODULE_URLS
 
 
 def test_structured_nested_models_reject_non_finite_values_and_unknown_keys() -> None:

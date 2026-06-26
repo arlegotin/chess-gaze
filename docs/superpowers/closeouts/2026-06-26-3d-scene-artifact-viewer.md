@@ -65,7 +65,8 @@ Observed native runtime notes:
 
 - MediaPipe initialized successfully only in unsandboxed execution.
 - Native MediaPipe periodically logged Clearcut upload failures. The analysis
-  still exited `0`; the generated viewer does not make remote requests.
+  still exited `0`; at the time of this closeout, the generated viewer did not
+  make remote requests. ADR-0003 supersedes that viewer-loading behavior.
 - cv2/PyAV duplicate Objective-C AVFoundation class warnings appeared during
   model and viewer commands.
 
@@ -144,6 +145,9 @@ Observed:
 - local network requests only: `/`, `styles.css`, `scene_viewer.js`,
   `vendor/three.module.js`, `vendor/OrbitControls.js`, `vendor/three.core.js`,
   `scene-data.json`, all `200`;
+- historical note: ADR-0003 supersedes this original local-vendor runtime;
+  current generated viewers no longer copy `viewer/vendor/` and load pinned
+  Three.js `0.185.0` modules from jsDelivr at render time;
 - console had no errors, warnings, or issues;
 - initial canvas was nonblank (`toDataURL` length `275650`);
 - hit counter showed `1958`;
@@ -234,6 +238,9 @@ Success: no issues found in 55 source files
   analysis. The command completed and the generated viewer made no remote
   requests, but the native library behavior should remain visible in future
   privacy reviews.
+- Superseded viewer-loading note: ADR-0003 changes the viewer runtime so it now
+  makes pinned jsDelivr requests for Three.js modules. Scene artifacts, frames,
+  crops, and model data remain local.
 - Legacy real-video coverage remains dependent on ignored local media files.
   In this run, missing `test_1.mp4` and `test_2.mp4` caused the 7 full-suite
   failures above; `test_0.mp4` coverage is skipped when that local file is

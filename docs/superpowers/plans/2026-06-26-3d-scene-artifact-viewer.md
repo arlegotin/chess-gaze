@@ -4,9 +4,13 @@
 
 **Goal:** Extend `chess-gaze analyze` so each completed run writes strict 3D scene artifacts and a local 3D viewer that reconstructs the streamer's head, eyes, UniGaze ray, inferred monitor plane, and every valid gaze hit point from the analyzed video.
 
-**Architecture:** Keep the existing per-frame analysis pipeline stable and add a deep scene-artifact layer after `records/frames.jsonl` is complete and before `qa_summary.json` is built. New scene modules own strict schemas, adult-male and desktop-monitor assumptions, robust pseudo-metric geometry, scene artifact writing, and static viewer generation. The viewer is generated as local HTML/CSS/JS with vendored Three.js assets and served through a localhost-only `chess-gaze view` command.
+**Architecture:** Keep the existing per-frame analysis pipeline stable and add a deep scene-artifact layer after `records/frames.jsonl` is complete and before `qa_summary.json` is built. New scene modules own strict schemas, adult-male and desktop-monitor assumptions, robust pseudo-metric geometry, scene artifact writing, and static viewer generation. Historical implementation used local vendored Three.js assets; ADR-0003 supersedes that detail with pinned remote Three.js module loading.
 
 **Tech Stack:** Python 3.12, uv, pytest, Ruff, mypy, NumPy, Pydantic v2, existing PyAV/MediaPipe/UniGaze pipeline, local static HTML/CSS/JavaScript, Three.js `0.185.0` vendored from the npm tarball recorded in the approved spec.
+
+> Historical note, 2026-06-26: ADR-0003 supersedes this plan's local-vendored
+> Three.js constraint. Current generated viewers load Three.js `0.185.0` from
+> pinned jsDelivr npm module URLs and no longer copy `viewer/vendor/`.
 
 ## Global Constraints
 
@@ -26,7 +30,10 @@
 - Use `nakamura_1.mp4` during development, not only at closeout. Current verified facts: `artifacts/input/nakamura_1.mp4`, 1920x1080, 1973 decoded frames, sha256 `eca8b3c81c2bd33a639dbe4926924b9462b6f90fd8fd14bda3bae97b956a1a45`.
 - Existing real-video tests still reference `artifacts/input/test_1.mp4` and `artifacts/input/test_2.mp4`. Do not weaken those tests globally. Add `nakamura_1.mp4` checkpoints for this feature and report absent legacy media separately when full gates fail.
 - Real model runs may need unsandboxed execution on this machine because README documents MediaPipe native macOS GL/Metal failures inside the managed sandbox. If blocked, capture the exact command and error.
-- Vendor Three.js locally. No CDN, remote viewer loading, remote telemetry, uploaded frames, or frontend build service is allowed.
+- Superseded by ADR-0003 for Three.js runtime modules: do not vendor Three.js
+  locally. Load only pinned jsDelivr URLs for `three@0.185.0`. Remote telemetry,
+  uploaded frames, uploaded model data, and frontend build services remain
+  disallowed.
 - Do not add `package.json`, `node_modules`, Playwright, or a frontend build unless an ADR or spec update compares that dependency against the task requirements. The initial viewer is a Python-packaged static asset generator.
 - Axis convention correction: the spec's illustrative camera axes `right=[1,0,0]`, `up=[0,-1,0]`, `forward=[0,0,1]` are left-handed when stored as basis columns. Implementation must persist semantic `scene_forward_camera` for the dominant gaze direction and a right-handed transform basis with columns `[scene_right_camera, scene_up_camera, scene_back_camera]`, where `scene_back_camera = -scene_forward_camera` after orthogonalization. Tests must prove determinant near `+1` for that transform basis. Viewer copy and labels may still describe the UniGaze line as forward from the streamer toward the monitor.
 
@@ -39,7 +46,9 @@
 - Create `src/chess_gaze/scene_geometry.py` for pseudo-metric back-projection, robust estimators, scene axes, monitor plane construction, coordinate transforms, and ray-plane intersection.
 - Create `src/chess_gaze/scene_artifacts.py` for reading run/frame artifacts and writing scene JSON artifacts.
 - Create `src/chess_gaze/scene_viewer.py` for viewer data generation, static asset copying, and localhost static-server helpers.
-- Create `src/chess_gaze/viewer_assets/` for packaged `index.html`, `scene_viewer.js`, `styles.css`, and vendored Three.js files.
+- Create `src/chess_gaze/viewer_assets/` for packaged `index.html`,
+  `scene_viewer.js`, `styles.css`, and viewer dependency metadata. Historical
+  local-vendor instructions below are superseded by ADR-0003.
 - Modify `src/chess_gaze/artifact_runs.py` to add `scene_dir` and `viewer_dir` to `RunLayout`.
 - Modify `src/chess_gaze/pipeline.py` to call scene artifact and viewer generation before QA summary validation and return scene/viewer paths in `AnalyzeResult`.
 - Modify `src/chess_gaze/qa_summary.py` to validate scene artifacts, count scene frames, include scene/viewer bytes, and keep `QASummary.source_artifacts` consistent with `ArtifactValidationResult.source_artifacts`.
@@ -1076,20 +1085,24 @@ Expected: the model-free `nakamura_1.mp4` contract still passes through integrat
 
 ## Task 7: Vendored Viewer Assets And Package Resources
 
+> Superseded by ADR-0003 and
+> `docs/superpowers/plans/2026-06-26-remote-three-viewer-assets.md`.
+> Do not create or restore `src/chess_gaze/viewer_assets/vendor/` or
+> `vendor_manifest.json`; current viewer package resources use
+> `viewer_dependency_manifest.json` and pinned remote Three.js module URLs.
+
 **Files:**
 - Create: `src/chess_gaze/viewer_assets/index.html`
 - Create: `src/chess_gaze/viewer_assets/scene_viewer.js`
 - Create: `src/chess_gaze/viewer_assets/styles.css`
-- Create: `src/chess_gaze/viewer_assets/vendor/three.module.js`
-- Create: `src/chess_gaze/viewer_assets/vendor/OrbitControls.js`
-- Create: `src/chess_gaze/viewer_assets/vendor/THREE_LICENSE.txt`
-- Create: `src/chess_gaze/viewer_assets/vendor/vendor_manifest.json`
+- Create: `src/chess_gaze/viewer_assets/viewer_dependency_manifest.json`
 - Modify: `pyproject.toml` if resource packaging test requires explicit force include.
 - Create: `tests/test_package_metadata.py`
 
 **Interfaces:**
 - Packaged resources are loaded with `importlib.resources.files("chess_gaze").joinpath("viewer_assets")`.
-- `vendor_manifest.json` records Three.js version, license, repository, tarball URL, npm integrity, copied file paths, and copied file sha256 values.
+- `viewer_dependency_manifest.json` records Three.js version, license,
+  repository, tarball URL, npm integrity, CDN provider, and pinned module URLs.
 
 - [ ] **Step 1: Write failing package resource test**
 
@@ -1100,12 +1113,9 @@ Assert package resources expose:
 - `viewer_assets/index.html`
 - `viewer_assets/scene_viewer.js`
 - `viewer_assets/styles.css`
-- `viewer_assets/vendor/three.module.js`
-- `viewer_assets/vendor/OrbitControls.js`
-- `viewer_assets/vendor/THREE_LICENSE.txt`
-- `viewer_assets/vendor/vendor_manifest.json`
+- `viewer_assets/viewer_dependency_manifest.json`
 
-Also assert `vendor_manifest.json` includes:
+Also assert `viewer_dependency_manifest.json` includes:
 
 - `package_name == "three"`
 - `version == "0.185.0"`
@@ -1123,17 +1133,12 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/test_package_metadata.py -q
 
 Expected before implementation: resource files are missing.
 
-- [ ] **Step 3: Vendor Three.js assets**
+- [ ] **Step 3: Record pinned remote Three.js assets**
 
-Request network approval for npm registry access if required by the sandbox. Run commands one at a time and do not commit `node_modules`.
-
-Use Three.js `0.185.0`, already selected in the approved spec. Copy only:
-
-- `package/build/three.module.js`
-- `package/examples/jsm/controls/OrbitControls.js`
-- `package/LICENSE`
-
-Record copied file sha256 values in `vendor_manifest.json`. Do not rely on a CDN.
+Use Three.js `0.185.0`, selected in the approved spec and superseded by
+ADR-0003 for runtime loading. Record the pinned jsDelivr module URLs and npm
+integrity in `viewer_dependency_manifest.json`. Do not commit `node_modules` or
+vendored Three.js source files.
 
 - [ ] **Step 4: Add static asset shells**
 
@@ -1150,7 +1155,8 @@ Create `index.html`, `scene_viewer.js`, and `styles.css` as packaged templates. 
   - `data-testid="step-next"`
   - `data-testid="hit-count"`
   - `data-testid="frame-status"`
-- import local `./vendor/three.module.js` and `./vendor/OrbitControls.js`;
+- import `three` and `three/addons/controls/OrbitControls.js` through the
+  generated import map;
 - fetch local `./scene-data.json`;
 - render visible fallback status text if `scene-data.json` cannot be loaded.
 
@@ -1195,12 +1201,14 @@ Create `tests/chess_gaze/test_scene_viewer.py` with tests for:
 
 - `build_scene_viewer()` writes `viewer/index.html`.
 - `build_scene_viewer()` writes `viewer/scene-data.json`.
-- `build_scene_viewer()` writes local vendor assets under `viewer/vendor/`.
+- `build_scene_viewer()` does not write local vendor assets under
+  `viewer/vendor/` and removes stale old vendor directories.
 - `scene-data.json` is schema-versioned and strict.
 - `scene-data.json` includes all scene frames, not only valid frames.
 - `scene-data.json` contains exactly one hit identity per valid monitor hit frame and preserves duplicate `u/v` coordinates when different frames hit the same point.
 - generated HTML includes required selectors.
-- generated HTML references local assets only and does not contain `http://`, `https://`, or CDN URLs.
+- generated HTML references only approved pinned remote Three.js module URLs and
+  local app assets.
 - generated CSS uses a light theme and the required semantic color roles.
 - generated JavaScript contains mode names `Instant` and `Accumulated`.
 

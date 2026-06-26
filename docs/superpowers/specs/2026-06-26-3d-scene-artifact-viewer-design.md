@@ -131,14 +131,13 @@ artifacts/output/<video-stem>/runs/<run-id>/
   viewer/
     index.html
     scene-data.json
-    vendor/
-      three.module.js
-      OrbitControls.js
 ```
 
-`viewer/vendor/` may be replaced by a single bundled local viewer script if the
-implementation proves that direct `file://` opening works in Chrome. CDN loading
-is forbidden. Analysis and viewing must remain local and offline after setup.
+ADR-0003 supersedes the original local-vendor constraint for Three.js runtime
+loading. The generated viewer must keep scene data, frames, crops, and model
+artifacts local, but it may load pinned Three.js `0.185.0` ESM modules from
+jsDelivr at page render time. Do not use floating CDN aliases, unpinned versions,
+remote telemetry, or uploaded artifacts.
 
 The CLI should continue printing the run directory. It may also print a second
 line with the viewer path:
@@ -673,7 +672,7 @@ Verified on 2026-06-26 unless noted.
 
 | Candidate | Fit | Source evidence | Package metadata | Decision |
 | --- | --- | --- | --- | --- |
-| Three.js | Strong fit for custom 3D geometry, orbit/pan/zoom, lines, points, planes, transparent ellipsoids, and local browser rendering. | Official docs and source show `OrbitControls` supports orbiting, dollying, and panning around a target, and imports from `three/addons/controls/OrbitControls.js`. Source: `https://threejs.org/docs/`, `https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/jsm/controls/OrbitControls.js`. | `npm view three`: version `0.185.0`, MIT, repo `git+https://github.com/mrdoob/three.js.git`, tarball `https://registry.npmjs.org/three/-/three-0.185.0.tgz`, integrity `sha512-+yRrcRO2iZa8uzvNNl0d7cL4huhgKgBvVJ0njcTe8xFqZ6DMAFZdCKDP91SEAuj25bNAj7k1QQdf+srZywVK6w==`. | Select for viewer. Pin version and copy local assets into generated viewer. No CDN. |
+| Three.js | Strong fit for custom 3D geometry, orbit/pan/zoom, lines, points, planes, transparent ellipsoids, and browser rendering. | Official docs and source show `OrbitControls` supports orbiting, dollying, and panning around a target, and imports from bare specifier `three` in release `r185`. Source: `https://threejs.org/docs/`, `https://raw.githubusercontent.com/mrdoob/three.js/r185/examples/jsm/controls/OrbitControls.js`. | `npm view three@0.185.0`: version `0.185.0`, MIT, repo `git+https://github.com/mrdoob/three.js.git`, tarball `https://registry.npmjs.org/three/-/three-0.185.0.tgz`, integrity `sha512-+yRrcRO2iZa8uzvNNl0d7cL4huhgKgBvVJ0njcTe8xFqZ6DMAFZdCKDP91SEAuj25bNAj7k1QQdf+srZywVK6w==`. jsDelivr serves pinned `three@0.185.0` module URLs with CORS and immutable version headers. | Select for viewer. Pin version and load through the ADR-0003 import map from jsDelivr; do not vendor source files. |
 | Babylon.js | Capable 3D engine but larger and more app/game-engine oriented than this viewer needs. | Official repo: `https://github.com/BabylonJS/Babylon.js`. | `npm view @babylonjs/core`: version `9.14.0`, Apache-2.0, repo `git+https://github.com/BabylonJS/Babylon.js.git`, integrity `sha512-gEXo5KF8wEu+k0bZbNLLfwW2LoIQm6d2ljdOc16p2kLapclVnHc4nZOk8q6l8N4scWD7GYM9WuX3au1namokiw==`. | Reject for first viewer. Keep as fallback only if viewer becomes an editor-like app. |
 | Plotly 3D | Good for quick scientific plots, weak fit for animated head/eye/ray scene with direct object control and precise per-frame interaction. | Official repo: `https://github.com/plotly/plotly.js`. | `npm view plotly.js-dist-min`: version `3.6.0`, MIT, repo `git+https://github.com/plotly/plotly.js.git`, integrity `sha512-VR9jO2YdcEwbzVwtRyPE0eAieXFv1x5q6M9nnIgUS8FggahPrjiID6kzpnTYABwLX0gZkgEc0zxS6gQgVmgHzw==`. | Reject. It is a plotting library, not the right scene runtime. |
 | Custom Canvas/WebGL | Could avoid JS dependency, but would force custom camera controls, 3D math, hit testing, and rendering edge cases. | No external source needed. | No package. | Reject. Reimplementing a 3D engine is not the quality path. |
@@ -868,10 +867,10 @@ The implementation must not migrate or rewrite old run directories in place.
 | Monocular video cannot prove real metric depth. | Label coordinates `pseudo_m`, persist assumptions, and avoid calibrated claims. |
 | UniGaze direction sign may be misinterpreted. | Lock conversion tests against existing overlay convention and inspect `nakamura_1.mp4` before viewer work builds on it. |
 | Wrong-face or missed-eye frames distort robust estimates. | Use finite gates, MAD screening, geometric median, angular RANSAC, and persist inlier counts. |
-| Browser `file://` blocks module/JSON loading. | Use local assets, avoid CDN, and add `chess-gaze view <run-dir>` if needed. |
+| Browser `file://` blocks local module/JSON loading. | Embed scene data and app source in `index.html`; use an import map for pinned remote Three.js modules. |
 | Viewer silently drops points for performance. | Test exact point counts and forbid downsampling/merging. |
 | Scene artifacts drift from `frames.jsonl`. | Build scene artifacts from validated frame records and require count/index equality in QA summary. |
-| Additional frontend tooling bloats the Python repo. | Generate viewer from Python templates and pinned local vendor assets; avoid a full frontend stack in this step. |
+| Additional frontend tooling bloats the Python repo. | Generate viewer from Python templates and pinned remote dependency metadata; avoid a full frontend stack in this step. |
 
 ## Closeout Requirements For Implementation
 
