@@ -21,15 +21,44 @@ from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 
 IMAGE_WIDTH_PX = 200
 IMAGE_HEIGHT_PX = 100
+MEDIAPIPE_ANATOMICAL_LEFT_EYE_CONTOUR_INDICES = (
+    263,
+    387,
+    385,
+    362,
+    380,
+    373,
+    374,
+    386,
+)
+MEDIAPIPE_ANATOMICAL_RIGHT_EYE_CONTOUR_INDICES = (
+    33,
+    160,
+    158,
+    133,
+    153,
+    144,
+    145,
+    159,
+)
+MEDIAPIPE_ANATOMICAL_LEFT_IRIS_INDICES = (473, 474, 475, 476, 477)
+MEDIAPIPE_ANATOMICAL_RIGHT_IRIS_INDICES = (468, 469, 470, 471, 472)
 LANDMARK_COUNT = (
     max(
-        *LEFT_EYE_CONTOUR_INDICES,
-        *RIGHT_EYE_CONTOUR_INDICES,
-        *LEFT_IRIS_INDICES,
-        *RIGHT_IRIS_INDICES,
+        *MEDIAPIPE_ANATOMICAL_LEFT_EYE_CONTOUR_INDICES,
+        *MEDIAPIPE_ANATOMICAL_RIGHT_EYE_CONTOUR_INDICES,
+        *MEDIAPIPE_ANATOMICAL_LEFT_IRIS_INDICES,
+        *MEDIAPIPE_ANATOMICAL_RIGHT_IRIS_INDICES,
     )
     + 1
 )
+
+
+def test_eye_landmark_constants_follow_streamer_anatomy() -> None:
+    assert LEFT_EYE_CONTOUR_INDICES == MEDIAPIPE_ANATOMICAL_LEFT_EYE_CONTOUR_INDICES
+    assert RIGHT_EYE_CONTOUR_INDICES == MEDIAPIPE_ANATOMICAL_RIGHT_EYE_CONTOUR_INDICES
+    assert LEFT_IRIS_INDICES == MEDIAPIPE_ANATOMICAL_LEFT_IRIS_INDICES
+    assert RIGHT_IRIS_INDICES == MEDIAPIPE_ANATOMICAL_RIGHT_IRIS_INDICES
 
 
 def test_observe_eyes_records_independent_eye_and_iris_measurements(
@@ -38,16 +67,16 @@ def test_observe_eyes_records_independent_eye_and_iris_measurements(
     run_layout = make_run_layout(tmp_path)
     face = make_face_candidate(
         left_eye=EyeFixture(
-            bbox=(40.0, 30.0, 80.0, 50.0),
-            iris_center=(57.0, 40.0),
-            iris_radius_x=6.0,
-            iris_radius_y=5.0,
-        ),
-        right_eye=EyeFixture(
             bbox=(125.0, 32.0, 170.0, 56.0),
             iris_center=(149.0, 42.0),
             iris_radius_x=9.0,
             iris_radius_y=6.0,
+        ),
+        right_eye=EyeFixture(
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
         ),
     )
     rgb_frame = gradient_rgb_frame()
@@ -69,30 +98,30 @@ def test_observe_eyes_records_independent_eye_and_iris_measurements(
 
     assert observation.left.bounding_box_image_px is not None
     assert observation.right.bounding_box_image_px is not None
-    assert observation.left.bounding_box_image_px.x_min == pytest.approx(40.0)
-    assert observation.left.bounding_box_image_px.y_min == pytest.approx(30.0)
-    assert observation.left.bounding_box_image_px.x_max == pytest.approx(80.0)
-    assert observation.left.bounding_box_image_px.y_max == pytest.approx(50.0)
-    assert observation.right.bounding_box_image_px.x_min == pytest.approx(125.0)
-    assert observation.right.bounding_box_image_px.y_max == pytest.approx(56.0)
+    assert observation.left.bounding_box_image_px.x_min == pytest.approx(125.0)
+    assert observation.left.bounding_box_image_px.y_min == pytest.approx(32.0)
+    assert observation.left.bounding_box_image_px.x_max == pytest.approx(170.0)
+    assert observation.left.bounding_box_image_px.y_max == pytest.approx(56.0)
+    assert observation.right.bounding_box_image_px.x_min == pytest.approx(40.0)
+    assert observation.right.bounding_box_image_px.y_max == pytest.approx(50.0)
 
     assert observation.left.iris_center_image_px is not None
     assert observation.right.iris_center_image_px is not None
-    assert observation.left.iris_center_image_px.x == pytest.approx(57.0)
-    assert observation.left.iris_center_image_px.y == pytest.approx(40.0)
-    assert observation.right.iris_center_image_px.x == pytest.approx(149.0)
-    assert observation.right.iris_center_image_px.y == pytest.approx(42.0)
-    assert observation.left.iris_diameter_px == pytest.approx(12.0)
-    assert observation.right.iris_diameter_px == pytest.approx(18.0)
+    assert observation.left.iris_center_image_px.x == pytest.approx(149.0)
+    assert observation.left.iris_center_image_px.y == pytest.approx(42.0)
+    assert observation.right.iris_center_image_px.x == pytest.approx(57.0)
+    assert observation.right.iris_center_image_px.y == pytest.approx(40.0)
+    assert observation.left.iris_diameter_px == pytest.approx(18.0)
+    assert observation.right.iris_diameter_px == pytest.approx(12.0)
 
     assert observation.left.normalized_iris_offset_xy is not None
     assert observation.right.normalized_iris_offset_xy is not None
-    assert observation.left.normalized_iris_offset_xy == pytest.approx((-0.15, 0.0))
-    assert observation.right.normalized_iris_offset_xy == pytest.approx(
+    assert observation.left.normalized_iris_offset_xy == pytest.approx(
         (1.0 / 15.0, -1.0 / 6.0)
     )
-    assert observation.left.eye_open_metric == pytest.approx(0.5)
-    assert observation.right.eye_open_metric == pytest.approx(24.0 / 45.0)
+    assert observation.right.normalized_iris_offset_xy == pytest.approx((-0.15, 0.0))
+    assert observation.left.eye_open_metric == pytest.approx(24.0 / 45.0)
+    assert observation.right.eye_open_metric == pytest.approx(0.5)
     assert observation.left.occlusion == "none"
     assert observation.right.occlusion == "none"
     assert (
@@ -110,10 +139,10 @@ def test_one_missing_eye_does_not_invalidate_the_other(tmp_path: Path) -> None:
     face = make_face_candidate(
         left_eye=EyeFixture.degenerate(),
         right_eye=EyeFixture(
-            bbox=(125.0, 32.0, 170.0, 56.0),
-            iris_center=(149.0, 42.0),
-            iris_radius_x=9.0,
-            iris_radius_y=6.0,
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
         ),
     )
 
@@ -140,16 +169,16 @@ def test_missing_iris_keeps_eye_contour_with_explicit_reason(
     run_layout = make_run_layout(tmp_path)
     face = make_face_candidate(
         left_eye=EyeFixture(
-            bbox=(40.0, 30.0, 80.0, 50.0),
+            bbox=(125.0, 32.0, 170.0, 56.0),
             iris_center=(0.0, 0.0),
             iris_radius_x=0.0,
             iris_radius_y=0.0,
         ),
         right_eye=EyeFixture(
-            bbox=(125.0, 32.0, 170.0, 56.0),
-            iris_center=(149.0, 42.0),
-            iris_radius_x=9.0,
-            iris_radius_y=6.0,
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
         ),
     )
 
@@ -178,16 +207,16 @@ def test_crop_transform_maps_crop_coordinates_back_to_image_px(
     run_layout = make_run_layout(tmp_path)
     face = make_face_candidate(
         left_eye=EyeFixture(
-            bbox=(40.0, 30.0, 80.0, 50.0),
-            iris_center=(57.0, 40.0),
-            iris_radius_x=6.0,
-            iris_radius_y=5.0,
-        ),
-        right_eye=EyeFixture(
             bbox=(125.0, 32.0, 170.0, 56.0),
             iris_center=(149.0, 42.0),
             iris_radius_x=9.0,
             iris_radius_y=6.0,
+        ),
+        right_eye=EyeFixture(
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
         ),
     )
 
@@ -214,7 +243,7 @@ def test_crop_transform_maps_crop_coordinates_back_to_image_px(
     assert mapped_origin == pytest.approx(
         (left.crop_bbox_image_px.x_min, left.crop_bbox_image_px.y_min)
     )
-    assert mapped_iris == pytest.approx((57.0, 40.0))
+    assert mapped_iris == pytest.approx((149.0, 42.0))
 
 
 def test_closed_or_insufficient_landmarks_produce_explicit_reason_codes(
@@ -223,15 +252,16 @@ def test_closed_or_insufficient_landmarks_produce_explicit_reason_codes(
     run_layout = make_run_layout(tmp_path)
     face = make_face_candidate(
         left_eye=EyeFixture(
-            bbox=(40.0, 39.7, 80.0, 40.3),
-            iris_center=(57.0, 40.0),
-            iris_radius_x=6.0,
+            bbox=(125.0, 41.7, 170.0, 42.3),
+            iris_center=(149.0, 42.0),
+            iris_radius_x=9.0,
             iris_radius_y=0.2,
         ),
         right_eye=EyeFixture.insufficient_contour(
-            iris_center=(149.0, 42.0),
-            iris_radius_x=9.0,
-            iris_radius_y=6.0,
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
         ),
     )
 
@@ -280,12 +310,13 @@ class EyeFixture:
     def insufficient_contour(
         cls,
         *,
+        bbox: tuple[float, float, float, float],
         iris_center: tuple[float, float],
         iris_radius_x: float,
         iris_radius_y: float,
     ) -> EyeFixture:
         return cls(
-            bbox=(125.0, 32.0, 170.0, 56.0),
+            bbox=bbox,
             iris_center=iris_center,
             iris_radius_x=iris_radius_x,
             iris_radius_y=iris_radius_y,
@@ -322,15 +353,15 @@ def make_face_candidate(
     set_eye_landmarks(
         landmark_px,
         landmark_norm,
-        eye_indices=LEFT_EYE_CONTOUR_INDICES,
-        iris_indices=LEFT_IRIS_INDICES,
+        eye_indices=MEDIAPIPE_ANATOMICAL_LEFT_EYE_CONTOUR_INDICES,
+        iris_indices=MEDIAPIPE_ANATOMICAL_LEFT_IRIS_INDICES,
         fixture=left_eye,
     )
     set_eye_landmarks(
         landmark_px,
         landmark_norm,
-        eye_indices=RIGHT_EYE_CONTOUR_INDICES,
-        iris_indices=RIGHT_IRIS_INDICES,
+        eye_indices=MEDIAPIPE_ANATOMICAL_RIGHT_EYE_CONTOUR_INDICES,
+        iris_indices=MEDIAPIPE_ANATOMICAL_RIGHT_IRIS_INDICES,
         fixture=right_eye,
     )
 

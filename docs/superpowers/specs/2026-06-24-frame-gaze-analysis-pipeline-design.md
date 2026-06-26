@@ -524,19 +524,20 @@ No metric 3D translation may be treated as ground truth without calibrated
 camera intrinsics.
 
 Initial PnP correspondences must be explicit and stored in calibration metadata.
-Use these MediaPipe landmark indices unless implementation evidence proves a
-better set:
+Left/right names are the streamer's anatomical sides. For an unmirrored frontal
+webcam image, anatomical left appears on image-right. Use these MediaPipe
+landmark indices unless implementation evidence proves a better set:
 
 | Name | MediaPipe index | Role |
 | --- | ---: | --- |
 | `nose_tip` | 1 | central forward anchor |
 | `chin` | 152 | lower face anchor |
-| `left_eye_outer` | 33 | left canthus anchor |
-| `right_eye_outer` | 263 | right canthus anchor |
-| `left_eye_inner` | 133 | left inner eye anchor |
-| `right_eye_inner` | 362 | right inner eye anchor |
-| `left_mouth_corner` | 61 | lower lateral anchor |
-| `right_mouth_corner` | 291 | lower lateral anchor |
+| `left_eye_outer` | 263 | left canthus anchor |
+| `right_eye_outer` | 33 | right canthus anchor |
+| `left_eye_inner` | 362 | left inner eye anchor |
+| `right_eye_inner` | 133 | right inner eye anchor |
+| `left_mouth_corner` | 291 | lower lateral anchor |
+| `right_mouth_corner` | 61 | lower lateral anchor |
 
 Canonical 3D coordinates for these points must not be hard-coded as anonymous
 numbers. The implementation must either:
@@ -749,12 +750,12 @@ replace placeholder arrays with typed structures and invariants.
     "pnp_landmark_indices": {
       "nose_tip": 1,
       "chin": 152,
-      "left_eye_outer": 33,
-      "right_eye_outer": 263,
-      "left_eye_inner": 133,
-      "right_eye_inner": 362,
-      "left_mouth_corner": 61,
-      "right_mouth_corner": 291
+      "left_eye_outer": 263,
+      "right_eye_outer": 33,
+      "left_eye_inner": 362,
+      "right_eye_inner": 133,
+      "left_mouth_corner": 291,
+      "right_mouth_corner": 61
     },
     "canonical_points_source": "committed_named_resource_or_mediapipe_transform",
     "pnp_method": "solvepnp_iterative",

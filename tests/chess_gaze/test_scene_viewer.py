@@ -139,8 +139,8 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
             ],
             reason_invalid=None,
         ),
-        left_eye=_eye(900.0 + eye_index, 540.0),
-        right_eye=_eye(1020.0 + eye_index, 540.0),
+        left_eye=_eye(1020.0 + eye_index, 540.0),
+        right_eye=_eye(900.0 + eye_index, 540.0),
         head_pose=HeadPoseRecord(
             valid=True,
             yaw_radians=0.0,
@@ -485,6 +485,21 @@ def test_generated_js_contains_mode_names(
 
     assert "Instant" in js
     assert "Accumulated" in js
+
+
+def test_generated_viewer_uses_front_camera_and_anatomical_axis_labels(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "camera.position.set(0, 0.28, -1.6)" in js
+    assert "controls.target.set(0, 0, 0)" in js
+    assert "X streamer right" in html
+    assert "Y scene up" in html
+    assert "Z streamer back" in html
+    assert "Z scene depth" not in html
 
 
 def test_generated_index_import_map_resolves_pinned_three_modules(

@@ -142,8 +142,8 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
             ],
             reason_invalid=None,
         ),
-        left_eye=_eye(900.0 + eye_index, 540.0),
-        right_eye=_eye(1020.0 + eye_index, 540.0),
+        left_eye=_eye(1020.0 + eye_index, 540.0),
+        right_eye=_eye(900.0 + eye_index, 540.0),
         head_pose=HeadPoseRecord(
             valid=True,
             yaw_radians=0.0,
@@ -223,6 +223,7 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     assert manifest.source_artifacts.frame_records == "records/frames.jsonl"
     assert manifest.source_artifacts.scene_frame_records == "records/scene_frames.jsonl"
     assert manifest.source_artifacts.scene_summary == "scene/scene_summary.json"
+    assert manifest.source_artifacts.viewer == "viewer/index.html"
     assert manifest.assumptions
     assert {
         "DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M",
@@ -258,6 +259,12 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
         manifest.robust_estimators.main_unigaze_direction.angular_residual_percentiles_radians
     )
     assert manifest.robust_estimators.main_unigaze_direction.uncertainty == "medium"
+    assert (
+        manifest.robust_estimators.scene_orientation.method
+        == "anatomical_frontal_webcam_right_up_back_axes"
+    )
+    assert manifest.robust_estimators.scene_orientation.candidate_frame_count == 0
+    assert manifest.robust_estimators.scene_orientation.fallbacks == []
     assert (
         manifest.monitor_plane.distance_source == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
     )
@@ -351,6 +358,168 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
     assert viewer_data.monitor_plane == result.manifest.monitor_plane
     assert viewer_data.axis_basis == result.manifest.axis_basis
     assert viewer_data.summary.valid_monitor_hit_frames == 6
+
+
+def test_scene_frame_direction_maps_positive_pitch_to_scene_up(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    layout = _layout(run_dir)
+    layout.records_dir.mkdir(parents=True)
+    video = VideoManifest(
+        source_path="artifacts/input/synthetic_upward_gaze_source.mp4",
+        source_sha256="b" * 64,
+        frame_width=1920,
+        frame_height=1080,
+        frame_count_decoded=7,
+    )
+    run_manifest = RunManifest(
+        run_id="20260626T123000Z-scene-up",
+        created_at_utc=datetime(2026, 6, 26, 12, 30, tzinfo=UTC).isoformat(),
+        input_path=video.source_path,
+        video=video,
+    )
+    neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
+    upward_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.20)
+    frames = [
+        _frame(index).model_copy(
+            update={
+                "appearance_gaze": neutral_gaze,
+                "geometric_gaze": neutral_gaze,
+                "recommended_gaze": neutral_gaze,
+            }
+        )
+        for index in range(6)
+    ]
+    frames.append(
+        _frame(6).model_copy(
+            update={
+                "appearance_gaze": upward_gaze,
+                "geometric_gaze": upward_gaze,
+                "recommended_gaze": upward_gaze,
+            }
+        )
+    )
+    (run_dir / "run_manifest.json").write_text(
+        run_manifest.model_dump_json(), encoding="utf-8"
+    )
+    (run_dir / "video_manifest.json").write_text(
+        video.model_dump_json(), encoding="utf-8"
+    )
+    (layout.records_dir / "frames.jsonl").write_text(
+        "".join(frame.model_dump_json() + "\n" for frame in frames),
+        encoding="utf-8",
+    )
+
+    result = build_scene_artifacts(layout)
+    records = load_scene_frames(result.paths.scene_frames_jsonl_path)
+    upward_record = records[6]
+
+    assert upward_record.unigaze_ray.valid is True
+    assert upward_record.unigaze_ray.direction_camera is not None
+    assert upward_record.unigaze_ray.direction_scene is not None
+    assert upward_record.unigaze_ray.direction_camera.y < 0.0
+    assert upward_record.unigaze_ray.direction_camera.z < 0.0
+    assert upward_record.unigaze_ray.direction_scene.y > 0.0
+    assert upward_record.unigaze_ray.direction_scene.z < 0.0
+
+
+def test_scene_frame_direction_maps_image_right_to_streamer_left(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    layout = _layout(run_dir)
+    layout.records_dir.mkdir(parents=True)
+    video = VideoManifest(
+        source_path="artifacts/input/synthetic_left_right_gaze_source.mp4",
+        source_sha256="c" * 64,
+        frame_width=1920,
+        frame_height=1080,
+        frame_count_decoded=7,
+    )
+    run_manifest = RunManifest(
+        run_id="20260626T124000Z-scene-left-right",
+        created_at_utc=datetime(2026, 6, 26, 12, 40, tzinfo=UTC).isoformat(),
+        input_path=video.source_path,
+        video=video,
+    )
+    neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
+    image_right_gaze = _gaze(valid=True, yaw_radians=0.20, pitch_radians=0.0)
+    frames = [
+        _frame(index).model_copy(
+            update={
+                "appearance_gaze": neutral_gaze,
+                "geometric_gaze": neutral_gaze,
+                "recommended_gaze": neutral_gaze,
+            }
+        )
+        for index in range(6)
+    ]
+    frames.append(
+        _frame(6).model_copy(
+            update={
+                "appearance_gaze": image_right_gaze,
+                "geometric_gaze": image_right_gaze,
+                "recommended_gaze": image_right_gaze,
+            }
+        )
+    )
+    (run_dir / "run_manifest.json").write_text(
+        run_manifest.model_dump_json(), encoding="utf-8"
+    )
+    (run_dir / "video_manifest.json").write_text(
+        video.model_dump_json(), encoding="utf-8"
+    )
+    (layout.records_dir / "frames.jsonl").write_text(
+        "".join(frame.model_dump_json() + "\n" for frame in frames),
+        encoding="utf-8",
+    )
+
+    result = build_scene_artifacts(layout)
+    records = load_scene_frames(result.paths.scene_frames_jsonl_path)
+    image_right_record = records[6]
+
+    assert image_right_record.unigaze_ray.valid is True
+    assert image_right_record.unigaze_ray.direction_camera is not None
+    assert image_right_record.unigaze_ray.direction_scene is not None
+    assert image_right_record.unigaze_ray.direction_camera.x > 0.0
+    assert image_right_record.unigaze_ray.direction_scene.x < 0.0
+    assert image_right_record.unigaze_ray.direction_scene.z < 0.0
+
+
+def test_scene_frame_places_eyes_on_front_side_of_head(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+
+    result = build_scene_artifacts(layout)
+    record = result.frames[0]
+
+    assert record.eye_midpoint.scene_point_m is not None
+    assert record.head.ellipsoid_center_scene_m is not None
+    assert record.head.ellipsoid_center_scene_m.y < record.eye_midpoint.scene_point_m.y
+    assert record.eye_midpoint.scene_point_m.z < record.head.ellipsoid_center_scene_m.z
+
+
+def test_scene_frame_preserves_anatomical_eye_sides_for_frontal_webcam(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+
+    result = build_scene_artifacts(layout)
+    record = result.frames[0]
+
+    assert record.left_eye.image_px is not None
+    assert record.right_eye.image_px is not None
+    assert record.left_eye.camera_point_m is not None
+    assert record.right_eye.camera_point_m is not None
+    assert record.left_eye.scene_point_m is not None
+    assert record.right_eye.scene_point_m is not None
+    assert record.eye_midpoint.scene_point_m is not None
+    assert record.left_eye.image_px.x > record.right_eye.image_px.x
+    assert record.left_eye.camera_point_m.x > record.right_eye.camera_point_m.x
+    assert record.left_eye.scene_point_m.x < record.eye_midpoint.scene_point_m.x
+    assert record.right_eye.scene_point_m.x > record.eye_midpoint.scene_point_m.x
 
 
 def test_build_viewer_scene_data_uses_result_manifest_assumptions(

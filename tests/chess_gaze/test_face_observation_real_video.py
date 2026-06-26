@@ -33,6 +33,15 @@ MIX_2_REPORTED_VISIBLE_FACE_REGIONS = {
     524: (880.0, 170.0, 1040.0, 330.0),
     532: (790.0, 160.0, 970.0, 330.0),
 }
+NAKAMURA_OVEREXPANDED_FULL_FRAME_REGIONS = {
+    1429: (295.0, 600.0, 500.0, 825.0),
+    1430: (295.0, 600.0, 500.0, 825.0),
+    1685: (310.0, 600.0, 535.0, 850.0),
+    1691: (310.0, 610.0, 535.0, 865.0),
+    1692: (310.0, 610.0, 535.0, 865.0),
+    1693: (310.0, 610.0, 535.0, 865.0),
+    1695: (310.0, 620.0, 535.0, 875.0),
+}
 
 
 def test_mediapipe_face_observer_matches_real_video_evidence() -> None:
@@ -220,6 +229,86 @@ def test_mediapipe_face_observer_recovers_mix2_reported_visible_faces() -> None:
             "f000000510": (920.8, 200.6, 1009.0, 301.6),
             "f000000524": (920.5, 201.8, 1008.3, 301.5),
             "f000000532": (831.3, 183.6, 937.4, 310.3),
+        }
+    finally:
+        observer.close()
+
+
+def test_mediapipe_observer_rejects_nakamura_overexpanded_faces() -> None:
+    video_path = REPO_ROOT / "artifacts/input/nakamura_1.mp4"
+    if not video_path.is_file():
+        pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
+
+    registry = load_model_registry(MODEL_REGISTRY_PATH)
+    model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
+    model_path = MODELS_ROOT / model_entry.expected_relative_path
+    if not model_path.is_file():
+        pytest.skip(
+            "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
+            f"{model_path}"
+        )
+    assert model_entry.checksum_sha256 is not None
+    assert sha256_file(model_path) == model_entry.checksum_sha256
+
+    observer = MediaPipeFaceObserver(
+        model_asset_path=model_path,
+        calibration=default_calibration(),
+    )
+    try:
+        sampled_frames = _sample_frames(
+            video_path,
+            tuple(NAKAMURA_OVEREXPANDED_FULL_FRAME_REGIONS),
+        )
+        recovered_boxes: dict[str, tuple[float, float, float, float]] = {}
+        for frame in sampled_frames:
+            observation = observer.observe(frame.rgb, frame_id=frame.frame_id)
+
+            assert observation.selection.present, (
+                f"{frame.frame_id} should keep the visible webcam face"
+            )
+            assert observation.selection.primary_candidate_id is not None
+            candidate = next(
+                item
+                for item in observation.selection.candidates
+                if item.candidate_id == observation.selection.primary_candidate_id
+            )
+            bbox = candidate.bounding_box_image_px
+            width = bbox.x_max - bbox.x_min
+            height = bbox.y_max - bbox.y_min
+            center_x = (bbox.x_min + bbox.x_max) / 2.0
+            center_y = (bbox.y_min + bbox.y_max) / 2.0
+            x_min, y_min, x_max, y_max = NAKAMURA_OVEREXPANDED_FULL_FRAME_REGIONS[
+                frame.frame_index
+            ]
+            assert x_min <= center_x <= x_max, (
+                f"{frame.frame_id} face center x {center_x:.1f} outside "
+                f"expected compact visible-face region {x_min:.1f}..{x_max:.1f}"
+            )
+            assert y_min <= center_y <= y_max, (
+                f"{frame.frame_id} face center y {center_y:.1f} outside "
+                f"expected compact visible-face region {y_min:.1f}..{y_max:.1f}"
+            )
+            assert width <= 230.0, (
+                f"{frame.frame_id} selected face width {width:.1f} is overexpanded"
+            )
+            assert height <= 255.0, (
+                f"{frame.frame_id} selected face height {height:.1f} is overexpanded"
+            )
+            recovered_boxes[frame.frame_id] = (
+                round(bbox.x_min, 1),
+                round(bbox.y_min, 1),
+                round(bbox.x_max, 1),
+                round(bbox.y_max, 1),
+            )
+
+        assert recovered_boxes == {
+            "f000001429": (308.0, 613.4, 480.0, 810.1),
+            "f000001430": (308.3, 612.7, 481.0, 811.4),
+            "f000001685": (324.5, 616.7, 514.5, 830.2),
+            "f000001691": (327.1, 629.8, 516.6, 848.9),
+            "f000001692": (327.3, 633.0, 517.1, 851.0),
+            "f000001693": (327.9, 634.5, 517.2, 854.2),
+            "f000001695": (329.4, 640.4, 518.1, 858.0),
         }
     finally:
         observer.close()

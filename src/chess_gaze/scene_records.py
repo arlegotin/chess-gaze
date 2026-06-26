@@ -750,7 +750,10 @@ class SceneDirectionEstimatorRecord(SceneSchemaModel):
 
 
 class SceneOrientationEstimatorRecord(SceneSchemaModel):
-    method: Literal["eye_pair_right_and_head_up_with_camera_axis_fallbacks"]
+    method: Literal[
+        "camera_stable_right_up_back_axes",
+        "anatomical_frontal_webcam_right_up_back_axes",
+    ]
     candidate_frame_count: int
     fallbacks: list[str]
 

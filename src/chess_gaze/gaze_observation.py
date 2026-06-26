@@ -166,13 +166,15 @@ def normalize_face_crop(
     )
 
 
-def compute_per_eye_geometric_gaze(eye: Any, head_pose: Any) -> GazeAngles:
+def compute_per_eye_geometric_gaze(
+    eye: Any, head_pose: Any, *, missing_reason: ErrorCode
+) -> GazeAngles:
     if not bool(getattr(eye, "present", False)):
         return GazeAngles(
             valid=False,
             yaw_radians=None,
             pitch_radians=None,
-            reason_invalid=_eye_invalid_reason(eye),
+            reason_invalid=missing_reason,
         )
     if not bool(getattr(head_pose, "valid", False)):
         return GazeAngles(
@@ -188,7 +190,7 @@ def compute_per_eye_geometric_gaze(eye: Any, head_pose: Any) -> GazeAngles:
             valid=False,
             yaw_radians=None,
             pitch_radians=None,
-            reason_invalid=_eye_invalid_reason(eye),
+            reason_invalid=missing_reason,
         )
 
     head_yaw = float(head_pose.yaw_radians)
@@ -349,13 +351,6 @@ def _first_invalid_reason(
         if gaze.reason_invalid is not None:
             return gaze.reason_invalid
     return ErrorCode.GAZE_MODEL_FAILED
-
-
-def _eye_invalid_reason(eye: Any) -> ErrorCode:
-    side = str(getattr(eye, "side", "")).lower()
-    if side == "right":
-        return ErrorCode.RIGHT_EYE_NOT_FOUND
-    return ErrorCode.LEFT_EYE_NOT_FOUND
 
 
 def _eye_offset_xy(eye: Any) -> tuple[float | None, float | None]:

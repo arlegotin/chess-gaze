@@ -6,6 +6,12 @@ from typing import Any
 
 import numpy as np
 import pytest
+from face_observation_fakes import (
+    build_fake_mediapipe,
+    build_sequence_fake_mediapipe,
+    empty_detection_result,
+    fake_detection_result,
+)
 
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import ErrorCode
@@ -392,17 +398,17 @@ def test_mediapipe_observer_recovers_full_frame_miss_from_right_half_retry(
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[],
                 face_blendshapes=[],
                 facial_transformation_matrixes=[],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[],
                 face_blendshapes=[],
                 facial_transformation_matrixes=[],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.20, y=0.30, z=0.0),
@@ -414,11 +420,11 @@ def test_mediapipe_observer_recovers_full_frame_miss_from_right_half_retry(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -474,7 +480,7 @@ def test_mediapipe_observer_prefers_focused_right_half_over_ambiguous_full_frame
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.76, y=0.29, z=0.0),
@@ -494,12 +500,12 @@ def test_mediapipe_observer_prefers_focused_right_half_over_ambiguous_full_frame
                     np.eye(4, dtype=np.float64) * 2.0,
                 ],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[],
                 face_blendshapes=[],
                 facial_transformation_matrixes=[],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.54, y=0.29, z=0.0),
@@ -511,11 +517,11 @@ def test_mediapipe_observer_prefers_focused_right_half_over_ambiguous_full_frame
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -564,7 +570,7 @@ def test_mediapipe_observer_prefers_focused_left_half_over_low_partial_full_fram
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.21, y=0.69, z=0.0),
@@ -576,7 +582,7 @@ def test_mediapipe_observer_prefers_focused_left_half_over_low_partial_full_fram
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.39, y=0.62, z=0.0),
@@ -588,16 +594,16 @@ def test_mediapipe_observer_prefers_focused_left_half_over_low_partial_full_fram
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 4.0],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[],
                 face_blendshapes=[],
                 facial_transformation_matrixes=[],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -642,7 +648,7 @@ def test_mediapipe_observer_scores_all_focused_half_frame_candidates(
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.10, y=0.20, z=0.0),
@@ -662,7 +668,7 @@ def test_mediapipe_observer_scores_all_focused_half_frame_candidates(
                     np.eye(4, dtype=np.float64) * 2.0,
                 ],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.21, y=0.20, z=0.0),
@@ -674,7 +680,7 @@ def test_mediapipe_observer_scores_all_focused_half_frame_candidates(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.54, y=0.29, z=0.0),
@@ -686,11 +692,11 @@ def test_mediapipe_observer_scores_all_focused_half_frame_candidates(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 4.0],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -732,8 +738,8 @@ def test_mediapipe_observer_prefers_tighter_top_left_face_over_wrong_half_candid
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.50, y=0.43, z=0.0),
@@ -753,8 +759,8 @@ def test_mediapipe_observer_prefers_tighter_top_left_face_over_wrong_half_candid
                     np.eye(4, dtype=np.float64) * 2.0,
                 ],
             ),
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.50, y=0.43, z=0.0),
@@ -766,10 +772,10 @@ def test_mediapipe_observer_prefers_tighter_top_left_face_over_wrong_half_candid
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -803,7 +809,7 @@ def test_mediapipe_observer_prefers_focused_left_face_over_tall_full_false_posit
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.295, y=0.10, z=0.0),
@@ -815,7 +821,7 @@ def test_mediapipe_observer_prefers_focused_left_face_over_tall_full_false_posit
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.45, y=0.217, z=0.0),
@@ -827,8 +833,8 @@ def test_mediapipe_observer_prefers_focused_left_face_over_tall_full_false_posit
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.45, y=0.433, z=0.0),
@@ -840,10 +846,10 @@ def test_mediapipe_observer_prefers_focused_left_face_over_tall_full_false_posit
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -877,11 +883,11 @@ def test_mediapipe_observer_recovers_small_face_from_right_top_region(
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.523, y=0.638, z=0.0),
@@ -893,9 +899,9 @@ def test_mediapipe_observer_recovers_small_face_from_right_top_region(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -929,14 +935,14 @@ def test_mediapipe_observer_recovers_small_face_from_right_upper_middle_region(
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.435, y=0.342, z=0.0),
@@ -985,8 +991,8 @@ def test_mediapipe_observer_scans_focused_regions_before_accepting_half_frame_fa
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.50, y=0.43, z=0.0),
@@ -998,8 +1004,8 @@ def test_mediapipe_observer_scans_focused_regions_before_accepting_half_frame_fa
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
             ),
-            _empty_detection_result(),
-            _fake_detection_result(
+            empty_detection_result(),
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.50, y=0.43, z=0.0),
@@ -1011,10 +1017,10 @@ def test_mediapipe_observer_scans_focused_regions_before_accepting_half_frame_fa
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -1054,7 +1060,7 @@ def test_mediapipe_observer_keeps_large_full_face_without_focused_consensus(
     fake_mediapipe = build_sequence_fake_mediapipe(
         captured,
         results=[
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.30, y=0.18, z=0.0),
@@ -1066,7 +1072,7 @@ def test_mediapipe_observer_keeps_large_full_face_without_focused_consensus(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
             ),
-            _fake_detection_result(
+            fake_detection_result(
                 face_landmarks=[
                     [
                         SimpleNamespace(x=0.10, y=0.20, z=0.0),
@@ -1078,12 +1084,12 @@ def test_mediapipe_observer_keeps_large_full_face_without_focused_consensus(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
-            _empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -1150,8 +1156,8 @@ def test_mediapipe_observer_rejects_candidates_clipped_by_focused_region_seams(
     category_name: str,
 ) -> None:
     captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
-    results = [_empty_detection_result() for _index in range(8)]
-    results[result_index] = _fake_detection_result(
+    results = [empty_detection_result() for _index in range(8)]
+    results[result_index] = fake_detection_result(
         face_landmarks=[landmarks],
         face_blendshapes=[[SimpleNamespace(category_name=category_name, score=0.20)]],
         facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
@@ -1178,129 +1184,3 @@ def test_mediapipe_observer_rejects_candidates_clipped_by_focused_region_seams(
 
     assert observation.selection.present is False
     assert observation.selection.reason_invalid is ErrorCode.FACE_NOT_FOUND
-
-
-def build_fake_mediapipe(
-    captured: dict[str, Any],
-    *,
-    face_landmarks: list[list[SimpleNamespace]],
-    face_blendshapes: list[list[SimpleNamespace]],
-    facial_transformation_matrixes: list[np.ndarray],
-) -> SimpleNamespace:
-    class FakeBaseOptions:
-        def __init__(self, *, model_asset_path: str) -> None:
-            self.model_asset_path = model_asset_path
-
-    class FakeFaceLandmarkerOptions:
-        def __init__(self, **kwargs: object) -> None:
-            self.__dict__.update(kwargs)
-
-    class FakeFaceLandmarker:
-        @classmethod
-        def create_from_options(
-            cls, options: FakeFaceLandmarkerOptions
-        ) -> FakeFaceLandmarker:
-            captured["options"] = options
-            return cls()
-
-        def detect(self, image: Any) -> SimpleNamespace:
-            captured["image"] = image
-            return SimpleNamespace(
-                face_landmarks=face_landmarks,
-                face_blendshapes=face_blendshapes,
-                facial_transformation_matrixes=facial_transformation_matrixes,
-            )
-
-        def close(self) -> None:
-            captured["closed"] = True
-
-    class FakeImage:
-        def __init__(self, *, image_format: str, data: np.ndarray) -> None:
-            self.image_format = image_format
-            self.data = data
-
-    return SimpleNamespace(
-        tasks=SimpleNamespace(
-            BaseOptions=FakeBaseOptions,
-            vision=SimpleNamespace(
-                FaceLandmarker=FakeFaceLandmarker,
-                FaceLandmarkerOptions=FakeFaceLandmarkerOptions,
-                RunningMode=SimpleNamespace(IMAGE="IMAGE"),
-            ),
-        ),
-        Image=FakeImage,
-        ImageFormat=SimpleNamespace(SRGB="SRGB"),
-    )
-
-
-def _fake_detection_result(
-    *,
-    face_landmarks: list[list[SimpleNamespace]],
-    face_blendshapes: list[list[SimpleNamespace]],
-    facial_transformation_matrixes: list[np.ndarray],
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        face_landmarks=face_landmarks,
-        face_blendshapes=face_blendshapes,
-        facial_transformation_matrixes=facial_transformation_matrixes,
-    )
-
-
-def _empty_detection_result() -> SimpleNamespace:
-    return _fake_detection_result(
-        face_landmarks=[],
-        face_blendshapes=[],
-        facial_transformation_matrixes=[],
-    )
-
-
-def build_sequence_fake_mediapipe(
-    captured: dict[str, Any],
-    *,
-    results: list[SimpleNamespace],
-) -> SimpleNamespace:
-    class FakeBaseOptions:
-        def __init__(self, *, model_asset_path: str) -> None:
-            self.model_asset_path = model_asset_path
-
-    class FakeFaceLandmarkerOptions:
-        def __init__(self, **kwargs: object) -> None:
-            self.__dict__.update(kwargs)
-
-    class FakeFaceLandmarker:
-        @classmethod
-        def create_from_options(
-            cls, options: FakeFaceLandmarkerOptions
-        ) -> FakeFaceLandmarker:
-            captured["options"] = options
-            return cls()
-
-        def detect(self, image: Any) -> SimpleNamespace:
-            captured.setdefault("images", []).append(image)
-            captured["detect_shapes"].append(image.data.shape)
-            captured.setdefault("detect_contiguous", []).append(
-                bool(image.data.flags.c_contiguous)
-            )
-            index = len(captured["detect_shapes"]) - 1
-            return results[index]
-
-        def close(self) -> None:
-            captured["closed"] = True
-
-    class FakeImage:
-        def __init__(self, *, image_format: str, data: np.ndarray) -> None:
-            self.image_format = image_format
-            self.data = data
-
-    return SimpleNamespace(
-        tasks=SimpleNamespace(
-            BaseOptions=FakeBaseOptions,
-            vision=SimpleNamespace(
-                FaceLandmarker=FakeFaceLandmarker,
-                FaceLandmarkerOptions=FakeFaceLandmarkerOptions,
-                RunningMode=SimpleNamespace(IMAGE="IMAGE"),
-            ),
-        ),
-        Image=FakeImage,
-        ImageFormat=SimpleNamespace(SRGB="SRGB"),
-    )

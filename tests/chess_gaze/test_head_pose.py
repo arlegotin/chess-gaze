@@ -23,6 +23,80 @@ from chess_gaze.head_pose import (
 IMAGE_SIZE = ImageSize(width_px=640, height_px=480)
 
 
+def test_default_pnp_correspondences_use_streamer_anatomical_sides() -> None:
+    calibration = default_calibration()
+    indices = calibration.pnp_landmark_indices
+
+    assert indices.left_eye_outer == 263
+    assert indices.right_eye_outer == 33
+    assert indices.left_eye_inner == 362
+    assert indices.right_eye_inner == 133
+    assert indices.left_mouth_corner == 291
+    assert indices.right_mouth_corner == 61
+    assert (
+        CANONICAL_FACE_MODEL_POINTS_MM["left_eye_outer"][0]
+        > CANONICAL_FACE_MODEL_POINTS_MM["right_eye_outer"][0]
+    )
+    assert (
+        CANONICAL_FACE_MODEL_POINTS_MM["left_eye_inner"][0]
+        > CANONICAL_FACE_MODEL_POINTS_MM["right_eye_inner"][0]
+    )
+    assert (
+        CANONICAL_FACE_MODEL_POINTS_MM["left_mouth_corner"][0]
+        > CANONICAL_FACE_MODEL_POINTS_MM["right_mouth_corner"][0]
+    )
+
+
+def test_pnp_evidence_uses_independent_frontal_anatomical_landmarks() -> None:
+    calibration = default_calibration()
+    indices = calibration.pnp_landmark_indices
+    landmark_count = max(indices.model_dump().values()) + 1
+    landmarks = [
+        Point2D(space=CoordinateSpace.IMAGE_PX, x=0.0, y=0.0)
+        for _index in range(landmark_count)
+    ]
+    anatomical_points = {
+        "nose_tip": (320.0, 238.0),
+        "chin": (320.0, 330.0),
+        "left_eye_outer": (390.0, 205.0),
+        "right_eye_outer": (250.0, 205.0),
+        "left_eye_inner": (350.0, 207.0),
+        "right_eye_inner": (290.0, 207.0),
+        "left_mouth_corner": (360.0, 302.0),
+        "right_mouth_corner": (280.0, 302.0),
+    }
+    for name, (x, y) in anatomical_points.items():
+        landmarks[getattr(indices, name)] = Point2D(
+            space=CoordinateSpace.IMAGE_PX,
+            x=x,
+            y=y,
+        )
+    face = _face_with_landmarks(landmarks, image_size=IMAGE_SIZE)
+
+    observation = estimate_head_pose(face, calibration, IMAGE_SIZE)
+
+    evidence_by_name = {item.name: item for item in observation.pnp_landmarks}
+    assert tuple(evidence_by_name) == PNP_LANDMARK_NAMES
+    assert evidence_by_name["left_eye_outer"].landmark_index == 263
+    assert evidence_by_name["right_eye_outer"].landmark_index == 33
+    assert evidence_by_name["left_eye_inner"].landmark_index == 362
+    assert evidence_by_name["right_eye_inner"].landmark_index == 133
+    assert evidence_by_name["left_mouth_corner"].landmark_index == 291
+    assert evidence_by_name["right_mouth_corner"].landmark_index == 61
+    assert (
+        evidence_by_name["left_eye_outer"].image_point.x
+        > evidence_by_name["right_eye_outer"].image_point.x
+    )
+    assert (
+        evidence_by_name["left_eye_inner"].image_point.x
+        > evidence_by_name["right_eye_inner"].image_point.x
+    )
+    assert (
+        evidence_by_name["left_mouth_corner"].image_point.x
+        > evidence_by_name["right_mouth_corner"].image_point.x
+    )
+
+
 def test_preserves_mediapipe_facial_transformation_matrix() -> None:
     calibration = default_calibration()
     facial_transformation_matrix = (

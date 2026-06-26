@@ -24,10 +24,18 @@ from chess_gaze.scene_calibration import (
     DEFAULT_MONITOR_WIDTH_M,
     default_scene_assumptions,
 )
+from chess_gaze.scene_geometry import (
+    RobustDirectionEstimate,
+    RobustPointEstimate,
+    build_monitor_plane,
+    build_scene_axis_basis,
+)
 from chess_gaze.scene_records import (
     CoordinateFrame3D,
+    SceneAxisBasisRecord,
     SceneEyeMidpointRecord,
     SceneInvalidReason,
+    SceneMonitorPlaneRecord,
     SceneUniGazeRayRecord,
     UnitVector3D,
     Vector3D,
@@ -165,8 +173,8 @@ def _frame_record_with_gazes(
             landmarks=None,
             reason_invalid=ErrorCode.FACE_NOT_FOUND,
         ),
-        left_eye=_present_eye(900.0, 540.0),
-        right_eye=_present_eye(1020.0, 540.0),
+        left_eye=_present_eye(1020.0, 540.0),
+        right_eye=_present_eye(900.0, 540.0),
         head_pose=HeadPoseRecord(
             valid=False,
             yaw_radians=None,
@@ -227,11 +235,11 @@ def _direction_from_pitch_yaw(
     pitch_radians: float,
     yaw_radians: float,
 ) -> UnitVector3D:
-    x, y, z = pitch_yaw_to_unit_vector(
+    x, image_up_y, z = pitch_yaw_to_unit_vector(
         pitch_radians=pitch_radians,
         yaw_radians=yaw_radians,
     )
-    return _camera_unit_vector(x, y, z)
+    return _camera_unit_vector(x, -image_up_y, -z)
 
 
 def _midpoint_record(
@@ -330,9 +338,8 @@ def _direction_angles_in_degrees(
     )
 
 
-def _scene_center_estimate() -> object:
-    scene_geometry = _scene_geometry()
-    return scene_geometry.RobustPointEstimate(
+def _scene_center_estimate() -> RobustPointEstimate:
+    return RobustPointEstimate(
         point_camera_m=_camera_point(0.0, 0.0, 0.650),
         candidate_count=10,
         finite_candidate_count=10,
@@ -349,11 +356,10 @@ def _scene_center_estimate() -> object:
 
 def _dominant_direction_estimate(
     direction_camera: UnitVector3D | None = None,
-) -> object:
-    scene_geometry = _scene_geometry()
+) -> RobustDirectionEstimate:
     assumptions = default_scene_assumptions()
-    return scene_geometry.RobustDirectionEstimate(
-        direction_camera=direction_camera or _camera_unit_vector(0.0, 0.0, 1.0),
+    return RobustDirectionEstimate(
+        direction_camera=direction_camera or _camera_unit_vector(0.0, 0.0, -1.0),
         candidate_count=10,
         finite_candidate_count=10,
         inlier_count=10,
@@ -370,20 +376,18 @@ def _dominant_direction_estimate(
     )
 
 
-def _monitor_test_axes() -> object:
-    scene_geometry = _scene_geometry()
+def _monitor_test_axes() -> SceneAxisBasisRecord:
     assumptions = default_scene_assumptions()
-    return scene_geometry.build_scene_axis_basis(
+    return build_scene_axis_basis(
         _dominant_direction_estimate(),
         [_camera_unit_vector(1.0, 0.0, 0.0)],
         assumptions,
     )
 
 
-def _monitor_fixture() -> object:
-    scene_geometry = _scene_geometry()
+def _monitor_fixture() -> SceneMonitorPlaneRecord:
     assumptions = default_scene_assumptions()
-    return scene_geometry.build_monitor_plane(
+    return build_monitor_plane(
         _scene_center_estimate(),
         _dominant_direction_estimate(),
         _monitor_test_axes(),
@@ -422,7 +426,7 @@ def _frame_record_with_non_finite_left_eye() -> FrameRecord:
             reason_invalid=ErrorCode.FACE_NOT_FOUND,
         ),
         left_eye=eye,
-        right_eye=_present_eye(1020.0, 540.0),
+        right_eye=_present_eye(900.0, 540.0),
         head_pose=HeadPoseRecord(
             valid=False,
             yaw_radians=None,
@@ -469,8 +473,8 @@ def test_back_project_eye_points_projects_eyes_and_midpoint_in_camera_space() ->
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(900.0, 540.0),
-            right_eye=_present_eye(1020.0, 540.0),
+            left_eye=_present_eye(1020.0, 540.0),
+            right_eye=_present_eye(900.0, 540.0),
         ),
         camera,
         assumptions,
@@ -483,13 +487,13 @@ def test_back_project_eye_points_projects_eyes_and_midpoint_in_camera_space() ->
     assert projection.left_eye.camera_point_m.space == (
         CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M
     )
-    assert projection.left_eye.camera_point_m.x == pytest.approx(-0.0315)
+    assert projection.left_eye.camera_point_m.x == pytest.approx(0.0315)
     assert projection.left_eye.camera_point_m.y == pytest.approx(0.0)
     assert projection.left_eye.camera_point_m.z == pytest.approx(expected_depth)
 
     assert projection.right_eye.valid is True
     assert projection.right_eye.camera_point_m is not None
-    assert projection.right_eye.camera_point_m.x == pytest.approx(0.0315)
+    assert projection.right_eye.camera_point_m.x == pytest.approx(-0.0315)
     assert projection.right_eye.camera_point_m.y == pytest.approx(0.0)
     assert projection.right_eye.camera_point_m.z == pytest.approx(expected_depth)
 
@@ -515,8 +519,8 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(900.0, 500.0),
-            right_eye=_present_eye(1020.0, 580.0),
+            left_eye=_present_eye(1020.0, 500.0),
+            right_eye=_present_eye(900.0, 580.0),
         ),
         camera,
         assumptions,
@@ -530,7 +534,7 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
     assert projection.left_eye.valid is True
     assert projection.left_eye.camera_point_m is not None
     assert projection.left_eye.camera_point_m.x == pytest.approx(
-        ((900.0 - 960.0) * expected_depth) / 1920.0
+        ((1020.0 - 960.0) * expected_depth) / 1920.0
     )
     assert projection.left_eye.camera_point_m.y == pytest.approx(
         ((500.0 - 540.0) * expected_depth) / 1920.0
@@ -540,7 +544,7 @@ def test_back_project_eye_points_uses_euclidean_pupil_distance() -> None:
     assert projection.right_eye.valid is True
     assert projection.right_eye.camera_point_m is not None
     assert projection.right_eye.camera_point_m.x == pytest.approx(
-        ((1020.0 - 960.0) * expected_depth) / 1920.0
+        ((900.0 - 960.0) * expected_depth) / 1920.0
     )
     assert projection.right_eye.camera_point_m.y == pytest.approx(
         ((580.0 - 540.0) * expected_depth) / 1920.0
@@ -612,7 +616,7 @@ def test_back_project_eye_points_rejects_normalized_pupil_coordinates() -> None:
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
             left_eye=_present_eye_with_pupil(_normalized_point(0.45, 0.50)),
-            right_eye=_present_eye(1020.0, 540.0),
+            right_eye=_present_eye(900.0, 540.0),
         ),
         camera,
         assumptions,
@@ -642,7 +646,7 @@ def test_back_project_eye_points_marks_midpoint_invalid_when_one_eye_is_missing(
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(900.0, 540.0),
+            left_eye=_present_eye(1020.0, 540.0),
             right_eye=_missing_eye(ErrorCode.RIGHT_EYE_NOT_FOUND),
         ),
         camera,
@@ -661,18 +665,18 @@ def test_back_project_eye_points_preserves_oof_diagnostics() -> None:
 
     projection = scene_geometry.back_project_eye_points(
         _frame_record(
-            left_eye=_present_eye(-60.0, 1100.0),
-            right_eye=_present_eye(60.0, 1100.0),
+            left_eye=_present_eye(60.0, 1100.0),
+            right_eye=_present_eye(-60.0, 1100.0),
         ),
         camera,
         assumptions,
     )
 
     assert projection.left_eye.image_px is not None
-    assert projection.left_eye.image_px.x == pytest.approx(-60.0)
+    assert projection.left_eye.image_px.x == pytest.approx(60.0)
     assert projection.left_eye.image_px.y == pytest.approx(1100.0)
     assert projection.right_eye.image_px is not None
-    assert projection.right_eye.image_px.x == pytest.approx(60.0)
+    assert projection.right_eye.image_px.x == pytest.approx(-60.0)
     assert projection.right_eye.image_px.y == pytest.approx(1100.0)
     assert projection.diagnostics["left_eye_in_frame"] is False
     assert projection.diagnostics["right_eye_in_frame"] is False
@@ -845,14 +849,16 @@ def test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze() -> N
         midpoint,
     )
 
-    appearance_vector = pitch_yaw_to_unit_vector(
+    appearance_x, appearance_image_up_y, appearance_z = pitch_yaw_to_unit_vector(
         pitch_radians=0.05,
         yaw_radians=0.10,
     )
-    recommended_vector = pitch_yaw_to_unit_vector(
+    recommended_x, recommended_image_up_y, recommended_z = pitch_yaw_to_unit_vector(
         pitch_radians=-0.30,
         yaw_radians=0.75,
     )
+    appearance_vector = (appearance_x, -appearance_image_up_y, -appearance_z)
+    recommended_vector = (recommended_x, -recommended_image_up_y, -recommended_z)
 
     assert ray.valid is True
     assert ray.source == "appearance_gaze"
@@ -868,7 +874,74 @@ def test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze() -> N
     assert ray.direction_camera.z != pytest.approx(recommended_vector[2])
 
 
-def test_unigaze_ray_from_frame_matches_pitch_yaw_sign_convention() -> None:
+def test_unigaze_ray_from_frame_maps_positive_pitch_to_camera_up() -> None:
+    scene_geometry = _scene_geometry()
+    midpoint = _midpoint_record(
+        valid=True,
+        camera_point=_camera_point(0.0, 0.0, 0.7),
+        scene_point=_scene_point(0.0, 0.0, 0.0),
+        reason_invalid=None,
+    )
+
+    ray = scene_geometry.unigaze_ray_from_frame(
+        _frame_record_with_gazes(
+            appearance_gaze=_gaze_angles(
+                valid=True,
+                pitch_radians=0.2,
+                yaw_radians=0.0,
+                reason_invalid=None,
+            ),
+            recommended_gaze=_invalid_angles(ErrorCode.GAZE_ESTIMATORS_DISAGREE),
+        ),
+        midpoint,
+    )
+
+    assert ray.valid is True
+    assert ray.direction_camera is not None
+    assert ray.direction_camera.x == pytest.approx(0.0)
+    assert ray.direction_camera.y < 0.0
+    assert ray.direction_camera.z < 0.0
+
+
+def test_unigaze_ray_from_frame_preserves_nakamura_upward_gaze_direction() -> None:
+    scene_geometry = _scene_geometry()
+    midpoint = _midpoint_record(
+        valid=True,
+        camera_point=_camera_point(
+            -0.46211833054305185,
+            0.08590315491459204,
+            1.6175790317537708,
+        ),
+        scene_point=_scene_point(
+            -0.20316321340576493,
+            0.08391311089468123,
+            -0.0871501757382564,
+        ),
+        reason_invalid=None,
+    )
+
+    ray = scene_geometry.unigaze_ray_from_frame(
+        _frame_record_with_gazes(
+            appearance_gaze=_gaze_angles(
+                valid=True,
+                pitch_radians=0.8304274082183838,
+                yaw_radians=-0.42343080043792725,
+                reason_invalid=None,
+            ),
+            recommended_gaze=_invalid_angles(ErrorCode.GAZE_ESTIMATORS_DISAGREE),
+            frame_index=1651,
+        ),
+        midpoint,
+    )
+
+    assert ray.valid is True
+    assert ray.direction_camera is not None
+    assert ray.direction_camera.x < 0.0
+    assert ray.direction_camera.y < 0.0
+    assert ray.direction_camera.z < 0.0
+
+
+def test_unigaze_ray_from_frame_maps_angles_to_physical_frontal_webcam_ray() -> None:
     scene_geometry = _scene_geometry()
     midpoint = _midpoint_record(
         valid=True,
@@ -892,15 +965,15 @@ def test_unigaze_ray_from_frame_matches_pitch_yaw_sign_convention() -> None:
         midpoint,
     )
 
-    expected_x, expected_y, expected_z = pitch_yaw_to_unit_vector(
+    expected_x, expected_image_up_y, expected_z = pitch_yaw_to_unit_vector(
         pitch_radians=pitch_radians,
         yaw_radians=yaw_radians,
     )
     assert ray.valid is True
     assert ray.direction_camera is not None
     assert ray.direction_camera.x == pytest.approx(expected_x)
-    assert ray.direction_camera.y == pytest.approx(expected_y)
-    assert ray.direction_camera.z == pytest.approx(expected_z)
+    assert ray.direction_camera.y == pytest.approx(-expected_image_up_y)
+    assert ray.direction_camera.z == pytest.approx(-expected_z)
 
 
 def test_unigaze_ray_from_frame_requires_valid_midpoint() -> None:
@@ -1037,7 +1110,7 @@ def test_robust_main_direction_prefers_lower_median_residual_on_inlier_ties() ->
     assert estimate.inlier_count == 5
     assert estimate.fallback_used is False
     assert estimate.direction_camera.x > 0.70
-    assert estimate.direction_camera.z > 0.60
+    assert estimate.direction_camera.z < -0.60
 
 
 def test_robust_main_direction_prefers_earlier_seed_index_when_residuals_tie() -> None:
@@ -1055,7 +1128,7 @@ def test_robust_main_direction_prefers_earlier_seed_index_when_residuals_tie() -
     assert estimate.inlier_count == 5
     assert estimate.fallback_used is False
     assert estimate.direction_camera.x == pytest.approx(0.0, abs=0.08)
-    assert estimate.direction_camera.z > 0.99
+    assert estimate.direction_camera.z < -0.99
 
 
 def test_robust_main_direction_falls_back_when_too_few_rays_are_valid() -> None:
@@ -1094,7 +1167,7 @@ def test_robust_main_direction_falls_back_when_too_few_rays_are_valid() -> None:
     assert estimate.uncertainty == "high"
     assert estimate.direction_camera.x == pytest.approx(0.0)
     assert estimate.direction_camera.y == pytest.approx(0.0)
-    assert estimate.direction_camera.z == pytest.approx(1.0)
+    assert estimate.direction_camera.z == pytest.approx(-1.0)
 
 
 def test_robust_main_direction_treats_opposite_rays_as_outliers() -> None:
@@ -1128,7 +1201,7 @@ def test_robust_main_direction_treats_opposite_rays_as_outliers() -> None:
 
     assert estimate.inlier_count == 5
     assert estimate.fallback_used is False
-    assert estimate.direction_camera.z > 0.99
+    assert estimate.direction_camera.z < -0.99
 
 
 def test_build_scene_axis_basis_returns_right_handed_orthonormal_columns() -> None:
@@ -1185,7 +1258,40 @@ def test_build_scene_axis_basis_returns_right_handed_orthonormal_columns() -> No
     assert axes.fallbacks == []
 
 
-def test_build_scene_axis_basis_records_fallbacks_for_degenerate_right_and_up() -> None:
+def test_scene_axis_basis_maps_image_right_to_streamer_left() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    main_direction = _dominant_direction_estimate(
+        _normalized_camera_unit_vector(
+            0.5935890162117526,
+            0.19115407280621485,
+            -0.7817366566065327,
+        )
+    )
+
+    axes = scene_geometry.build_scene_axis_basis(
+        main_direction,
+        [_camera_unit_vector(1.0, 0.0, 0.0)],
+        assumptions,
+    )
+
+    scene_direction = scene_geometry.camera_point_to_scene(
+        _camera_point(0.3711975714751555, 0.4338013084207659, -0.820992562538406),
+        _camera_point(0.0, 0.0, 0.0),
+        axes,
+    )
+
+    assert axes.right_camera.x < -0.99
+    assert axes.up_camera.y < -0.99
+    assert axes.back_camera.z > 0.99
+    assert scene_direction.x < 0.0
+    assert scene_direction.y < 0.0
+    assert scene_direction.z < 0.0
+
+
+def test_build_scene_axis_basis_ignores_degenerate_gaze_for_camera_stable_axes() -> (
+    None
+):
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     direction = scene_geometry.RobustDirectionEstimate(
@@ -1215,13 +1321,16 @@ def test_build_scene_axis_basis_records_fallbacks_for_degenerate_right_and_up() 
     )
 
     assert axes.determinant_right_up_back == pytest.approx(1.0, abs=1e-6)
-    assert any(
-        "right_axis" in fallback and "parallel" in fallback
-        for fallback in axes.fallbacks
-    )
-    assert any(
-        "up_axis" in fallback and "parallel" in fallback for fallback in axes.fallbacks
-    )
+    assert axes.right_camera.x == pytest.approx(-1.0)
+    assert axes.right_camera.y == pytest.approx(0.0)
+    assert axes.right_camera.z == pytest.approx(0.0)
+    assert axes.up_camera.x == pytest.approx(0.0)
+    assert axes.up_camera.y == pytest.approx(-1.0)
+    assert axes.up_camera.z == pytest.approx(0.0)
+    assert axes.back_camera.x == pytest.approx(0.0)
+    assert axes.back_camera.y == pytest.approx(0.0)
+    assert axes.back_camera.z == pytest.approx(1.0)
+    assert axes.fallbacks == []
 
 
 def test_build_monitor_plane_uses_assumed_distance_direction_and_dimensions() -> None:
@@ -1241,7 +1350,7 @@ def test_build_monitor_plane_uses_assumed_distance_direction_and_dimensions() ->
     assert monitor.center_camera_m.x == pytest.approx(0.0)
     assert monitor.center_camera_m.y == pytest.approx(0.0)
     assert monitor.center_camera_m.z == pytest.approx(
-        0.650 + DEFAULT_MONITOR_DISTANCE_FROM_EYES_M
+        0.650 - DEFAULT_MONITOR_DISTANCE_FROM_EYES_M
     )
     assert monitor.center_scene_m.x == pytest.approx(0.0)
     assert monitor.center_scene_m.y == pytest.approx(0.0)
@@ -1250,7 +1359,7 @@ def test_build_monitor_plane_uses_assumed_distance_direction_and_dimensions() ->
     )
     assert monitor.normal_camera.x == pytest.approx(0.0)
     assert monitor.normal_camera.y == pytest.approx(0.0)
-    assert monitor.normal_camera.z == pytest.approx(-1.0)
+    assert monitor.normal_camera.z == pytest.approx(1.0)
     assert monitor.width_m == pytest.approx(DEFAULT_MONITOR_WIDTH_M)
     assert monitor.height_m == pytest.approx(DEFAULT_MONITOR_HEIGHT_M)
     assert monitor.extended_width_m == pytest.approx(
@@ -1294,6 +1403,35 @@ def test_build_monitor_plane_uses_finite_orthonormal_right_and_up_basis() -> Non
     )
 
 
+def test_build_monitor_plane_keeps_camera_stable_normal_for_oblique_center() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    scene_center = _scene_center_estimate()
+    main_direction = _dominant_direction_estimate(
+        _normalized_camera_unit_vector(
+            0.5935890162117526,
+            0.19115407280621485,
+            -0.7817366566065327,
+        )
+    )
+    axes = scene_geometry.build_scene_axis_basis(
+        main_direction,
+        [_camera_unit_vector(1.0, 0.0, 0.0)],
+        assumptions,
+    )
+    monitor = scene_geometry.build_monitor_plane(
+        scene_center,
+        main_direction,
+        axes,
+        assumptions,
+    )
+
+    assert monitor.center_camera_m.x > scene_center.point_camera_m.x
+    assert monitor.normal_camera.x == pytest.approx(0.0)
+    assert monitor.normal_camera.y == pytest.approx(0.0)
+    assert monitor.normal_camera.z == pytest.approx(1.0)
+
+
 def test_camera_point_to_scene_uses_right_up_back_basis_centered_at_scene_center() -> (
     None
 ):
@@ -1307,9 +1445,9 @@ def test_camera_point_to_scene_uses_right_up_back_basis_centered_at_scene_center
     )
 
     assert scene_point.space == CoordinateFrame3D.SCENE_PSEUDO_M
-    assert scene_point.x == pytest.approx(0.20)
+    assert scene_point.x == pytest.approx(-0.20)
     assert scene_point.y == pytest.approx(0.10)
-    assert scene_point.z == pytest.approx(0.10)
+    assert scene_point.z == pytest.approx(-0.10)
 
 
 def test_intersect_ray_with_monitor_persists_valid_hit_geometry_and_bounds() -> None:
@@ -1318,8 +1456,8 @@ def test_intersect_ray_with_monitor_persists_valid_hit_geometry_and_bounds() -> 
     monitor = _monitor_fixture()
     ray = _ray_record_at(
         origin_camera=_camera_point(0.20, -0.10, 0.650),
-        direction_camera=_camera_unit_vector(0.0, 0.0, 1.0),
-        origin_scene=_scene_point(0.20, 0.10, 0.0),
+        direction_camera=_camera_unit_vector(0.0, 0.0, -1.0),
+        origin_scene=_scene_point(-0.20, 0.10, 0.0),
     )
 
     hit = scene_geometry.intersect_ray_with_monitor(ray, monitor, assumptions)
@@ -1332,18 +1470,18 @@ def test_intersect_ray_with_monitor_persists_valid_hit_geometry_and_bounds() -> 
     assert hit.point_camera_m is not None
     assert hit.point_camera_m.x == pytest.approx(0.20)
     assert hit.point_camera_m.y == pytest.approx(-0.10)
-    assert hit.point_camera_m.z == pytest.approx(1.350)
+    assert hit.point_camera_m.z == pytest.approx(-0.050)
     assert hit.point_scene_m is not None
-    assert hit.point_scene_m.x == pytest.approx(0.20)
+    assert hit.point_scene_m.x == pytest.approx(-0.20)
     assert hit.point_scene_m.y == pytest.approx(0.10)
     assert hit.point_scene_m.z == pytest.approx(-0.700)
-    assert hit.u_m == pytest.approx(0.20)
+    assert hit.u_m == pytest.approx(-0.20)
     assert hit.v_m == pytest.approx(0.10)
     assert hit.within_physical_monitor is True
     assert hit.within_extended_plane is True
 
 
-def test_intersect_ray_with_monitor_reconstructs_rotated_transform() -> None:
+def test_intersect_ray_with_monitor_reconstructs_frontoparallel_transform() -> None:
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()
     center = scene_geometry.RobustPointEstimate(
@@ -1411,9 +1549,9 @@ def test_intersect_ray_with_monitor_reconstructs_rotated_transform() -> None:
         center.point_camera_m.z
         + (dominant_direction.z * DEFAULT_MONITOR_DISTANCE_FROM_EYES_M)
     )
-    assert monitor.normal_camera.x == pytest.approx(-dominant_direction.x)
-    assert monitor.normal_camera.y == pytest.approx(-dominant_direction.y)
-    assert monitor.normal_camera.z == pytest.approx(-dominant_direction.z)
+    assert monitor.normal_camera.x == pytest.approx(axes.back_camera.x)
+    assert monitor.normal_camera.y == pytest.approx(axes.back_camera.y)
+    assert monitor.normal_camera.z == pytest.approx(axes.back_camera.z)
 
     assert hit.valid is True
     assert hit.u_m == pytest.approx(expected_u_m)
@@ -1423,9 +1561,9 @@ def test_intersect_ray_with_monitor_reconstructs_rotated_transform() -> None:
     assert hit.point_camera_m.y == pytest.approx(expected_hit_xyz[1])
     assert hit.point_camera_m.z == pytest.approx(expected_hit_xyz[2])
     assert hit.point_scene_m is not None
-    assert hit.point_scene_m.x == pytest.approx(expected_u_m)
-    assert hit.point_scene_m.y == pytest.approx(expected_v_m)
-    assert hit.point_scene_m.z == pytest.approx(-DEFAULT_MONITOR_DISTANCE_FROM_EYES_M)
+    assert hit.point_scene_m.x == pytest.approx(monitor.center_scene_m.x + expected_u_m)
+    assert hit.point_scene_m.y == pytest.approx(monitor.center_scene_m.y + expected_v_m)
+    assert hit.point_scene_m.z == pytest.approx(monitor.center_scene_m.z)
 
 
 def test_intersect_ray_with_monitor_rejects_parallel_non_coplanar_ray() -> None:
@@ -1451,7 +1589,7 @@ def test_intersect_ray_with_monitor_rejects_coplanar_ray() -> None:
     assumptions = default_scene_assumptions()
     monitor = _monitor_fixture()
     ray = _ray_record_at(
-        origin_camera=_camera_point(0.0, 0.0, 1.350),
+        origin_camera=_camera_point(0.0, 0.0, -0.050),
         direction_camera=_camera_unit_vector(1.0, 0.0, 0.0),
     )
 
@@ -1470,7 +1608,7 @@ def test_intersect_ray_with_monitor_rejects_behind_origin_intersection() -> None
     monitor = _monitor_fixture()
     ray = _ray_record_at(
         origin_camera=_camera_point(0.0, 0.0, 0.650),
-        direction_camera=_camera_unit_vector(0.0, 0.0, -1.0),
+        direction_camera=_camera_unit_vector(0.0, 0.0, 1.0),
     )
 
     hit = scene_geometry.intersect_ray_with_monitor(ray, monitor, assumptions)
@@ -1489,8 +1627,8 @@ def test_intersect_ray_with_monitor_rejects_non_finite_t_without_persisting_it()
     assumptions = default_scene_assumptions()
     monitor = _monitor_fixture()
     ray = _ray_record_at(
-        origin_camera=_camera_point(0.0, 0.0, -1e308),
-        direction_camera=_camera_unit_vector(math.sqrt(1.0 - 1e-12), 0.0, 1e-6),
+        origin_camera=_camera_point(0.0, 0.0, 1e308),
+        direction_camera=_camera_unit_vector(math.sqrt(1.0 - 1e-12), 0.0, -1e-6),
     )
 
     hit = scene_geometry.intersect_ray_with_monitor(ray, monitor, assumptions)
@@ -1510,13 +1648,13 @@ def test_intersect_ray_with_monitor_keeps_physical_out_of_bounds_hit_unclamped()
     monitor = _monitor_fixture()
     ray = _ray_record_at(
         origin_camera=_camera_point(0.45, 0.0, 0.650),
-        direction_camera=_camera_unit_vector(0.0, 0.0, 1.0),
+        direction_camera=_camera_unit_vector(0.0, 0.0, -1.0),
     )
 
     hit = scene_geometry.intersect_ray_with_monitor(ray, monitor, assumptions)
 
     assert hit.valid is True
-    assert hit.u_m == pytest.approx(0.45)
+    assert hit.u_m == pytest.approx(-0.45)
     assert hit.v_m == pytest.approx(0.0)
     assert hit.point_camera_m is not None
     assert hit.point_camera_m.x == pytest.approx(0.45)
@@ -1532,13 +1670,13 @@ def test_intersect_ray_with_monitor_keeps_extended_out_of_bounds_hit_unclamped()
     monitor = _monitor_fixture()
     ray = _ray_record_at(
         origin_camera=_camera_point(1.10, 0.0, 0.650),
-        direction_camera=_camera_unit_vector(0.0, 0.0, 1.0),
+        direction_camera=_camera_unit_vector(0.0, 0.0, -1.0),
     )
 
     hit = scene_geometry.intersect_ray_with_monitor(ray, monitor, assumptions)
 
     assert hit.valid is True
-    assert hit.u_m == pytest.approx(1.10)
+    assert hit.u_m == pytest.approx(-1.10)
     assert hit.v_m == pytest.approx(0.0)
     assert hit.point_camera_m is not None
     assert hit.point_camera_m.x == pytest.approx(1.10)
@@ -1557,7 +1695,7 @@ def test_intersect_ray_with_monitor_parallel_epsilon_boundary() -> None:
             direction_camera=_camera_unit_vector(
                 math.sqrt(1.0 - (5e-7 * 5e-7)),
                 0.0,
-                5e-7,
+                -5e-7,
             ),
         ),
         monitor,
@@ -1566,7 +1704,7 @@ def test_intersect_ray_with_monitor_parallel_epsilon_boundary() -> None:
     at_boundary = scene_geometry.intersect_ray_with_monitor(
         _ray_record_at(
             origin_camera=_camera_point(0.0, 0.0, 0.650),
-            direction_camera=_camera_unit_vector(math.sqrt(1.0 - 1e-12), 0.0, 1e-6),
+            direction_camera=_camera_unit_vector(math.sqrt(1.0 - 1e-12), 0.0, -1e-6),
         ),
         monitor,
         assumptions,

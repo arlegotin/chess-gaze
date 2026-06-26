@@ -104,6 +104,12 @@ interpupillary-distance assumption unless future calibration supplies measured
 scale, so absolute distances are useful for reconstruction/debugging but should
 not be treated as measured room geometry.
 
+Scene coordinates are human-centered for the frontal desktop webcam assumption:
+`+X` is the streamer's anatomical right, `+Y` is up, and `+Z` is the
+streamer's back. OpenCV camera `+X` is still image-right, so when a face is
+toward the camera, image-right gaze is the streamer's left and maps to negative
+scene X. Monitor-directed gaze points toward negative scene Z.
+
 Persisted scene assumptions include:
 
 - adult-male interpupillary distance: `0.063 m`

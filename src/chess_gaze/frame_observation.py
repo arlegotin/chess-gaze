@@ -127,8 +127,16 @@ class ModelBackedFrameObserver:
                 ),
             )
 
-        left_geometric = compute_per_eye_geometric_gaze(eye_pair.left, head_pose)
-        right_geometric = compute_per_eye_geometric_gaze(eye_pair.right, head_pose)
+        left_geometric = compute_per_eye_geometric_gaze(
+            eye_pair.left,
+            head_pose,
+            missing_reason=ErrorCode.LEFT_EYE_NOT_FOUND,
+        )
+        right_geometric = compute_per_eye_geometric_gaze(
+            eye_pair.right,
+            head_pose,
+            missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
+        )
         geometric_gaze = _combine_eye_gazes(left_geometric, right_geometric)
         appearance_gaze = self._appearance_gaze(frame.rgb, selected_face, errors)
         appearance_gaze_record = _face_model_gaze_record(appearance_gaze)

@@ -15,6 +15,8 @@ package instead of accidentally importing Python files from the repository root.
     processed-frame rendering.
   - `model_assets.py` and `model_registry.json` own local model trust and
     checksum validation.
+  - `face_landmark_indices.py` owns named MediaPipe face landmark indices that
+    encode anatomical left/right semantics.
   - `face_observation.py`, `eye_observation.py`, `head_pose.py`,
     `gaze_observation.py`, and `frame_observation.py` own per-frame evidence
     extraction.

@@ -11,6 +11,14 @@
 > Historical note, 2026-06-26: ADR-0003 supersedes this plan's local-vendored
 > Three.js constraint. Current generated viewers load Three.js `0.185.0` from
 > pinned jsDelivr npm module URLs and no longer copy `viewer/vendor/`.
+>
+> Historical note, 2026-06-26: the scene-axis and monitor-normal guidance in
+> this plan was superseded by
+> `docs/superpowers/plans/2026-06-26-anatomical-scene-coordinate-repair.md`.
+> Current scene axes are anatomical frontal-webcam right/up/back columns
+> `[-1,0,0]`, `[0,-1,0]`, `[0,0,1]`; the scene ray flips UniGaze canonical Z
+> into a physical eye-to-monitor ray, and robust dominant UniGaze direction
+> places the monitor center only.
 
 ## Global Constraints
 
@@ -23,7 +31,7 @@
 - Every decoded frame must produce exactly one `records/scene_frames.jsonl` line with the same `frame_id` and `frame_index` identity as `records/frames.jsonl`.
 - Do not drop, sample, smooth, average across time, deduplicate, merge, clamp, cluster, or heatmap-substitute monitor hit points. A valid forward ray-plane hit produces exactly one persisted point.
 - Use `appearance_gaze` as the UniGaze source for scene rays. Do not substitute `recommended_gaze`.
-- Reuse `pitch_yaw_to_unit_vector()` from `src/chess_gaze/gaze_observation.py` and preserve its yaw sign convention.
+- Superseded by `docs/superpowers/plans/2026-06-26-anatomical-scene-coordinate-repair.md`: scene rays preserve `pitch_yaw_to_unit_vector()` X/Y overlay semantics, negate vector Y when entering `camera_opencv_pseudo_m`, and negate canonical Z so the scene ray is a physical frontal-webcam eye-to-monitor direction.
 - No scene artifact may contain NaN, Infinity, silently coerced unknown enum strings, or unknown JSON fields.
 - Keep all new modules deep. Do not create pass-through packages or generic `core`, `services`, `engine`, or `domain` layers.
 - Constants from the spec must be centralized, tested for exact values, and persisted into `scene/scene_manifest.json` with unit, source, and uncertainty metadata.
@@ -35,7 +43,13 @@
   uploaded frames, uploaded model data, and frontend build services remain
   disallowed.
 - Do not add `package.json`, `node_modules`, Playwright, or a frontend build unless an ADR or spec update compares that dependency against the task requirements. The initial viewer is a Python-packaged static asset generator.
-- Axis convention correction: the spec's illustrative camera axes `right=[1,0,0]`, `up=[0,-1,0]`, `forward=[0,0,1]` are left-handed when stored as basis columns. Implementation must persist semantic `scene_forward_camera` for the dominant gaze direction and a right-handed transform basis with columns `[scene_right_camera, scene_up_camera, scene_back_camera]`, where `scene_back_camera = -scene_forward_camera` after orthogonalization. Tests must prove determinant near `+1` for that transform basis. Viewer copy and labels may still describe the UniGaze line as forward from the streamer toward the monitor.
+- Axis convention correction, superseded by the anatomical scene coordinate
+  repair: implementation must persist a right-handed transform basis with
+  anatomical frontal-webcam columns `[scene_right_camera, scene_up_camera,
+  scene_back_camera] = [[-1,0,0], [0,-1,0], [0,0,1]]`. The robust dominant
+  UniGaze direction remains semantic monitor-center evidence, not a scene-axis
+  input. Tests must prove determinant near `+1`, image-right/his-left maps to
+  negative scene X, and monitor-directed gaze maps to negative scene Z.
 
 ---
 
@@ -763,13 +777,14 @@ Extend `tests/chess_gaze/test_scene_geometry.py` with tests for:
 - zero MAD still accepts natural small motion using `SCENE_CENTER_MIN_AXIS_TOLERANCE_M`.
 - non-finite center candidates are dropped and counted.
 - `unigaze_ray_from_frame()` uses `appearance_gaze`, never `recommended_gaze`.
-- UniGaze ray conversion matches `pitch_yaw_to_unit_vector()` for yaw and pitch sign.
+- UniGaze ray conversion preserves `pitch_yaw_to_unit_vector()` X/Y overlay semantics, negates vector Y for OpenCV camera space so positive frame-record pitch maps to camera up, and negates vector Z so the scene ray points from eyes toward the monitor/camera side.
 - angular RANSAC selects a dominant direction with outlier rays present.
 - angular RANSAC tie-breaks by inlier count, then lower median angular residual, then lower seed frame index.
-- fewer than `MIN_MAIN_DIRECTION_INLIER_FRAMES` valid rays falls back to `[0.0, 0.0, 1.0]`.
+- fewer than `MIN_MAIN_DIRECTION_INLIER_FRAMES` valid rays falls back to `[0.0, 0.0, -1.0]`.
 - opposite-direction rays are outliers, not equivalent inliers.
 - scene axes are finite, unit length, mutually orthogonal, and determinant `+1` for columns `[right, up, back]`.
-- degenerate right-vs-forward and up-vs-normal projections record fallback reasons.
+- scene axes are anatomical frontal-webcam axes; do not add right-vs-forward
+  or up-vs-normal projection fallback behavior.
 
 - [ ] **Step 2: Verify RED**
 
@@ -793,7 +808,7 @@ Implement the algorithms from the approved spec with the axis correction from th
   - persist candidate count, dropped count, inlier count, MAD values, iteration count, convergence tolerance, fallback state, and uncertainty.
 - `unigaze_ray_from_frame()`:
   - require valid `appearance_gaze`;
-  - convert pitch/yaw with the existing `pitch_yaw_to_unit_vector()`;
+  - convert pitch/yaw with the scene-specific OpenCV boundary: reuse `pitch_yaw_to_unit_vector()` for x/y overlay signs, negate its y component for `camera_opencv_pseudo_m`, and negate its z component for physical eye-to-monitor direction;
   - use valid eye midpoint as origin;
   - mark invalid with `EYE_MIDPOINT_INVALID` or `UNIGAZE_INVALID` when required.
 - `robust_main_direction()`:
@@ -803,12 +818,13 @@ Implement the algorithms from the approved spec with the axis correction from th
   - tie-break by median angular residual and seed frame index;
   - output normalized mean of inliers or explicit fallback.
 - `build_scene_axis_basis()`:
-  - persist semantic `scene_forward_camera` as dominant UniGaze direction;
-  - build a right-handed transform basis with columns `[scene_right_camera, scene_up_camera, scene_back_camera]`;
-  - set `scene_back_camera = -scene_forward_camera` after orthogonalization;
-  - prefer robust left-eye-to-right-eye direction for right axis;
-  - prefer camera up `[0.0, -1.0, 0.0]` when head-up evidence is unavailable;
-  - record every axis fallback in the manifest diagnostics.
+  - build a right-handed transform basis with anatomical frontal-webcam columns
+    `[scene_right_camera, scene_up_camera, scene_back_camera]`;
+  - set `scene_right_camera = [-1.0, 0.0, 0.0]`;
+  - set `scene_up_camera = [0.0, -1.0, 0.0]`;
+  - set `scene_back_camera = [0.0, 0.0, 1.0]`;
+  - set `scene_forward_camera = [0.0, 0.0, -1.0]`;
+  - do not rotate scene axes from dominant UniGaze or eye-pair evidence.
 
 - [ ] **Step 4: Verify GREEN**
 
@@ -838,8 +854,10 @@ Expected after implementation: all robust estimator and axis tests pass.
 Extend `tests/chess_gaze/test_scene_geometry.py` with tests for:
 
 - monitor center is `scene_center_camera + dominant_unigaze_direction_camera * DEFAULT_MONITOR_DISTANCE_FROM_EYES_M`.
-- monitor normal is the opposite of the dominant UniGaze direction.
-- monitor basis is finite, unit length, and orthogonal to the monitor normal.
+- monitor normal is anatomical `scene_back_camera`, not the opposite of the
+  dominant UniGaze direction.
+- monitor basis is finite, unit length, and equal to the scene right/up/back
+  axes.
 - physical width and height are `0.600` and `0.340`.
 - extended plane width and height are physical dimensions multiplied by `3.0`.
 - valid ray-plane hit persists denominator, signed distance, `t`, camera point, scene point, monitor `u/v`, and bounds booleans.

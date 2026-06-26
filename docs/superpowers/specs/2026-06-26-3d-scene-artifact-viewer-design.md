@@ -20,9 +20,12 @@ machine-readable evidence to reconstruct and debug an approximate 3D scene:
 
 - streamer head and eyes through time;
 - a robust scene center based on eye-midpoint positions;
-- a scene coordinate frame with explicit up, right, and forward axes;
-- a main-monitor plane inferred from the dominant UniGaze direction plus explicit
-  human/setup assumptions where monocular data cannot determine scale;
+- a scene coordinate frame with explicit streamer/anatomical right, up,
+  streamer back, and semantic monitor-forward axes for frontal desktop webcam
+  videos;
+- a main-monitor center placed from the dominant UniGaze direction, with an
+  anatomical frontoparallel plane orientation plus explicit human/setup
+  assumptions where monocular data cannot determine scale or monitor pose;
 - one per-frame scene record for every decoded frame;
 - one monitor-plane hit point for every frame that has a finite UniGaze ray and a
   valid ray-plane intersection;
@@ -164,12 +167,15 @@ All scene records must name the coordinate frame of every 3D value.
 | --- | --- |
 | `image_px` | Source decoded image pixels, origin top-left, x right, y down. |
 | `camera_opencv_pseudo_m` | OpenCV-style camera frame: +X image-right, +Y image-down, +Z camera-forward into the image. Units are pseudo-meters derived from assumptions unless calibration proves metric scale. |
-| `scene_pseudo_m` | Scene frame centered at the robust eye-midpoint center. +X scene-right, +Y scene-up, +Z scene-forward. Units match `camera_opencv_pseudo_m`. |
-| `monitor_plane_pseudo_m` | Main monitor plane coordinates. +U monitor-right, +V monitor-up, origin at inferred monitor center. |
+| `scene_pseudo_m` | Scene frame centered at the robust eye-midpoint center for a frontal desktop webcam setup. +X is the streamer's anatomical right, +Y is up, and +Z is the streamer's back in the `right_up_back_columns_right_handed` transform basis. In OpenCV camera coordinates this is `right_camera=(-1,0,0)`, `up_camera=(0,-1,0)`, and `back_camera=(0,0,1)`. Semantic forward gaze toward the monitor is therefore negative scene Z. Units match `camera_opencv_pseudo_m`. |
+| `monitor_plane_pseudo_m` | Main monitor plane coordinates. +U follows scene +X / streamer right, +V follows scene +Y / up, origin at inferred monitor center. |
 | `three_view` | Browser display mapping from `scene_pseudo_m`: x stays x, y stays y-up, z is rendered with Three.js camera conventions. |
 
 The mathematical frame is `camera_opencv_pseudo_m`. The viewer frame is only a
 rendering transform. Persist the math values, not only Three.js-ready values.
+Positive frame yaw remains image-right for 2D overlays, but in a frontal webcam
+view image-right is the streamer's left and must map to negative scene X.
+Mirror policy is unknown unless an explicit future artifact proves otherwise.
 
 ## Explicit Assumptions And Constants
 
@@ -183,7 +189,7 @@ determine a value.
 | Constant | Value | Unit | Purpose | Uncertainty |
 | --- | ---: | --- | --- | --- |
 | `DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M` | 0.063 | m | Estimate face depth from 2D pupil distance. | medium |
-| `DEFAULT_MONITOR_DISTANCE_FROM_EYES_M` | 0.700 | m | Place main-monitor plane along robust UniGaze direction. | high |
+| `DEFAULT_MONITOR_DISTANCE_FROM_EYES_M` | 0.700 | m | Place main-monitor plane center along robust UniGaze direction. | high |
 | `DEFAULT_MONITOR_WIDTH_M` | 0.600 | m | Draw a typical 16:9 main monitor rectangle. | medium |
 | `DEFAULT_MONITOR_HEIGHT_M` | 0.340 | m | Draw a typical 16:9 main monitor rectangle. | medium |
 | `DEFAULT_EXTENDED_PLANE_SCALE` | 3.0 | multiplier | Draw monitor plane beyond physical monitor bounds. | low |
@@ -196,7 +202,7 @@ determine a value.
 | `DEFAULT_SCENE_CENTER_CAMERA_M` | `[0.0, 0.0, 0.650]` | pseudo-m | Fallback scene center when eye-midpoint data is insufficient. | high |
 | `SCENE_CENTER_MIN_AXIS_TOLERANCE_M` | 0.015 | pseudo-m | Prevent zero MAD from rejecting natural small head motion. | medium |
 | `MIN_SCENE_CENTER_INLIER_FRAMES` | 5 | frames | Minimum valid frames before using data-derived center. | low |
-| `MIN_MAIN_DIRECTION_INLIER_FRAMES` | 5 | frames | Minimum valid UniGaze rays before using data-derived monitor normal. | low |
+| `MIN_MAIN_DIRECTION_INLIER_FRAMES` | 5 | frames | Minimum valid UniGaze rays before using data-derived monitor-center direction. | low |
 | `DIRECTION_INLIER_ANGLE_RADIANS` | 0.35 | rad | Default angular inlier cutoff for dominant gaze direction. | medium |
 
 If implementation changes any constant, the active spec or an ADR must explain
@@ -262,21 +268,22 @@ One JSON object per run:
       "fallback_used": false
     },
     "scene_orientation": {
-      "method": "eye_pair_right_and_head_up_with_camera_axis_fallbacks",
-      "candidate_frame_count": 1850,
+      "method": "anatomical_frontal_webcam_right_up_back_axes",
+      "candidate_frame_count": 0,
       "fallbacks": []
     }
   },
   "scene_center_camera_m": [0.0, 0.0, 0.65],
   "scene_axes_camera": {
-    "right": [1.0, 0.0, 0.0],
+    "right": [-1.0, 0.0, 0.0],
     "up": [0.0, -1.0, 0.0],
-    "forward": [0.0, 0.0, 1.0]
+    "back": [0.0, 0.0, 1.0],
+    "forward": [0.0, 0.0, -1.0]
   },
   "main_monitor_plane": {
-    "center_camera_m": [0.0, 0.0, 1.35],
-    "normal_camera": [0.0, 0.0, -1.0],
-    "right_camera": [1.0, 0.0, 0.0],
+    "center_camera_m": [0.0, 0.0, -0.05],
+    "normal_camera": [0.0, 0.0, 1.0],
+    "right_camera": [-1.0, 0.0, 0.0],
     "up_camera": [0.0, -1.0, 0.0],
     "physical_width_m": 0.6,
     "physical_height_m": 0.34,
@@ -353,14 +360,14 @@ Each line:
     "origin_camera_m": [-0.0335, -0.010, 0.700],
     "direction_camera": [0.01, -0.02, 0.99975],
     "direction_source": "appearance_gaze_unigaze_pitch_yaw",
-    "pitch_radians": -0.02,
+    "pitch_radians": 0.02,
     "yaw_radians": 0.01,
     "reason_invalid": null
   },
   "main_monitor_hit": {
     "valid": true,
     "point_camera_m": [-0.0265, -0.024, 1.400],
-    "point_scene_m": [0.006, 0.014, 0.700],
+    "point_scene_m": [0.006, 0.014, -0.700],
     "plane_uv_m": [0.006, 0.014],
     "within_physical_monitor": true,
     "within_extended_plane": true,
@@ -480,8 +487,11 @@ UniGaze.
 
 For valid `appearance_gaze`:
 
-1. Convert pitch/yaw to a camera direction with the existing
-   `pitch_yaw_to_unit_vector()` convention in `gaze_observation.py`.
+1. Convert pitch/yaw to a camera direction by preserving
+   `pitch_yaw_to_unit_vector()` yaw and forward-Z semantics, then negating the
+   vector Y component when entering `camera_opencv_pseudo_m`. Frame-record gaze
+   angles and 2D overlays use positive pitch as image-up; OpenCV camera space
+   uses +Y image-down.
 2. Normalize the vector and validate finite norm.
 3. Set ray origin to the per-frame eye midpoint when both eyes are valid.
 4. If eyes are invalid, set the ray invalid with reason
@@ -490,7 +500,7 @@ For valid `appearance_gaze`:
 Implementation must add regression tests that lock the yaw/pitch sign convention
 against existing 2D overlay expectations.
 
-### 4. Robust main-monitor normal
+### 4. Robust main-monitor center direction
 
 Candidate directions are valid per-frame UniGaze unit vectors.
 
@@ -508,32 +518,35 @@ Algorithm:
 7. If no candidate set has at least `MIN_MAIN_DIRECTION_INLIER_FRAMES`, use
    fallback direction `[0.0, 0.0, 1.0]` and mark high uncertainty.
 
-The monitor plane normal is the opposite of the dominant ray direction:
+The dominant ray direction estimates where the main monitor center lies relative
+to the robust scene center. It is not a measured monitor surface normal and must
+not rotate the scene horizontal/depth axes.
 
 ```text
-monitor_normal_camera = -dominant_unigaze_direction_camera
+monitor_center_camera =
+  scene_center_camera + dominant_unigaze_direction_camera * monitor_distance_m
 ```
 
-The sign is stored so ray-plane intersection denominators are explainable.
+The direction estimate and its inlier diagnostics are persisted so the inferred
+center remains auditable.
 
 ### 5. Scene orientation
 
-Build axes in camera coordinates:
+Build axes in camera coordinates and keep them anatomical for a frontal webcam
+setup:
 
-1. `scene_forward_camera` is the dominant UniGaze direction.
-2. `scene_right_camera` prefers the robust direction from left eye to right eye
-   across valid frames.
-3. `scene_up_camera` prefers robust head-up evidence if orientation matrices or
-   quaternions are persisted; otherwise use camera up `[0.0, -1.0, 0.0]`.
-4. Orthogonalize with Gram-Schmidt:
-   - remove the component of right along forward;
-   - normalize right;
-   - `up = normalize(cross(forward, right))` adjusted to align with preferred up;
-   - recompute `right = normalize(cross(up, forward))`.
-5. Validate finite axes, near-unit norms, pairwise dot products near zero, and
-   determinant near `+1`.
-6. If any axis degenerates, use the safest fallback axis and record the fallback
-   in `scene_manifest.robust_estimators.scene_orientation.fallbacks`.
+1. `scene_right_camera = [-1.0, 0.0, 0.0]`.
+2. `scene_up_camera = [0.0, -1.0, 0.0]`.
+3. `scene_back_camera = [0.0, 0.0, 1.0]`.
+4. `scene_forward_camera = [0.0, 0.0, -1.0]`.
+5. Validate finite axes, unit norms, pairwise dot products near zero, and
+   determinant near `+1` for `[right, up, back]`.
+
+Do not rotate scene axes from dominant gaze or eye-pair evidence. Eye labels and
+eye-pair ordering remain validation evidence, but they are not a basis-estimation
+input for the scene frame. This keeps the scene human-centered: image-right
+gaze from a face looking toward the camera is streamer's left and therefore
+negative scene X.
 
 Do not infer mirror policy unless explicit evidence exists. Persist
 `mirror_policy="unknown"` when unknown.
@@ -552,10 +565,14 @@ provides measured monitor distance.
 
 Plane basis:
 
-- `normal_camera = -dominant_unigaze_direction_camera`;
-- `up_camera = scene_up_camera` projected onto the monitor plane and normalized;
-- `right_camera = normalize(cross(up_camera, normal_camera))`;
-- if projection degenerates, use `scene_right_camera` projected onto the plane.
+- `normal_camera = scene_back_camera`;
+- `up_camera = scene_up_camera`;
+- `right_camera = scene_right_camera`.
+
+This is a frontoparallel scene plane, not a calibrated physical monitor pose.
+`monitor_plane_pseudo_m.u` is relative to the inferred monitor center. For
+left/right ray semantics, use `unigaze_ray.direction_scene.x`; the sign of
+`plane_uv_m[0]` alone can differ when the inferred center is off-axis.
 
 Persist physical monitor dimensions and extended plane dimensions. The viewer
 must draw both:
@@ -691,11 +708,10 @@ Official docs state that the result can contain face landmarks, blendshapes, and
 an optional facial transformation matrix. Source:
 `https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/python`.
 
-NumPy remains the core numerical dependency. Official docs cover median,
-percentile, and SVD APIs used for robust summaries and orthogonalization checks:
+NumPy remains the core numerical dependency. Official docs cover median and
+percentile APIs used for robust summaries:
 `https://numpy.org/doc/stable/reference/generated/numpy.median.html`,
-`https://numpy.org/doc/stable/reference/generated/numpy.percentile.html`,
-`https://numpy.org/doc/stable/reference/generated/numpy.linalg.svd.html`.
+`https://numpy.org/doc/stable/reference/generated/numpy.percentile.html`.
 
 ## Source Integration Points
 
@@ -808,17 +824,19 @@ Record the run directory, counts, scene summary, and viewer smoke result.
    deduplicated.
 6. Scene center is a geometric median over valid eye midpoints after outlier
    screening, or an explicit persisted fallback if too few valid frames exist.
-7. Main-monitor normal is inferred from robust dominant UniGaze direction, or an
-   explicit persisted fallback if too few valid rays exist.
-8. Monitor distance, monitor size, IPD, and head dimensions are persisted as
+7. Main-monitor center direction is inferred from robust dominant UniGaze
+   direction, or an explicit persisted fallback if too few valid rays exist.
+8. Main-monitor normal is anatomical `scene_back_camera`, and monitor right and
+   up match the scene right/up axes.
+9. Monitor distance, monitor size, IPD, and head dimensions are persisted as
    explicit assumptions with units and uncertainty.
-9. Scene axes are finite, unit-length within tolerance, mutually orthogonal
+10. Scene axes are finite, unit-length within tolerance, mutually orthogonal
    within tolerance, and have determinant near `+1`, or the manifest records the
    fallback axes used.
-10. Ray-plane intersection diagnostics include denominator, signed distance,
+11. Ray-plane intersection diagnostics include denominator, signed distance,
     `t`, bounds booleans, and invalid reason.
-11. `qa_summary.json` validates scene artifacts and includes their byte counts.
-12. The generated viewer renders a light-themed 3D scene with orbit/pan/zoom,
+12. `qa_summary.json` validates scene artifacts and includes their byte counts.
+13. The generated viewer renders a light-themed 3D scene with orbit/pan/zoom,
     head ellipsoid, eye spheres, UniGaze ray, monitor plane, current hit point,
     and accumulated points mode.
 13. The temporal slider supports exact frame scrubbing and mode switch between

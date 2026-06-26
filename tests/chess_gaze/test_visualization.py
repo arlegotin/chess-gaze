@@ -106,18 +106,6 @@ def _observed_record() -> FrameRecord:
     }
     payload["left_eye"] = {
         "present": True,
-        "bounding_box": _box(65.0, 55.0, 94.0, 80.0),
-        "pupil_center": _point(80.0, 67.0),
-        "iris_landmarks": [
-            _point(74.0, 67.0),
-            _point(86.0, 67.0),
-            _point(80.0, 61.0),
-            _point(80.0, 73.0),
-        ],
-        "reason_invalid": None,
-    }
-    payload["right_eye"] = {
-        "present": True,
         "bounding_box": _box(120.0, 55.0, 149.0, 80.0),
         "pupil_center": _point(135.0, 68.0),
         "iris_landmarks": [
@@ -125,6 +113,18 @@ def _observed_record() -> FrameRecord:
             _point(142.0, 68.0),
             _point(135.0, 61.0),
             _point(135.0, 75.0),
+        ],
+        "reason_invalid": None,
+    }
+    payload["right_eye"] = {
+        "present": True,
+        "bounding_box": _box(65.0, 55.0, 94.0, 80.0),
+        "pupil_center": _point(80.0, 67.0),
+        "iris_landmarks": [
+            _point(74.0, 67.0),
+            _point(86.0, 67.0),
+            _point(80.0, 61.0),
+            _point(80.0, 73.0),
         ],
         "reason_invalid": None,
     }
@@ -175,6 +175,29 @@ def _nonzero_near(image: np.ndarray, *, x: int, y: int, radius: int = 4) -> int:
     x_min = max(0, x - radius)
     x_max = min(image.shape[1], x + radius + 1)
     return int(np.count_nonzero(image[y_min:y_max, x_min:x_max]))
+
+
+def _has_dominant_channel_near(
+    image: np.ndarray, *, x: int, y: int, channel: int, radius: int = 5
+) -> bool:
+    y_min = max(0, y - radius)
+    y_max = min(image.shape[0], y + radius + 1)
+    x_min = max(0, x - radius)
+    x_max = min(image.shape[1], x + radius + 1)
+    patch = image[y_min:y_max, x_min:x_max].astype(np.int16)
+    other_channels = [index for index in range(3) if index != channel]
+    dominant = np.ones(patch.shape[:2], dtype=bool)
+    for other_channel in other_channels:
+        dominant &= patch[:, :, channel] > patch[:, :, other_channel] + 25
+    return bool(np.any(dominant))
+
+
+def test_observed_record_fixture_uses_streamer_anatomical_eye_sides() -> None:
+    record = _observed_record()
+
+    assert record.left_eye.pupil_center is not None
+    assert record.right_eye.pupil_center is not None
+    assert record.left_eye.pupil_center.x > record.right_eye.pupil_center.x
 
 
 def test_render_processed_frame_writes_ok_jpeg_with_current_schema_overlays(
@@ -246,6 +269,20 @@ def test_left_and_right_iris_centers_are_rendered_independently(
     rendered = _rgb_jpeg(output_path)
     assert _nonzero_near(rendered, x=80, y=67, radius=2) > 0
     assert _nonzero_near(rendered, x=135, y=68, radius=2) > 0
+
+
+def test_eye_overlay_colors_follow_streamer_anatomical_sides(
+    tmp_path: Path,
+) -> None:
+    frame = np.zeros((160, 220, 3), dtype=np.uint8)
+    record = _observed_record()
+    output_path = tmp_path / "eye-colors.jpg"
+
+    render_processed_frame(frame, record, output_path, quality=100)
+
+    rendered = _rgb_jpeg(output_path)
+    assert _has_dominant_channel_near(rendered, x=120, y=55, channel=2)
+    assert _has_dominant_channel_near(rendered, x=65, y=55, channel=0)
 
 
 def test_current_frame_record_rejects_unvalidated_candidate_overlay_fields() -> None:

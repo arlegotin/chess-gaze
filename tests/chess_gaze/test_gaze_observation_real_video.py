@@ -9,7 +9,7 @@ import pytest
 
 from chess_gaze.artifact_runs import create_run_layout
 from chess_gaze.calibration import default_calibration
-from chess_gaze.errors import FrameStatus
+from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.eye_observation import observe_eyes
 from chess_gaze.face_observation import FaceCandidate, MediaPipeFaceObserver
 from chess_gaze.frame_observation import ModelBackedFrameObserver
@@ -228,10 +228,14 @@ def test_unigaze_predicts_from_real_video_face_evidence(
                     continue
 
                 left_gaze = compute_per_eye_geometric_gaze(
-                    eye_observation.left, head_pose
+                    eye_observation.left,
+                    head_pose,
+                    missing_reason=ErrorCode.LEFT_EYE_NOT_FOUND,
                 )
                 right_gaze = compute_per_eye_geometric_gaze(
-                    eye_observation.right, head_pose
+                    eye_observation.right,
+                    head_pose,
+                    missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
                 )
                 normalized_crop = normalize_face_crop(
                     frame.rgb,
