@@ -636,61 +636,12 @@ def build_scene_axis_basis(
     eye_pair_right_vectors: Sequence[UnitVector3D],
     assumptions: SceneAssumptions,
 ) -> SceneAxisBasisRecord:
-    del assumptions
+    del direction, eye_pair_right_vectors, assumptions
     fallbacks: list[str] = []
-    forward_direction = _normalized_direction(direction.direction_camera)
-    if forward_direction is None:
-        forward_direction = (0.0, 0.0, 1.0)
-        _append_fallback(
-            fallbacks,
-            "forward_axis_invalid_used_default_forward",
-        )
-    back_direction = _negate_tuple(forward_direction)
-    preferred_right = _preferred_right_direction(eye_pair_right_vectors, fallbacks)
-
-    right_direction = _project_onto_plane(preferred_right, back_direction)
-    if right_direction is None:
-        _append_fallback(
-            fallbacks,
-            "right_axis_parallel_to_forward_used_camera_right",
-        )
-        right_direction = _project_onto_plane((1.0, 0.0, 0.0), back_direction)
-    if right_direction is None:
-        _append_fallback(
-            fallbacks,
-            "right_axis_camera_right_parallel_used_camera_forward",
-        )
-        right_direction = _project_onto_plane((0.0, 0.0, 1.0), back_direction)
-    if right_direction is None:
-        right_direction = _project_onto_plane((0.0, -1.0, 0.0), back_direction)
-    if right_direction is None:
-        right_direction = (1.0, 0.0, 0.0)
-
-    preferred_up = (0.0, -1.0, 0.0)
-    up_direction = _project_onto_plane(preferred_up, back_direction)
-    if up_direction is None:
-        _append_fallback(
-            fallbacks,
-            "up_axis_camera_up_parallel_to_back_used_cross_product",
-        )
-        up_direction = _normalize_tuple(_cross(back_direction, right_direction))
-    if up_direction is None:
-        up_direction = (0.0, 0.0, -1.0)
-
-    right_direction = _normalize_tuple(_cross(up_direction, back_direction))
-    if right_direction is None:
-        right_direction = (1.0, 0.0, 0.0)
-        _append_fallback(
-            fallbacks,
-            "right_axis_cross_product_invalid_used_camera_right",
-        )
-    up_direction = _normalize_tuple(_cross(back_direction, right_direction))
-    if up_direction is None:
-        up_direction = (0.0, 0.0, -1.0)
-        _append_fallback(
-            fallbacks,
-            "up_axis_cross_product_invalid_used_camera_forward",
-        )
+    right_direction = (1.0, 0.0, 0.0)
+    up_direction = (0.0, -1.0, 0.0)
+    back_direction = (0.0, 0.0, -1.0)
+    forward_direction = (0.0, 0.0, 1.0)
 
     determinant = _determinant(right_direction, up_direction, back_direction)
     return SceneAxisBasisRecord(
@@ -731,7 +682,7 @@ def build_monitor_plane(
             center_camera,
             axes,
         ),
-        normal_camera=_camera_unit_vector(_negate_tuple(forward_direction)),
+        normal_camera=axes.back_camera,
         right_camera=axes.right_camera,
         up_camera=axes.up_camera,
         physical_width_m=assumptions.monitor_width_m,
@@ -1322,64 +1273,11 @@ def _seed_is_better(
     return candidate_seed_frame_index < best_seed_frame_index
 
 
-def _preferred_right_direction(
-    eye_pair_right_vectors: Sequence[UnitVector3D],
-    fallbacks: list[str],
-) -> tuple[float, float, float]:
-    valid_vectors = [
-        normalized_direction
-        for vector in eye_pair_right_vectors
-        if (normalized_direction := _normalized_direction(vector)) is not None
-    ]
-    if not valid_vectors:
-        _append_fallback(
-            fallbacks,
-            "right_axis_missing_eye_pair_evidence_used_camera_right",
-        )
-        return (1.0, 0.0, 0.0)
-    mean_direction = _normalize_tuple(
-        (
-            sum(vector[0] for vector in valid_vectors),
-            sum(vector[1] for vector in valid_vectors),
-            sum(vector[2] for vector in valid_vectors),
-        )
-    )
-    if mean_direction is None:
-        _append_fallback(
-            fallbacks,
-            "right_axis_eye_pair_mean_degenerate_used_camera_right",
-        )
-        return (1.0, 0.0, 0.0)
-    return mean_direction
-
-
-def _project_onto_plane(
-    vector: tuple[float, float, float],
-    plane_normal: tuple[float, float, float],
-) -> tuple[float, float, float] | None:
-    projected = _subtract(
-        vector,
-        _scale(plane_normal, _dot(vector, plane_normal)),
-    )
-    return _normalize_tuple(projected)
-
-
 def _dot(
     left: tuple[float, float, float],
     right: tuple[float, float, float],
 ) -> float:
     return (left[0] * right[0]) + (left[1] * right[1]) + (left[2] * right[2])
-
-
-def _cross(
-    left: tuple[float, float, float],
-    right: tuple[float, float, float],
-) -> tuple[float, float, float]:
-    return (
-        (left[1] * right[2]) - (left[2] * right[1]),
-        (left[2] * right[0]) - (left[0] * right[2]),
-        (left[0] * right[1]) - (left[1] * right[0]),
-    )
 
 
 def _scale(
@@ -1411,12 +1309,6 @@ def _subtract(
     )
 
 
-def _negate_tuple(
-    vector: tuple[float, float, float],
-) -> tuple[float, float, float]:
-    return (-vector[0], -vector[1], -vector[2])
-
-
 def _determinant(
     right: tuple[float, float, float],
     up: tuple[float, float, float],
@@ -1427,11 +1319,6 @@ def _determinant(
         - right[1] * ((up[0] * back[2]) - (up[2] * back[0]))
         + right[2] * ((up[0] * back[1]) - (up[1] * back[0]))
     )
-
-
-def _append_fallback(fallbacks: list[str], reason: str) -> None:
-    if reason not in fallbacks:
-        fallbacks.append(reason)
 
 
 def _persist_invalid_coordinate_space_diagnostics(

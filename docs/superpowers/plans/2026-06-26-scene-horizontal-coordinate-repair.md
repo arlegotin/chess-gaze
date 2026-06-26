@@ -1,0 +1,262 @@
+# Scene Horizontal Coordinate Repair Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Repair the systematic left/right confusion in 3D scene and monitor coordinates by making monitor horizontal coordinates preserve camera image-left/image-right ordering for a fixed eye origin.
+
+**Architecture:** Keep frame-record and camera-space gaze semantics unchanged: positive frame yaw means image-right, positive pitch means image-up, and `camera_opencv_pseudo_m` uses +X image-right, +Y image-down, +Z forward. The durable boundary is the scene/monitor axis construction: dominant UniGaze direction estimates where the monitor center lies, but monocular gaze does not prove the monitor surface normal or justify rotating scene-right/depth. Scene axes and the monitor plane normal must remain camera-stable so a camera-right gaze direction cannot project to scene-left.
+
+**Tech Stack:** Python 3.12, Pydantic records, pytest, uv, generated Three.js viewer assets, real `artifacts/input/nakamura_1.mp4`.
+
+## Global Constraints
+
+- Follow `AGENTS.md` as the highest-priority repository instruction.
+- Work in the current branch `fixes-3`.
+- Treat this as root-cause coordinate repair, not a viewer-only cosmetic patch.
+- Use test-first repair: write failing regression tests before production changes.
+- Do not change frame-record UniGaze semantics: positive yaw remains image-right; positive pitch remains image-up.
+- Do not change OpenCV camera semantics: +X image-right, +Y image-down, +Z camera-forward.
+- Do not substitute `recommended_gaze` for scene rays.
+- Keep `scene_pseudo_m` right-handed with `right_up_back_columns_right_handed` and determinant near `+1`.
+- Treat robust main UniGaze direction as monitor-center placement evidence, not as scene-axis or monitor-normal evidence.
+- Use `artifacts/input/nakamura_1.mp4` and the reported run `artifacts/output/nakamura_1/runs/20260626T104848Z-21353a29` for real verification.
+- Make meaningful commits along the way.
+
+---
+
+### Task 1: Lock Camera-Stable Horizontal Scene Semantics
+
+**Files:**
+- Modify: `tests/chess_gaze/test_scene_geometry.py`
+- Modify: `src/chess_gaze/scene_geometry.py`
+
+**Interfaces:**
+- Consumes: `build_scene_axis_basis(...)`, `build_monitor_plane(...)`, `camera_point_to_scene(...)`, and `intersect_ray_with_monitor(...)`.
+- Produces: scene X and monitor U values that preserve camera-space image-left/image-right signs for gaze directions and hit points.
+
+- [x] **Step 1: Write failing regression tests**
+
+Add tests in `tests/chess_gaze/test_scene_geometry.py` proving camera-right remains scene-right even with the oblique robust main direction from the reported Nakamura run:
+
+```python
+def test_scene_axis_basis_does_not_rotate_camera_right_into_scene_left() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    main_direction = _dominant_direction_estimate(
+        _normalized_camera_unit_vector(0.5935890162117526, 0.19115407280621485, 0.7817366566065327)
+    )
+    axes = scene_geometry.build_scene_axis_basis(
+        main_direction,
+        [_camera_unit_vector(1.0, 0.0, 0.0)],
+        assumptions,
+    )
+
+    scene_direction = scene_geometry.camera_point_to_scene(
+        _camera_point(0.3711975714751555, 0.4338013084207659, 0.820992562538406),
+        _camera_point(0.0, 0.0, 0.0),
+        axes,
+    )
+
+    assert axes.right_camera.x > 0.99
+    assert axes.up_camera.y < -0.99
+    assert axes.back_camera.z < -0.99
+    assert scene_direction.x > 0.0
+    assert scene_direction.y < 0.0
+    assert scene_direction.z < 0.0
+```
+
+Add a second regression proving the monitor center may be placed obliquely from dominant gaze, but the plane normal remains camera-stable:
+
+```python
+def test_build_monitor_plane_keeps_camera_stable_normal_for_oblique_center() -> None:
+    scene_geometry = _scene_geometry()
+    assumptions = default_scene_assumptions()
+    scene_center = _scene_center_estimate()
+    main_direction = _dominant_direction_estimate(
+        _normalized_camera_unit_vector(0.5935890162117526, 0.19115407280621485, 0.7817366566065327)
+    )
+    axes = scene_geometry.build_scene_axis_basis(
+        main_direction,
+        [_camera_unit_vector(1.0, 0.0, 0.0)],
+        assumptions,
+    )
+    monitor = scene_geometry.build_monitor_plane(
+        scene_center,
+        main_direction,
+        axes,
+        assumptions,
+    )
+
+    assert monitor.center_camera_m.x > scene_center.point_camera_m.x
+    assert monitor.normal_camera.x == pytest.approx(0.0)
+    assert monitor.normal_camera.y == pytest.approx(0.0)
+    assert monitor.normal_camera.z == pytest.approx(-1.0)
+```
+
+- [x] **Step 2: Run tests to verify RED**
+
+Run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py::test_scene_axis_basis_does_not_rotate_camera_right_into_scene_left tests/chess_gaze/test_scene_geometry.py::test_build_monitor_plane_keeps_camera_stable_normal_for_oblique_center -q
+```
+
+Expected: both tests fail with the old oblique `right_camera`/`back_camera` construction because the scene basis and monitor normal use dominant gaze as the depth axis.
+
+- [x] **Step 3: Implement the durable axis repair**
+
+In `src/chess_gaze/scene_geometry.py`, make scene axes camera-stable:
+
+- set `right_camera = (1.0, 0.0, 0.0)`;
+- set `up_camera = (0.0, -1.0, 0.0)`;
+- set `back_camera = (0.0, 0.0, -1.0)`;
+- set `forward_camera = (0.0, 0.0, 1.0)` for the camera-stable scene frame;
+- keep robust main UniGaze direction in `RobustDirectionEstimate` and use it only to place `monitor.center_camera_m`;
+- set `monitor.normal_camera = axes.back_camera`, making the inferred monitor plane frontoparallel in the scene frame.
+
+- [x] **Step 4: Run focused tests to verify GREEN**
+
+Run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+Expected: all scene geometry tests pass.
+
+- [x] **Step 5: Commit**
+
+Run:
+
+```sh
+git add tests/chess_gaze/test_scene_geometry.py src/chess_gaze/scene_geometry.py docs/superpowers/plans/2026-06-26-scene-horizontal-coordinate-repair.md
+git commit -m "fix: preserve scene monitor horizontal ordering"
+```
+
+### Task 2: Verify Existing Artifacts And Regenerate Nakamura Run
+
+**Files:**
+- Inspect: `artifacts/output/nakamura_1/runs/20260626T104848Z-21353a29/`
+- Generate: fresh run under `artifacts/output/nakamura_1/runs/`
+
+**Interfaces:**
+- Consumes: `artifacts/input/nakamura_1.mp4`.
+- Produces: fresh real-video evidence that frame 90's positive yaw maps to the right of a straight-ahead reference and that no pitch/up-down repair regressed.
+
+- [ ] **Step 1: Audit reported run numerically**
+
+Run a Python audit that reads the reported run and records:
+
+- frame 90 `appearance_gaze.yaw_radians`, `direction_camera.x`, `direction_scene.x`, and `plane_uv_m`;
+- scene basis determinant and right/up/back vectors;
+- count of valid-hit frames where camera horizontal ordering disagrees with monitor U ordering against a straight-ahead reference from the same origin.
+
+- [ ] **Step 2: Re-run Nakamura analysis**
+
+Run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 --output-root artifacts/output --models-root models
+```
+
+If sandboxed MediaPipe fails, rerun unsandboxed and record the exact sandbox error.
+
+- [ ] **Step 3: Audit fresh run**
+
+Run the same Python audit on the fresh run. Expected:
+
+- `scene_axes_camera.determinant_right_up_back` remains near `+1`;
+- frame 90 keeps positive camera X for positive yaw;
+- positive camera yaw maps to larger monitor U than straight-ahead for the same origin;
+- frame 1651 still maps positive pitch to camera-up and scene-up.
+
+- [ ] **Step 4: Browser smoke**
+
+Serve the fresh viewer with:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run chess-gaze view <fresh-run-dir> --host 127.0.0.1 --port 0
+```
+
+Open it in Chrome, inspect frames 90, 154, 1568, and 1651, and save screenshots under `/private/tmp/`.
+
+- [ ] **Step 5: Commit closeout updates if needed**
+
+Only generated run artifacts are ignored; commit tracked documentation and tests only.
+
+### Task 3: Repair Documentation And Closeout
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-06-26-3d-scene-artifact-viewer-design.md`
+- Modify: `docs/superpowers/plans/2026-06-26-3d-scene-artifact-viewer.md`
+- Create: `docs/superpowers/closeouts/2026-06-26-scene-horizontal-coordinate-repair.md`
+
+**Interfaces:**
+- Consumes: root-cause evidence from Tasks 1 and 2.
+- Produces: non-contradictory coordinate guidance and closeout evidence for future agents.
+
+- [ ] **Step 1: Update coordinate guidance**
+
+Clarify that `scene_pseudo_m` horizontal ordering must preserve image-left/image-right monotonicity and that robust UniGaze direction remains a semantic forward/monitor placement vector, not permission to rotate horizontal coordinates until depth reverses left/right.
+
+- [ ] **Step 2: Write closeout**
+
+Record:
+
+- root cause;
+- why raw UniGaze yaw/pitch and eye labels were ruled out;
+- third-party coordinate docs consulted;
+- durable surface changed;
+- tests added;
+- real Nakamura verification;
+- residual uncertainty.
+
+- [ ] **Step 3: Run focused doc/source checks**
+
+Run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py tests/chess_gaze/test_scene_artifacts.py tests/chess_gaze/test_scene_viewer.py -q
+UV_CACHE_DIR=.uv-cache uv run ruff check .
+UV_CACHE_DIR=.uv-cache uv run ruff format --check .
+UV_CACHE_DIR=.uv-cache uv run mypy
+```
+
+- [ ] **Step 4: Commit**
+
+Run:
+
+```sh
+git add docs/superpowers/specs/2026-06-26-3d-scene-artifact-viewer-design.md docs/superpowers/plans/2026-06-26-3d-scene-artifact-viewer.md docs/superpowers/plans/2026-06-26-scene-horizontal-coordinate-repair.md docs/superpowers/closeouts/2026-06-26-scene-horizontal-coordinate-repair.md
+git commit -m "docs: record scene horizontal coordinate repair"
+```
+
+### Task 4: Broad Verification And Review
+
+**Files:**
+- No source files unless review finds a defect.
+
+**Interfaces:**
+- Consumes: all repaired source/docs.
+- Produces: final confidence and review evidence.
+
+- [ ] **Step 1: Run broad gates**
+
+Run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest
+UV_CACHE_DIR=.uv-cache uv run ruff check .
+UV_CACHE_DIR=.uv-cache uv run ruff format --check .
+UV_CACHE_DIR=.uv-cache uv run mypy
+```
+
+If full pytest fails due absent legacy media fixtures, record exact failing tests and run the broad available subset that excludes only absent-media tests.
+
+- [ ] **Step 2: Request final code review**
+
+Dispatch a fresh review subagent over the branch diff, asking specifically for coordinate sign, monitor U ordering, scene axis determinant, viewer rendering, third-party contract, and documentation contradictions.
+
+- [ ] **Step 3: Fix Critical or Important findings**
+
+Use focused tests first for any required code fix, then rerun relevant gates and update this plan or closeout if the root-cause understanding changes.
