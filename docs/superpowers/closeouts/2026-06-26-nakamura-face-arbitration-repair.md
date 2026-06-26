@@ -20,6 +20,7 @@ Implementation commits:
 - `1234348 test: reproduce nakamura face arbitration jumps`
 - `ca59e47 fix: prefer compact overlapping face refinements`
 - `452a64e fix: bound overexpanded face refinements`
+- `6a6aa50 test: split face arbitration regressions`
 
 Final review found that the first implementation let overexpanded full-frame
 candidates enter older larger-candidate and top-shift refinement paths. The
@@ -151,14 +152,14 @@ The same-signature detector returned no frames in the fresh run.
 Artifact validation:
 
 ```text
-qa_summary final_status: complete
-decoded_frames: 1973
-frame_records: 1973
-raw_frames: 1973
-processed_frames: 1973
-scene_frame_records: 1973
-schema_validation_passed: true
-counts_match: true
+qa_summary.final_status: complete
+qa_summary.counts.decoded_frames: 1973
+qa_summary.counts.frame_records: 1973
+qa_summary.counts.raw_frames: 1973
+qa_summary.counts.processed_frames: 1973
+qa_summary.counts.scene_frame_records: 1973
+qa_summary.artifact_validation.schema_validation_passed: true
+qa_summary.artifact_validation.counts_match: true
 ```
 
 Scene validation:
@@ -190,7 +191,7 @@ landmarks continuous with adjacent frames.
 RED evidence:
 
 ```text
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py::test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_frame -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_frame -q
 FAILED because only the full-frame region was evaluated.
 ```
 
@@ -203,7 +204,12 @@ Focused post-fix gates:
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py -q
-28 passed
+24 passed
+```
+
+```text
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_region_arbitration.py -q
+4 passed
 ```
 
 ```text
@@ -212,7 +218,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_real
 ```
 
 ```text
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_real_video.py tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_qa_summary.py -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py tests/chess_gaze/test_face_observation_real_video.py tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_qa_summary.py -q
 44 passed, 2 skipped
 ```
 
@@ -225,12 +231,12 @@ All checks passed!
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run ruff format --check .
-57 files already formatted
+59 files already formatted
 ```
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run mypy
-Success: no issues found in 57 source files
+Success: no issues found in 59 source files
 ```
 
 Full pytest was run and failed only because local legacy mandatory inputs are
@@ -238,7 +244,7 @@ absent from this checkout:
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run pytest -q
-7 failed, 253 passed, 7 skipped, 18 warnings in 449.49s
+7 failed, 253 passed, 7 skipped, 18 warnings in 454.23s
 ```
 
 All 7 failures were missing-file assertions for:
@@ -256,7 +262,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest \
   --ignore=tests/chess_gaze/test_qa_summary_real_video_contract.py \
   --ignore=tests/chess_gaze/test_video_decode_real_video.py \
   --ignore=tests/chess_gaze/test_visualization_real_video.py -q
-253 passed, 7 skipped, 18 warnings in 449.76s
+253 passed, 7 skipped, 18 warnings in 451.17s
 ```
 
 ## Source-Layout Review
@@ -271,6 +277,18 @@ helpers that change together and do not yet have a stable reusable interface.
 If candidate provenance becomes persisted, or if another observer needs the
 same arbitration policy, split region selection and scoring behind an explicit
 domain interface rather than adding more private helper growth to this file.
+
+Final review also found that `tests/chess_gaze/test_face_observation.py` had
+crossed the 1,500-line threshold. The overexpanded arbitration regressions now
+live in `tests/chess_gaze/test_face_observation_region_arbitration.py`, with
+shared fake MediaPipe scaffolding in
+`tests/chess_gaze/face_observation_fakes.py`. After the split, line counts are:
+
+```text
+tests/chess_gaze/test_face_observation.py: 1186
+tests/chess_gaze/test_face_observation_region_arbitration.py: 313
+tests/chess_gaze/face_observation_fakes.py: 132
+```
 
 ## Remaining Limitations
 

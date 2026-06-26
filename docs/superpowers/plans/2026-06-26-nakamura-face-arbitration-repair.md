@@ -13,6 +13,8 @@ Status: completed on 2026-06-26. See
 for root cause, verification evidence, and residual limitations.
 Final review added guardrail tests and tightened the overexpanded refinement
 path so it cannot fall through older larger-candidate or top-shift paths.
+The final review follow-up split overexpanded arbitration regressions out of
+the oversized general face-observation test module.
 
 ## Global Constraints
 
