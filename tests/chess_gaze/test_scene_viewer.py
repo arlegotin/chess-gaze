@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,8 +22,8 @@ from chess_gaze.frame_records import (
 )
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.scene_artifacts import build_scene_artifacts
-from chess_gaze.scene_records import ViewerSceneData
-from chess_gaze.scene_viewer import build_scene_viewer
+from chess_gaze.scene_records import SceneSummary, ViewerSceneData
+from chess_gaze.scene_viewer import build_scene_viewer, write_viewer_scene_data
 
 
 def _layout(run_dir: Path) -> RunLayout:
@@ -381,19 +380,41 @@ def test_build_scene_viewer_updates_viewer_exists_summary(
     assert viewer_data.summary.artifact_validation.viewer_exists is True
 
 
-def test_build_scene_viewer_writes_scene_result_viewer_data(
+def test_build_scene_viewer_updates_persisted_scene_summary(
     tmp_path: Path,
 ) -> None:
     layout = _write_minimal_run(tmp_path / "run")
     scene_result = build_scene_artifacts(layout)
-    scene_result = replace(
-        scene_result,
-        viewer_data=scene_result.viewer_data.model_copy(update={"run_id": "changed"}),
+    before_summary = SceneSummary.model_validate_json(
+        scene_result.paths.scene_summary_path.read_text(encoding="utf-8")
     )
+    assert before_summary.artifact_validation.viewer_exists is False
 
     result = build_scene_viewer(layout, scene_result)
 
+    after_summary = SceneSummary.model_validate_json(
+        scene_result.paths.scene_summary_path.read_text(encoding="utf-8")
+    )
     viewer_data = ViewerSceneData.model_validate_json(
         result.scene_data_path.read_text(encoding="utf-8")
     )
-    assert viewer_data.run_id == "changed"
+    assert after_summary.artifact_validation.viewer_exists is True
+    assert viewer_data.summary.artifact_validation.viewer_exists is True
+    assert after_summary.artifact_validation.viewer_exists == (
+        viewer_data.summary.artifact_validation.viewer_exists
+    )
+
+
+def test_write_viewer_scene_data_writes_supplied_viewer_data(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+    scene_result = build_scene_artifacts(layout)
+    viewer_data = scene_result.viewer_data.model_copy(update={"run_id": "changed"})
+
+    path = write_viewer_scene_data(layout.viewer_dir, viewer_data)
+
+    written_viewer_data = ViewerSceneData.model_validate_json(
+        path.read_text(encoding="utf-8")
+    )
+    assert written_viewer_data.run_id == "changed"

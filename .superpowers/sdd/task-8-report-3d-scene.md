@@ -48,3 +48,26 @@ Date: 2026-06-26
 
 - The viewer behavior is covered by static and schema tests, plus local ESM import checks when Node is available. It was not browser-smoked in this task because Task 8 explicitly forbids adding Playwright and Task 9 owns the localhost viewer command/browser smoke.
 - The monitor plane rendering uses the scene-space center and dimensions directly for a readable first viewer. It does not yet derive a rotated Three.js plane from the persisted camera basis; that may matter if future scene axes stop being near the viewer's default plane orientation.
+
+## Review Fixes Round 1
+
+Reviewer finding: standalone `build_scene_viewer(layout, build_scene_artifacts(layout))` wrote `viewer/scene-data.json` with `summary.artifact_validation.viewer_exists=True` while leaving persisted `scene/scene_summary.json` with `viewer_exists=False`.
+
+RED evidence:
+
+- Command: `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q`
+- Result: `test_build_scene_viewer_updates_persisted_scene_summary` failed because `after_summary.artifact_validation.viewer_exists` was `False`.
+
+Fix:
+
+- Moved the viewer-exists update into `build_scene_viewer()`.
+- `build_scene_viewer()` now calls `scene_result_with_viewer_exists(..., viewer_exists=True)`, rewrites `scene/scene_summary.json`, and writes `viewer/scene-data.json` from the same updated scene result.
+- Removed duplicate pre-update and scene-summary rewrite logic from `pipeline.analyze_video()`.
+
+Validation:
+
+- Command: `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q`
+- Result: `13 passed in 0.83s`.
+- Command: `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_qa_summary.py -q`
+- Result: `33 passed in 1.21s`.
+- Real-video checkpoint intentionally skipped for this review fix because the change is metadata consistency only; it does not change frame decoding, scene geometry, hit generation, or viewer frame/hit content.
