@@ -8,6 +8,10 @@
 
 **Tech Stack:** Python 3.12, uv, pytest, MediaPipe Face Landmarker, NumPy, OpenCV/Pillow artifact inspection.
 
+Status: completed on 2026-06-26. See
+`docs/superpowers/closeouts/2026-06-26-nakamura-face-arbitration-repair.md`
+for root cause, verification evidence, and residual limitations.
+
 ## Global Constraints
 
 - Follow `AGENTS.md` as the highest-priority repository instruction.
@@ -31,19 +35,19 @@
 - Consumes: `MediaPipeFaceObserver.observe(rgb_frame, frame_id=...)`.
 - Produces: selected `FaceCandidate` with full-image pixel coordinates.
 
-- [ ] **Step 1: Write unit regression**
+- [x] **Step 1: Write unit regression**
 
 Add a fake MediaPipe sequence where the full-frame result is a single valid overexpanded candidate and the left-half result is a tighter overlapping candidate. The expected selected candidate is the focused one.
 
-- [ ] **Step 2: Write real-video regression**
+- [x] **Step 2: Write real-video regression**
 
 Sample `artifacts/input/nakamura_1.mp4` at frames `1429`, `1430`, `1685`, `1691`, `1692`, `1693`, and `1695`; assert selected face centers/boxes fall in the visually correct compact webcam-face region.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run the focused unit regression and real-video regression. Expected: both fail because current arbitration keeps the overexpanded full-frame candidate on the reported frames.
 
-- [ ] **Step 4: Commit tests**
+- [x] **Step 4: Commit tests**
 
 Commit the failing regression tests separately.
 
@@ -56,15 +60,15 @@ Commit the failing regression tests separately.
 - Consumes: full-frame and focused-region `FaceSelection` values.
 - Produces: a single selected `FaceSelection`.
 
-- [ ] **Step 1: Implement minimal root-cause fix**
+- [x] **Step 1: Implement minimal root-cause fix**
 
 Add a bounded overexpanded-full-frame refinement rule: a focused-region candidate may replace a single full-frame candidate only when it is plausible, not seam-clipped, overlaps the full candidate, is materially more compact, and has a better geometry score.
 
-- [ ] **Step 2: Verify GREEN**
+- [x] **Step 2: Verify GREEN**
 
 Run the new focused tests plus existing face-observation unit and real-video tests.
 
-- [ ] **Step 3: Commit code**
+- [x] **Step 3: Commit code**
 
 Commit the candidate-arbitration fix.
 
@@ -78,18 +82,18 @@ Commit the candidate-arbitration fix.
 - Consumes: `artifacts/input/nakamura_1.mp4`, local model assets under `models/`.
 - Produces: fresh run artifacts with corrected overlays and matching schema validation.
 
-- [ ] **Step 1: Run real analysis**
+- [x] **Step 1: Run real analysis**
 
 Run `chess-gaze analyze artifacts/input/nakamura_1.mp4` unsandboxed with local models.
 
-- [ ] **Step 2: Verify artifact records and visuals**
+- [x] **Step 2: Verify artifact records and visuals**
 
 Compare repaired frames `1429`, `1430`, `1685`, `1691`, `1692`, `1693`, and `1695` against adjacent frames in the fresh run. Confirm the box and landmarks are no longer overexpanded.
 
-- [ ] **Step 3: Run broad gates**
+- [x] **Step 3: Run broad gates**
 
 Run focused face tests, real-video tests, ruff, format check, mypy, and the broad available pytest gate or record exact blocked media failures.
 
-- [ ] **Step 4: Write closeout and commit**
+- [x] **Step 4: Write closeout and commit**
 
 Record root cause, durable surface changed, regression coverage, real-video evidence, third-party docs checked, and remaining limitations.
