@@ -11,6 +11,8 @@
 Status: completed on 2026-06-26. See
 `docs/superpowers/closeouts/2026-06-26-nakamura-face-arbitration-repair.md`
 for root cause, verification evidence, and residual limitations.
+Final review added guardrail tests and tightened the overexpanded refinement
+path so it cannot fall through older larger-candidate or top-shift paths.
 
 ## Global Constraints
 

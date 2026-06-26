@@ -19,6 +19,13 @@ Implementation commits:
 - `352696f docs: plan nakamura face arbitration repair`
 - `1234348 test: reproduce nakamura face arbitration jumps`
 - `ca59e47 fix: prefer compact overlapping face refinements`
+- `452a64e fix: bound overexpanded face refinements`
+
+Final review found that the first implementation let overexpanded full-frame
+candidates enter older larger-candidate and top-shift refinement paths. The
+final code preserves the pre-existing large-full-frame consensus path first,
+then uses the new bounded overexpanded helper exclusively for remaining single
+overexpanded full-frame candidates.
 
 ## Root Cause
 
@@ -102,6 +109,9 @@ Added:
 
 - unit regression for a single overexpanded full-frame candidate plus a compact
   overlapping left-half candidate;
+- unit guardrails proving overexpanded-triggered refinement rejects larger
+  focused candidates, top-shift candidates without compact geometry gain, and
+  large full-frame overlaps without compact gain;
 - real-video regression for `artifacts/input/nakamura_1.mp4` frames `1429`,
   `1430`, `1685`, `1691`, `1692`, `1693`, and `1695`.
 
@@ -120,8 +130,8 @@ UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 
 Fresh run:
 
 ```text
-artifacts/output/nakamura_1/runs/20260626T183952Z-39609cd0
-viewer: artifacts/output/nakamura_1/runs/20260626T183952Z-39609cd0/viewer/index.html
+artifacts/output/nakamura_1/runs/20260626T193202Z-ea469828
+viewer: artifacts/output/nakamura_1/runs/20260626T193202Z-ea469828/viewer/index.html
 ```
 
 Fresh repaired frame records:
@@ -167,9 +177,9 @@ viewer_exists: true
 Visual contact sheets inspected:
 
 ```text
-/private/tmp/chess-gaze-nakamura-debug/fixed/fixed_1427_1432_processed.jpg
-/private/tmp/chess-gaze-nakamura-debug/fixed/fixed_1682_1687_processed.jpg
-/private/tmp/chess-gaze-nakamura-debug/fixed/fixed_1690_1697_processed.jpg
+/private/tmp/chess-gaze-nakamura-debug/final/final_1427_1432_processed.jpg
+/private/tmp/chess-gaze-nakamura-debug/final/final_1682_1687_processed.jpg
+/private/tmp/chess-gaze-nakamura-debug/final/final_1690_1697_processed.jpg
 ```
 
 Visual inspection confirmed the reported frames now have compact face boxes and
@@ -193,7 +203,7 @@ Focused post-fix gates:
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py -q
-25 passed
+28 passed
 ```
 
 ```text
@@ -203,7 +213,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_real
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_real_video.py tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_qa_summary.py -q
-41 passed, 2 skipped
+44 passed, 2 skipped
 ```
 
 Static gates:
@@ -228,7 +238,7 @@ absent from this checkout:
 
 ```text
 UV_CACHE_DIR=.uv-cache uv run pytest -q
-7 failed, 250 passed, 7 skipped, 18 warnings in 453.22s
+7 failed, 253 passed, 7 skipped, 18 warnings in 449.49s
 ```
 
 All 7 failures were missing-file assertions for:
@@ -246,8 +256,21 @@ UV_CACHE_DIR=.uv-cache uv run pytest \
   --ignore=tests/chess_gaze/test_qa_summary_real_video_contract.py \
   --ignore=tests/chess_gaze/test_video_decode_real_video.py \
   --ignore=tests/chess_gaze/test_visualization_real_video.py -q
-250 passed, 7 skipped, 18 warnings in 448.93s
+253 passed, 7 skipped, 18 warnings in 449.76s
 ```
+
+## Source-Layout Review
+
+`src/chess_gaze/face_observation.py` is above the 800-line review threshold.
+The file still owns one coherent deep-module responsibility: MediaPipe face
+observation and candidate arbitration, including region probing, crop-to-image
+coordinate conversion, candidate scoring, and final selection. I did not split
+it during this repair because the new logic modifies private arbitration
+helpers that change together and do not yet have a stable reusable interface.
+
+If candidate provenance becomes persisted, or if another observer needs the
+same arbitration policy, split region selection and scoring behind an explicit
+domain interface rather than adding more private helper growth to this file.
 
 ## Remaining Limitations
 
