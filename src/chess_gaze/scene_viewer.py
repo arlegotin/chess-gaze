@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from importlib.resources.abc import Traversable
+from ipaddress import ip_address
 from pathlib import Path
 from types import TracebackType
 
@@ -100,9 +101,10 @@ def write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
 def serve_viewer(
     run_dir: Path, host: str = "127.0.0.1", port: int = 0
 ) -> ViewerServer:
+    bind_host = _validate_loopback_host(host)
     viewer_root = _validate_viewer_run(run_dir)
     handler = _viewer_request_handler(viewer_root)
-    httpd = _ViewerHTTPServer((host, port), handler)
+    httpd = _ViewerHTTPServer((bind_host, port), handler)
     actual_host, actual_port = httpd.server_address[:2]
     closed = threading.Event()
     started = threading.Event()
@@ -162,6 +164,28 @@ def _validate_viewer_run(run_dir: Path) -> Path:
         raise ViewerServerError(f"Viewer scene data is missing: {scene_data_path}")
 
     return viewer_root.resolve()
+
+
+def _validate_loopback_host(host: str) -> str:
+    normalized = host.strip()
+    if normalized == "localhost":
+        return normalized
+
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+
+    try:
+        address = ip_address(normalized)
+    except ValueError as exc:
+        raise ViewerServerError(
+            f"Viewer host must be a loopback address, not {host!r}"
+        ) from exc
+
+    if not address.is_loopback:
+        raise ViewerServerError(
+            f"Viewer host must be a loopback address, not {host!r}"
+        )
+    return normalized
 
 
 class _ViewerHTTPServer(ThreadingHTTPServer):

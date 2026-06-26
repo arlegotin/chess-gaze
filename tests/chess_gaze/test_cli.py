@@ -168,3 +168,19 @@ def test_view_rejects_missing_run_directory_or_viewer_files(
 
     assert main(["view", str(run_dir)]) == 2
     assert "usage:" in capsys.readouterr().err
+
+
+def test_view_rejects_non_loopback_host(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    run_dir = tmp_path / "run"
+    viewer_dir = run_dir / "viewer"
+    viewer_dir.mkdir(parents=True)
+    (viewer_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (viewer_dir / "scene-data.json").write_text("{}", encoding="utf-8")
+
+    exit_code = main(["view", str(run_dir), "--host", "0.0.0.0"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "loopback" in captured.err

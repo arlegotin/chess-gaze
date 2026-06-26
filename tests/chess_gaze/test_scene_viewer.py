@@ -450,6 +450,20 @@ def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
         server.close()
 
 
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.0.25", "example.com"])
+def test_static_server_rejects_non_loopback_hosts(
+    tmp_path: Path, host: str
+) -> None:
+    run_dir = tmp_path / "run"
+    viewer_dir = run_dir / "viewer"
+    viewer_dir.mkdir(parents=True)
+    (viewer_dir / "index.html").write_text("<!doctype html>viewer", encoding="utf-8")
+    (viewer_dir / "scene-data.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(scene_viewer.ViewerServerError, match="loopback"):
+        scene_viewer.serve_viewer(run_dir, host=host)
+
+
 def test_static_server_does_not_escape_viewer_root(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     viewer_dir = run_dir / "viewer"

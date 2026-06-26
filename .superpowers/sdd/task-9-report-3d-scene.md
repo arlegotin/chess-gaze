@@ -44,7 +44,8 @@ Expected failures:
 - `serve_viewer(run_dir, host="127.0.0.1", port=0)` validates that `run_dir`
   exists and contains `viewer/index.html` and `viewer/scene-data.json`.
 - The HTTP server uses only Python standard library `http.server` primitives.
-- The default bind host is `127.0.0.1`.
+- The default bind host is `127.0.0.1`, and `serve_viewer()` rejects
+  non-loopback hosts such as `0.0.0.0` and `::` before socket binding.
 - The server root is locked to `run_dir/viewer` by resolving every translated
   request path and refusing paths outside the resolved viewer root.
 - `ViewerServer.url` exposes the local URL, including the OS-selected port when
@@ -71,7 +72,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_cli.py tests/chess_ga
 Result:
 
 ```text
-22 passed in 2.05s
+27 passed in 1.72s
 ```
 
 Focused Ruff:
@@ -85,6 +86,15 @@ Result:
 ```text
 All checks passed!
 ```
+
+## Review Finding Resolved
+
+Subagent review found that `--host 0.0.0.0` could expose the static viewer and
+`scene-data.json` outside localhost. The fix moved host validation into
+`serve_viewer()` so both CLI and library callers are restricted to loopback
+addresses. Regression coverage now rejects `0.0.0.0`, `::`, a private LAN
+address, and a non-IP hostname at the server seam, plus the CLI usage-error path
+for `--host 0.0.0.0`.
 
 ## Browser Smoke Evidence
 
@@ -126,7 +136,7 @@ Verified in Chrome DevTools against `http://127.0.0.1:54603/`:
 
 ## Residual Risks
 
-- Unit tests cover traversal attempts and root locking, but they do not exhaust
-  every URL encoding variant.
+- Unit tests cover traversal attempts, root locking, and non-loopback host
+  rejection, but they do not exhaust every URL encoding variant.
 - Real CLI serving was covered through the lower-level server and a monkeypatched
   CLI wait path to avoid hanging the test process.
