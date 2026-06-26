@@ -178,7 +178,6 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         main_direction=main_direction,
         axis_basis=axis_basis,
         monitor_plane=monitor_plane,
-        eye_pair_right_vectors=eye_pair_right_vectors,
     )
     summary = _build_summary(
         run_id=run_manifest.run_id,
@@ -453,7 +452,6 @@ def _build_manifest(
     main_direction: RobustDirectionEstimate,
     axis_basis: SceneAxisBasisRecord,
     monitor_plane: SceneMonitorPlaneRecord,
-    eye_pair_right_vectors: list[UnitVector3D],
 ) -> SceneManifest:
     del run_layout
     return SceneManifest(
@@ -504,8 +502,8 @@ def _build_manifest(
                 uncertainty=main_direction.uncertainty,
             ),
             scene_orientation=SceneOrientationEstimatorRecord(
-                method="eye_pair_right_and_head_up_with_camera_axis_fallbacks",
-                candidate_frame_count=len(eye_pair_right_vectors),
+                method="camera_stable_right_up_back_axes",
+                candidate_frame_count=0,
                 fallbacks=axis_basis.fallbacks,
             ),
         ),

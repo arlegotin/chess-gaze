@@ -98,6 +98,17 @@ Docs updated in this closeout pass:
 - `docs/superpowers/plans/2026-06-26-3d-scene-artifact-viewer.md`;
 - `docs/superpowers/plans/2026-06-26-scene-horizontal-coordinate-repair.md`.
 
+Review follow-up:
+
+- A final review found that runtime scene vectors were fixed, but
+  `scene_manifest.robust_estimators.scene_orientation` still advertised the old
+  eye-pair/head-up estimator. That would mislead artifact consumers.
+- The manifest schema and writer now persist
+  `method = "camera_stable_right_up_back_axes"` and
+  `candidate_frame_count = 0`.
+- The historical implementation plan no longer instructs future agents to add
+  right-vs-forward/up-vs-normal projection fallback behavior.
+
 ## Real Video Verification
 
 Fresh run from `artifacts/input/nakamura_1.mp4`:
@@ -199,8 +210,16 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/
 
 Result: passed.
 
-Final broad-gate evidence is recorded in the repair plan after this closeout is
-committed.
+Broad-gate evidence is recorded in the repair plan.
+
+Post-review evidence:
+
+- Targeted manifest metadata tests failed before the review fix and passed after
+  it with `2 passed in 1.97s`.
+- Focused scene suite passed after the review fix with `93 passed in 2.93s`.
+- Broad available subset passed after the review fix with
+  `237 passed, 7 skipped, 18 warnings` in 587.41s.
+- Final `ruff check .`, `ruff format --check .`, and `mypy` passed.
 
 ## Residual Risk
 

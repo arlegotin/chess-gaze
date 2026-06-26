@@ -309,7 +309,7 @@ git commit -m "docs: record scene horizontal coordinate repair"
 - Consumes: all repaired source/docs.
 - Produces: final confidence and review evidence.
 
-- [ ] **Step 1: Run broad gates**
+- [x] **Step 1: Run broad gates**
 
 Run:
 
@@ -322,10 +322,65 @@ UV_CACHE_DIR=.uv-cache uv run mypy
 
 If full pytest fails due absent legacy media fixtures, record exact failing tests and run the broad available subset that excludes only absent-media tests.
 
-- [ ] **Step 2: Request final code review**
+Evidence:
+
+- `UV_CACHE_DIR=.uv-cache uv run pytest` completed in 636.46s with
+  `237 passed, 7 skipped, 7 failed, 18 warnings`; every failure asserted missing
+  legacy media `artifacts/input/test_1.mp4` or `artifacts/input/test_2.mp4`
+  in:
+  - `tests/chess_gaze/test_pipeline_real_video_contract.py` two parametrized cases;
+  - `tests/chess_gaze/test_qa_summary_real_video_contract.py` two parametrized cases;
+  - `tests/chess_gaze/test_video_decode_real_video.py` two parametrized cases;
+  - `tests/chess_gaze/test_visualization_real_video.py`.
+- Broad available subset excluding only those four absent-media failure files
+  passed in 712.46s with `237 passed, 7 skipped, 18 warnings`:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest --ignore=tests/chess_gaze/test_pipeline_real_video_contract.py --ignore=tests/chess_gaze/test_qa_summary_real_video_contract.py --ignore=tests/chess_gaze/test_video_decode_real_video.py --ignore=tests/chess_gaze/test_visualization_real_video.py
+```
+
+- `UV_CACHE_DIR=.uv-cache uv run ruff check .` passed;
+- `UV_CACHE_DIR=.uv-cache uv run ruff format --check .` passed with
+  `56 files already formatted`;
+- `UV_CACHE_DIR=.uv-cache uv run mypy` passed with
+  `Success: no issues found in 56 source files`.
+
+- [x] **Step 2: Request final code review**
 
 Dispatch a fresh review subagent over the branch diff, asking specifically for coordinate sign, monitor U ordering, scene axis determinant, viewer rendering, third-party contract, and documentation contradictions.
 
-- [ ] **Step 3: Fix Critical or Important findings**
+- [x] **Step 3: Fix Critical or Important findings**
 
 Use focused tests first for any required code fix, then rerun relevant gates and update this plan or closeout if the root-cause understanding changes.
+
+Review evidence:
+
+- Review subagent `019f0421-eae8-7fa1-ad72-044c848756ec` found one
+  Important issue: runtime scene vectors were fixed, but
+  `scene_manifest.robust_estimators.scene_orientation` still advertised the old
+  `eye_pair_right_and_head_up_with_camera_axis_fallbacks` estimator and
+  candidate count.
+- Fixed by changing `SceneOrientationEstimatorRecord.method`,
+  `_build_manifest()`, and manifest tests to persist
+  `method = "camera_stable_right_up_back_axes"` and
+  `candidate_frame_count = 0`.
+- Minor review note fixed by replacing the stale historical-plan instruction
+  about degenerate right-vs-forward/up-vs-normal projection fallbacks.
+
+Post-review verification:
+
+- RED before fix:
+  `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_records.py::test_scene_manifest_serializes_structured_spec_fields tests/chess_gaze/test_scene_artifacts.py::test_build_scene_artifacts_writes_strict_manifest_summary_and_frames -q`
+  failed because the schema rejected `camera_stable_right_up_back_axes` and the
+  writer emitted the old method.
+- GREEN after fix: same command passed with `2 passed in 1.97s`.
+- Focused scene suite passed with `93 passed in 2.93s`.
+- Rebuilt scene artifacts from the real
+  `artifacts/output/nakamura_1/runs/20260626T123553Z-a0f00fd3` run produced
+  orientation metadata
+  `{"method": "camera_stable_right_up_back_axes", "candidate_frame_count": 0,
+  "fallbacks": []}` and retained 1973 valid rays with 0 X-sign, 0 Y-sign, and
+  0 positive scene-Z mismatches.
+- Broad available subset passed after the final review fix in 587.41s with
+  `237 passed, 7 skipped, 18 warnings`.
+- Final `ruff check .`, `ruff format --check .`, and `mypy` passed.

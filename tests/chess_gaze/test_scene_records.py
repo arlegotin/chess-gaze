@@ -269,8 +269,8 @@ def _manifest_payload() -> dict[str, Any]:
                 "uncertainty": "medium",
             },
             "scene_orientation": {
-                "method": "eye_pair_right_and_head_up_with_camera_axis_fallbacks",
-                "candidate_frame_count": 1850,
+                "method": "camera_stable_right_up_back_axes",
+                "candidate_frame_count": 0,
                 "fallbacks": [],
             },
         },

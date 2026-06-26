@@ -783,7 +783,8 @@ Extend `tests/chess_gaze/test_scene_geometry.py` with tests for:
 - fewer than `MIN_MAIN_DIRECTION_INLIER_FRAMES` valid rays falls back to `[0.0, 0.0, 1.0]`.
 - opposite-direction rays are outliers, not equivalent inliers.
 - scene axes are finite, unit length, mutually orthogonal, and determinant `+1` for columns `[right, up, back]`.
-- degenerate right-vs-forward and up-vs-normal projections record fallback reasons.
+- scene axes are camera-stable; do not add right-vs-forward or up-vs-normal
+  projection fallback behavior.
 
 - [ ] **Step 2: Verify RED**
 

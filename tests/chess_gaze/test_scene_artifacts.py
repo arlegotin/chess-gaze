@@ -259,6 +259,12 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     )
     assert manifest.robust_estimators.main_unigaze_direction.uncertainty == "medium"
     assert (
+        manifest.robust_estimators.scene_orientation.method
+        == "camera_stable_right_up_back_axes"
+    )
+    assert manifest.robust_estimators.scene_orientation.candidate_frame_count == 0
+    assert manifest.robust_estimators.scene_orientation.fallbacks == []
+    assert (
         manifest.monitor_plane.distance_source == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
     )
     assert manifest.axis_basis.convention == "right_up_back_columns_right_handed"
