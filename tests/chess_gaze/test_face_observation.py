@@ -870,6 +870,84 @@ def test_mediapipe_observer_prefers_focused_left_face_over_tall_full_false_posit
     assert candidate.bounding_box_image_px.y_max == pytest.approx(288.72)
 
 
+def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            _fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.155, y=0.503, z=0.0),
+                        SimpleNamespace(x=0.281, y=0.775, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="full_frame_overexpanded_face", score=0.20
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+            _fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.321, y=0.568, z=0.0),
+                        SimpleNamespace(x=0.500, y=0.750, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [SimpleNamespace(category_name="left_half_compact_face", score=0.40)]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
+            ),
+            _empty_detection_result(),
+            _empty_detection_result(),
+            _empty_detection_result(),
+            _empty_detection_result(),
+            _empty_detection_result(),
+            _empty_detection_result(),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((1080, 1920, 3), dtype=np.uint8),
+        frame_id="f000001429",
+    )
+
+    assert captured["detect_shapes"] == [
+        (1080, 1920, 3),
+        (1080, 960, 3),
+        (1080, 960, 3),
+        (540, 960, 3),
+        (540, 960, 3),
+        (486, 960, 3),
+        (486, 960, 3),
+        (648, 960, 3),
+    ]
+    assert observation.selection.present is True
+    candidate = observation.selection.candidates[0]
+    assert candidate.blendshapes[0].category_name == "left_half_compact_face"
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(308.16)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(613.44)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(480.0)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(810.0)
+
+
 def test_mediapipe_observer_recovers_small_face_from_right_top_region(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
