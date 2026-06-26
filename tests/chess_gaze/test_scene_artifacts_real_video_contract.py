@@ -12,7 +12,7 @@ from chess_gaze.pipeline import (
     analyze_video,
 )
 from chess_gaze.scene_artifacts import build_scene_artifacts, build_viewer_scene_data
-from chess_gaze.scene_records import SceneSummary
+from chess_gaze.scene_records import SceneSummary, ViewerSceneData
 
 
 def _point(x: float, y: float) -> Point2D:
@@ -128,6 +128,9 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
         AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
         observers=ObserverBundle(frame_observer=_deterministic_valid_scene_record),
     )
+    generated_viewer_data = ViewerSceneData.model_validate_json(
+        pipeline_result.viewer_scene_data_path.read_text(encoding="utf-8")
+    )
     scene_result = build_scene_artifacts(pipeline_result.layout)
     viewer_data = build_viewer_scene_data(scene_result)
     summary = SceneSummary.model_validate_json(
@@ -135,6 +138,12 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
     )
 
     assert pipeline_result.decoded_frame_count == 1973
+    assert pipeline_result.viewer_index_path.is_file()
+    assert pipeline_result.viewer_scene_data_path.is_file()
+    assert generated_viewer_data.frame_count == 1973
+    assert len(generated_viewer_data.frames) == 1973
+    assert len(generated_viewer_data.valid_hit_points) == 1973
+    assert generated_viewer_data.summary.artifact_validation.viewer_exists is True
     assert scene_result.scene_frame_count == 1973
     assert viewer_data.frame_count == 1973
     assert len(viewer_data.frames) == 1973

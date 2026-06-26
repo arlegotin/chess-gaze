@@ -34,7 +34,7 @@ from chess_gaze.scene_artifacts import (
     build_scene_artifacts,
     scene_result_with_viewer_exists,
 )
-from chess_gaze.scene_records import ViewerSceneData
+from chess_gaze.scene_viewer import build_scene_viewer
 from chess_gaze.video_decode import (
     DecodedFrame,
     VideoDecodeError,
@@ -210,18 +210,14 @@ def analyze_video(
 
     try:
         scene_result = build_scene_artifacts(layout)
-        viewer_index_path = _write_viewer_index_placeholder(layout.viewer_dir)
         scene_result = scene_result_with_viewer_exists(
             scene_result,
             viewer_exists=True,
         )
+        viewer_result = build_scene_viewer(layout, scene_result)
         _write_json(
             scene_result.paths.scene_summary_path,
             scene_result.summary.model_dump(mode="json", by_alias=True),
-        )
-        viewer_scene_data_path = _write_viewer_scene_data(
-            layout.viewer_dir,
-            scene_result.viewer_data,
         )
     except (OSError, ValueError) as exc:
         raise PipelineError(CliErrorCode.SCHEMA_VALIDATION_FAILED, str(exc)) from exc
@@ -246,8 +242,8 @@ def analyze_video(
         scene_manifest_path=scene_result.paths.scene_manifest_path,
         scene_summary_path=scene_result.paths.scene_summary_path,
         scene_frames_jsonl_path=scene_result.paths.scene_frames_jsonl_path,
-        viewer_index_path=viewer_index_path,
-        viewer_scene_data_path=viewer_scene_data_path,
+        viewer_index_path=viewer_result.index_path,
+        viewer_scene_data_path=viewer_result.scene_data_path,
         qa_summary_path=qa_summary_path,
         decoded_frame_count=decoded_frame_count,
         validated_record_count=qa_summary.counts.frame_records,
@@ -504,21 +500,6 @@ def _write_json(path: Path, payload: object) -> None:
         + b"\n"
     )
     atomic_write_bytes(path, data)
-
-
-def _write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
-    path = viewer_dir / "scene-data.json"
-    _write_json(path, data.model_dump(mode="json", by_alias=True))
-    return path
-
-
-def _write_viewer_index_placeholder(viewer_dir: Path) -> Path:
-    path = viewer_dir / "index.html"
-    atomic_write_bytes(
-        path,
-        b"<!doctype html><title>Chess Gaze Scene Viewer</title>\n",
-    )
-    return path
 
 
 def _validate_image_format(actual: str, expected: str) -> None:
