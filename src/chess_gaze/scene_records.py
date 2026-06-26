@@ -767,6 +767,8 @@ class SceneViewerDependencyRecord(SceneSchemaModel):
     source: str
     license: str
     dist_integrity: str
+    cdn_provider: str | None = None
+    module_urls: dict[str, str] = Field(default_factory=dict)
 
 
 class SceneManifest(SceneSchemaModel):

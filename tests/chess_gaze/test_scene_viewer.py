@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -30,6 +29,29 @@ from chess_gaze.scene_records import SceneSummary, ViewerSceneData
 from chess_gaze.scene_viewer import (
     build_scene_viewer,
     write_viewer_scene_data,
+)
+
+THREE_MODULE_URL = "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js"
+THREE_CORE_URL = "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.core.js"
+THREE_ADDONS_URL = "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
+ORBIT_CONTROLS_URL = (
+    "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/controls/OrbitControls.js"
+)
+APPROVED_REMOTE_MODULE_URLS = {
+    THREE_MODULE_URL,
+    THREE_CORE_URL,
+    THREE_ADDONS_URL,
+    ORBIT_CONTROLS_URL,
+}
+EXPECTED_IMPORT_MAP = {
+    "imports": {
+        "three": THREE_MODULE_URL,
+        "three/addons/": THREE_ADDONS_URL,
+    }
+}
+EXTERNAL_URL_RE = re.compile(r"https?://[^\s\"'<>`]+")
+PROTOCOL_RELATIVE_URL_RE = re.compile(
+    r"(?<!:)//[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^\s\"'<>`]*"
 )
 
 
@@ -169,6 +191,57 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
     return layout
 
 
+def _read_viewer_app_assets(viewer_dir: Path) -> dict[str, str]:
+    return {
+        relative_path: (viewer_dir / relative_path).read_text(encoding="utf-8")
+        for relative_path in ("index.html", "scene_viewer.js", "styles.css")
+    }
+
+
+def _external_urls(text: str) -> set[str]:
+    return set(EXTERNAL_URL_RE.findall(text))
+
+
+def _assert_absent(text: str, needle: str, label: str) -> None:
+    if needle in text:
+        pytest.fail(f"{label} contains forbidden {needle!r}")
+
+
+def _extract_import_map(html: str) -> dict[str, object]:
+    for match in re.finditer(
+        r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>",
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        if re.search(r"""\btype=["']importmap["']""", match.group("attrs")):
+            return cast("dict[str, object]", json.loads(match.group("body")))
+    raise AssertionError("generated viewer index is missing an import map")
+
+
+def _resolve_import_map_specifier(import_map: dict[str, object], specifier: str) -> str:
+    imports = import_map["imports"]
+    assert isinstance(imports, dict)
+    exact = imports.get(specifier)
+    if isinstance(exact, str):
+        return exact
+
+    prefix_matches = [
+        (prefix, target)
+        for prefix, target in imports.items()
+        if (
+            isinstance(prefix, str)
+            and isinstance(target, str)
+            and prefix.endswith("/")
+            and specifier.startswith(prefix)
+        )
+    ]
+    if not prefix_matches:
+        raise AssertionError(f"{specifier!r} is not resolvable by the import map")
+
+    prefix, target = max(prefix_matches, key=lambda item: len(item[0]))
+    return target + specifier[len(prefix) :]
+
+
 @pytest.fixture
 def built_viewer(tmp_path: Path) -> tuple[RunLayout, ViewerSceneData]:
     layout = _write_minimal_run(tmp_path / "run")
@@ -194,19 +267,39 @@ def test_build_scene_viewer_writes_index_and_scene_data(
     assert viewer_data.schema_version == "gaze-scene-viewer-data-v1"
 
 
-def test_build_scene_viewer_copies_local_vendor_assets(
+def test_build_scene_viewer_writes_app_assets_without_local_vendor_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
 
-    for relative_path in (
-        "vendor/three.module.js",
-        "vendor/three.core.js",
-        "vendor/OrbitControls.js",
-        "vendor/THREE_LICENSE.txt",
-        "vendor/vendor_manifest.json",
-    ):
-        assert (layout.viewer_dir / relative_path).is_file()
+    generated_files = {
+        path.relative_to(layout.viewer_dir).as_posix()
+        for path in layout.viewer_dir.rglob("*")
+        if path.is_file()
+    }
+
+    assert {
+        "index.html",
+        "scene-data.json",
+        "scene_viewer.js",
+        "styles.css",
+    } <= generated_files
+    assert not (layout.viewer_dir / "vendor").exists()
+    assert all(not path.startswith("vendor/") for path in generated_files)
+
+
+def test_build_scene_viewer_removes_stale_local_vendor_assets(tmp_path: Path) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+    scene_result = build_scene_artifacts(layout)
+    stale_vendor_dir = layout.viewer_dir / "vendor"
+    stale_vendor_dir.mkdir(parents=True)
+    (stale_vendor_dir / "three.module.js").write_text(
+        "stale local dependency", encoding="utf-8"
+    )
+
+    build_scene_viewer(layout, scene_result)
+
+    assert not stale_vendor_dir.exists()
 
 
 def test_scene_data_is_strict_schema_versioned_viewer_scene_data(
@@ -285,20 +378,37 @@ def test_generated_html_includes_required_selectors(
         assert selector in html
 
 
-def test_generated_html_js_and_css_reference_only_local_assets(
+def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
 
-    for relative_path in ("scene_viewer.js", "styles.css"):
-        text = (layout.viewer_dir / relative_path).read_text(encoding="utf-8")
-        assert "http://" not in text
-        assert "https://" not in text
-        assert "cdn" not in text.lower()
-        assert "telemetry" not in text.lower()
+    app_assets = _read_viewer_app_assets(layout.viewer_dir)
+    combined_assets = "\n".join(app_assets.values())
 
-    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
-    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    _assert_absent(combined_assets, "http://", "generated viewer assets")
+    protocol_relative_match = PROTOCOL_RELATIVE_URL_RE.search(combined_assets)
+    assert protocol_relative_match is None, (
+        "generated viewer assets contain protocol-relative URL "
+        f"{protocol_relative_match.group(0)!r}"
+    )
+    _assert_absent(combined_assets.lower(), "latest", "generated viewer assets")
+    _assert_absent(combined_assets.lower(), "telemetry", "generated viewer assets")
+    _assert_absent(combined_assets, "./vendor/", "generated viewer assets")
+    _assert_absent(combined_assets, "/vendor/", "generated viewer assets")
+    unexpected_urls = _external_urls(combined_assets) - APPROVED_REMOTE_MODULE_URLS
+    assert unexpected_urls == set()
+
+    html = app_assets["index.html"]
+    js = app_assets["scene_viewer.js"]
+    css = app_assets["styles.css"]
+    import_map = _extract_import_map(html)
+    assert import_map == EXPECTED_IMPORT_MAP
+    assert THREE_MODULE_URL in _external_urls(html)
+    assert THREE_ADDONS_URL in _external_urls(html)
+    assert _external_urls(js) == set()
+    assert _external_urls(css) == set()
+
     load_references = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html)
     assert load_references
     assert all(
@@ -308,8 +418,14 @@ def test_generated_html_js_and_css_reference_only_local_assets(
     assert 'rel="icon" href="data:,"' in html
     assert 'href="./styles.css"' in html
     assert 'src="./scene_viewer.js"' not in html
-    assert 'from "./vendor/three.module.js"' in js
-    assert 'from "./vendor/OrbitControls.js"' in js
+    assert 'from "three"' in js
+    assert 'from "three/addons/controls/OrbitControls.js"' in js
+    assert (
+        _resolve_import_map_specifier(
+            import_map, "three/addons/controls/OrbitControls.js"
+        )
+        == ORBIT_CONTROLS_URL
+    )
 
 
 def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
@@ -320,9 +436,9 @@ def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
 
     assert 'type="module" src="./scene_viewer.js"' not in html
     assert 'id="scene-data-json"' in html
-    assert 'id="three-core-source"' in html
-    assert 'id="three-module-source"' in html
-    assert 'id="orbit-controls-source"' in html
+    _assert_absent(html, 'id="three-core-source"', "generated viewer index")
+    _assert_absent(html, 'id="three-module-source"', "generated viewer index")
+    _assert_absent(html, 'id="orbit-controls-source"', "generated viewer index")
     assert 'id="scene-viewer-source"' in html
     assert "window.__CHESS_GAZE_SCENE_DATA__" in html
     assert viewer_data.run_id in html
@@ -371,45 +487,22 @@ def test_generated_js_contains_mode_names(
     assert "Accumulated" in js
 
 
-def test_copied_vendor_modules_are_esm_importable_when_node_is_available(
+def test_generated_index_import_map_resolves_pinned_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("Node is unavailable; skipping copied vendored ESM import check.")
-
     layout, _viewer_data = built_viewer
-    three_module_url = (layout.viewer_dir / "vendor" / "three.module.js").as_uri()
-    orbit_controls_url = (layout.viewer_dir / "vendor" / "OrbitControls.js").as_uri()
-    import_script = """
-const modules = process.argv.slice(1);
-const results = await Promise.allSettled(modules.map((moduleUrl) => import(moduleUrl)));
-const failures = results
-  .map((result, index) => ({ result, moduleUrl: modules[index] }))
-  .filter(({ result }) => result.status === "rejected");
-if (failures.length > 0) {
-  for (const { result, moduleUrl } of failures) {
-    console.error(`${moduleUrl}: ${result.reason.message}`);
-  }
-  process.exit(1);
-}
-"""
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
 
-    result = subprocess.run(
-        [
-            node,
-            "--experimental-default-type=module",
-            "--input-type=module",
-            "-e",
-            import_script,
-            three_module_url,
-            orbit_controls_url,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
+    import_map = _extract_import_map(html)
+
+    assert import_map == EXPECTED_IMPORT_MAP
+    assert _resolve_import_map_specifier(import_map, "three") == THREE_MODULE_URL
+    assert (
+        _resolve_import_map_specifier(
+            import_map, "three/addons/controls/OrbitControls.js"
+        )
+        == ORBIT_CONTROLS_URL
     )
-    assert result.returncode == 0, result.stderr
 
 
 def test_build_scene_viewer_updates_viewer_exists_summary(

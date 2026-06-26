@@ -27,6 +27,25 @@ from chess_gaze.scene_artifacts import (
 )
 from chess_gaze.scene_records import SceneAssumptionRecord, SceneManifest, SceneSummary
 
+THREE_VERSION = "0.185.0"
+THREE_MODULE_URL = (
+    f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/build/three.module.js"
+)
+THREE_CORE_URL = (
+    f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/build/three.core.js"
+)
+THREE_ADDONS_URL = f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/"
+ORBIT_CONTROLS_URL = (
+    f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/controls/"
+    "OrbitControls.js"
+)
+EXPECTED_MODULE_URLS = {
+    "three": THREE_MODULE_URL,
+    "three/core": THREE_CORE_URL,
+    "three/addons/": THREE_ADDONS_URL,
+    "three/addons/controls/OrbitControls.js": ORBIT_CONTROLS_URL,
+}
+
 
 def _layout(run_dir: Path) -> RunLayout:
     records_dir = run_dir / "records"
@@ -246,7 +265,11 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     assert manifest.axis_basis.determinant_right_up_back > 0.99
     assert manifest.coordinate_frames.math_frame == "camera_opencv_pseudo_m"
     assert manifest.viewer_dependency.library == "three"
-    assert manifest.viewer_dependency.version == "0.185.0"
+    assert manifest.viewer_dependency.version == THREE_VERSION
+    assert manifest.viewer_dependency.source == "npm:three"
+    assert manifest.viewer_dependency.license == "MIT"
+    assert manifest.viewer_dependency.cdn_provider == "cdn.jsdelivr.net"
+    assert manifest.viewer_dependency.module_urls == EXPECTED_MODULE_URLS
 
     summary = SceneSummary.model_validate_json(
         result.paths.scene_summary_path.read_text(encoding="utf-8")

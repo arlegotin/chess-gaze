@@ -32,9 +32,10 @@ package instead of accidentally importing Python files from the repository root.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration, validation,
     and command-line entry points.
 - `src/chess_gaze/viewer_assets/` contains package resources for the generated
-  local viewer: HTML, CSS, JavaScript, and vendored Three.js assets. These files
-  are copied into each run's `viewer/` directory; there is no frontend build
-  tree or runtime CDN dependency.
+  local viewer: HTML, CSS, JavaScript, and pinned remote Three.js dependency
+  metadata. The app assets are copied into each run's `viewer/` directory; the
+  generated page loads Three.js `0.185.0` from pinned jsDelivr npm module URLs
+  at render time per ADR-0003. There is still no frontend build tree.
 - `tests/` contains behavior tests for code in `src/chess_gaze/`, with
   package-path-mirroring tests under `tests/chess_gaze/` and repository
   packaging checks at top level.

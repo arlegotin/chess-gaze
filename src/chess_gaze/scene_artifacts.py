@@ -56,6 +56,15 @@ from chess_gaze.scene_records import (
     ViewerHitPoint,
     ViewerSceneData,
 )
+from chess_gaze.viewer_dependencies import (
+    THREE_CDN_PROVIDER,
+    THREE_LICENSE,
+    THREE_MODULE_URLS,
+    THREE_NPM_INTEGRITY,
+    THREE_PACKAGE_NAME,
+    THREE_SOURCE,
+    THREE_VERSION,
+)
 
 
 @dataclass(frozen=True)
@@ -504,14 +513,13 @@ def _build_manifest(
         scene_axes_camera=axis_basis,
         main_monitor_plane=monitor_plane,
         viewer=SceneViewerDependencyRecord(
-            library="three",
-            version="0.185.0",
-            source="npm:three",
-            license="MIT",
-            dist_integrity=(
-                "sha512-+yRrcRO2iZa8uzvNNl0d7cL4huhgKgBvVJ0njcTe8xFqZ6DMAFZdCKDP"
-                "91SEAuj25bNAj7k1QQdf+srZywVK6w=="
-            ),
+            library=THREE_PACKAGE_NAME,
+            version=THREE_VERSION,
+            source=THREE_SOURCE,
+            license=THREE_LICENSE,
+            dist_integrity=THREE_NPM_INTEGRITY,
+            cdn_provider=THREE_CDN_PROVIDER,
+            module_urls=THREE_MODULE_URLS,
         ),
         generated_at_utc=_utc_timestamp(),
     )

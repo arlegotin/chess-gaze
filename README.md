@@ -89,6 +89,14 @@ uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>
 The command prints a local URL and serves only files under that run's
 `viewer/` directory. It binds to loopback hosts only.
 
+The viewer keeps run artifacts local, but it loads Three.js `0.185.0` from
+pinned jsDelivr module URLs when the page renders. Expected remote module
+requests are `three.module.js`, its transitive `three.core.js`, and
+`OrbitControls.js` for the same pinned version. Project viewer code does not
+upload scene JSON, frames, crops, or model data, but the remote modules execute
+in the same page as embedded scene data and must be trusted. Offline viewing
+requires those pinned modules to already be present in the browser cache.
+
 ## Scene Artifacts
 
 Scene units are pseudo-metric. Eye depth is inferred from the adult-male

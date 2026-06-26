@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -17,6 +19,7 @@ from chess_gaze.scene_artifacts import (
     scene_result_with_viewer_exists,
 )
 from chess_gaze.scene_records import SceneSummary, ViewerSceneData
+from chess_gaze.viewer_dependencies import three_import_map
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,7 @@ def build_scene_viewer(
         scene_result,
         viewer_exists=True,
     )
+    _remove_stale_local_vendor_assets(viewer_dir)
     copy_viewer_assets(viewer_dir)
     _write_scene_summary(
         updated_scene_result.paths.scene_summary_path,
@@ -119,20 +123,7 @@ def _write_file_url_compatible_index(
             '    <script type="application/json" id="scene-data-json">',
             _safe_script_payload(scene_data_json),
             "    </script>",
-            _module_source_script(
-                "three-core-source",
-                (viewer_dir / "vendor" / "three.core.js").read_text(encoding="utf-8"),
-            ),
-            _module_source_script(
-                "three-module-source",
-                (viewer_dir / "vendor" / "three.module.js").read_text(encoding="utf-8"),
-            ),
-            _module_source_script(
-                "orbit-controls-source",
-                (viewer_dir / "vendor" / "OrbitControls.js").read_text(
-                    encoding="utf-8"
-                ),
-            ),
+            _import_map_script(three_import_map()),
             _module_source_script(
                 "scene-viewer-source",
                 (viewer_dir / "scene_viewer.js").read_text(encoding="utf-8"),
@@ -156,6 +147,18 @@ def _module_source_script(script_id: str, source: str) -> str:
     )
 
 
+def _import_map_script(import_map: Mapping[str, object]) -> str:
+    return "\n".join(
+        (
+            '    <script type="importmap">',
+            _safe_script_payload(
+                json.dumps(import_map, ensure_ascii=True, separators=(",", ":"))
+            ),
+            "    </script>",
+        )
+    )
+
+
 def _safe_script_payload(payload: str) -> str:
     return payload.replace("</", "<\\/")
 
@@ -165,41 +168,12 @@ def _file_url_bootstrap_script() -> str:
       const sourceText = (id) => JSON.parse(document.getElementById(id).textContent);
       const moduleUrl = (source) =>
         URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
-      const replaceSpecifier = (source, specifier, replacementUrl) =>
-        source
-          .replaceAll(`"${specifier}"`, JSON.stringify(replacementUrl))
-          .replaceAll(`'${specifier}'`, JSON.stringify(replacementUrl));
 
       window.__CHESS_GAZE_SCENE_DATA__ = JSON.parse(
         document.getElementById("scene-data-json").textContent,
       );
 
-      const threeCoreUrl = moduleUrl(sourceText("three-core-source"));
-      const threeModuleUrl = moduleUrl(
-        replaceSpecifier(
-          sourceText("three-module-source"),
-          "./three.core.js",
-          threeCoreUrl,
-        ),
-      );
-      const orbitControlsUrl = moduleUrl(
-        replaceSpecifier(
-          sourceText("orbit-controls-source"),
-          "./three.module.js",
-          threeModuleUrl,
-        ),
-      );
-      const sceneViewerUrl = moduleUrl(
-        sourceText("scene-viewer-source")
-          .replace(
-            'import * as THREE from "./vendor/three.module.js";',
-            `import * as THREE from ${JSON.stringify(threeModuleUrl)};`,
-          )
-          .replace(
-            'import { OrbitControls } from "./vendor/OrbitControls.js";',
-            `import { OrbitControls } from ${JSON.stringify(orbitControlsUrl)};`,
-          ),
-      );
+      const sceneViewerUrl = moduleUrl(sourceText("scene-viewer-source"));
 
       import(sceneViewerUrl).catch((error) => {
         const message = `Scene viewer unavailable: ${error.message}`;
@@ -215,6 +189,12 @@ def _file_url_bootstrap_script() -> str:
         console.error(error);
       });
     })();"""
+
+
+def _remove_stale_local_vendor_assets(viewer_dir: Path) -> None:
+    vendor_dir = viewer_dir / "vendor"
+    if vendor_dir.exists():
+        shutil.rmtree(vendor_dir)
 
 
 def serve_viewer(run_dir: Path, host: str = "127.0.0.1", port: int = 0) -> ViewerServer:
