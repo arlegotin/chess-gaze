@@ -878,6 +878,45 @@ def test_structured_nested_models_reject_non_finite_values_and_unknown_keys() ->
         SceneManifest.model_validate(unknown_viewer_manifest_payload)
 
 
+def test_scene_manifest_rejects_non_finite_and_unknown_estimator_diagnostics() -> None:
+    non_finite_mad_payload = _manifest_payload()
+    non_finite_mad_payload["robust_estimators"]["scene_center"]["mad_m"] = (
+        0.012,
+        math.nan,
+        0.08,
+    )
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(non_finite_mad_payload)
+
+    non_finite_threshold_payload = _manifest_payload()
+    non_finite_threshold_payload["robust_estimators"]["scene_center"][
+        "thresholds_m"
+    ] = (0.042, math.inf, 0.28)
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(non_finite_threshold_payload)
+
+    non_finite_percentile_payload = _manifest_payload()
+    non_finite_percentile_payload["robust_estimators"]["main_unigaze_direction"][
+        "angular_residual_percentiles_radians"
+    ]["p50"] = math.inf
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(non_finite_percentile_payload)
+
+    missing_percentile_payload = _manifest_payload()
+    missing_percentile_payload["robust_estimators"]["main_unigaze_direction"][
+        "angular_residual_percentiles_radians"
+    ].pop("p95")
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(missing_percentile_payload)
+
+    extra_percentile_payload = _manifest_payload()
+    extra_percentile_payload["robust_estimators"]["main_unigaze_direction"][
+        "angular_residual_percentiles_radians"
+    ]["p99"] = 0.4
+    with pytest.raises(ValidationError):
+        SceneManifest.model_validate(extra_percentile_payload)
+
+
 def test_scene_summary_serializes_structured_breakdowns() -> None:
     summary = SceneSummary.model_validate(_summary_payload())
     payload = summary.model_dump()

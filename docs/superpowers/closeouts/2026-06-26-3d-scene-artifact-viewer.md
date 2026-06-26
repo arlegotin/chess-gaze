@@ -83,6 +83,10 @@ Counts and validation:
 - `scene_summary.artifact_validation`: all true
 - `qa_summary.artifact_validation.schema_validation_passed`: true
 - `qa_summary.artifact_validation.counts_match`: true
+- post-review refresh validates persisted assumption
+  `DEFAULT_HEAD_ELLIPSOID_RADIUS_M == (0.09, 0.12, 0.1)` and no split
+  `DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M/Y_M/Z_M` records remain in the generated
+  manifest.
 
 Axis convention evidence:
 
@@ -182,10 +186,17 @@ Targeted robust-diagnostics regression after repair:
 64 passed in 0.84s
 ```
 
+Focused final-review regression for strict estimator diagnostics, persisted
+assumptions, scene artifacts, and QA summary:
+
+```text
+40 passed in 1.30s
+```
+
 Final full pytest:
 
 ```text
-7 failed, 227 passed, 7 skipped, 18 warnings in 460.57s (0:07:40)
+7 failed, 228 passed, 7 skipped, 18 warnings in 476.16s (0:07:56)
 ```
 
 All 7 failures are absent legacy media blockers for:
@@ -196,7 +207,7 @@ All 7 failures are absent legacy media blockers for:
 Final broad available subset excluding those absent-media files:
 
 ```text
-227 passed, 7 skipped, 18 warnings in 463.34s (0:07:43)
+228 passed, 7 skipped, 18 warnings in 476.50s (0:07:56)
 ```
 
 Static gates:
@@ -223,5 +234,7 @@ Success: no issues found in 55 source files
   analysis. The command completed and the generated viewer made no remote
   requests, but the native library behavior should remain visible in future
   privacy reviews.
-- Legacy real-video tests for `test_0.mp4`, `test_1.mp4`, and `test_2.mp4`
-  remain blocked/skipped/failed when those local ignored media files are absent.
+- Legacy real-video coverage remains dependent on ignored local media files.
+  In this run, missing `test_1.mp4` and `test_2.mp4` caused the 7 full-suite
+  failures above; `test_0.mp4` coverage is skipped when that local file is
+  absent.

@@ -78,10 +78,11 @@ def test_default_scene_assumptions_persists_metadata_for_every_record() -> None:
         }
 
 
-def test_default_scene_assumptions_persists_individual_head_radius_constants() -> None:
+def test_default_scene_assumptions_persists_head_radius_tuple_constant() -> None:
     assumptions = default_scene_assumptions()
     names = {record.name: record.value for record in assumptions.records}
 
-    assert names["DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M"] == 0.090
-    assert names["DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M"] == 0.120
-    assert names["DEFAULT_HEAD_ELLIPSOID_RADIUS_Z_M"] == 0.100
+    assert names["DEFAULT_HEAD_ELLIPSOID_RADIUS_M"] == (0.090, 0.120, 0.100)
+    assert "DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M" not in names
+    assert "DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M" not in names
+    assert "DEFAULT_HEAD_ELLIPSOID_RADIUS_Z_M" not in names

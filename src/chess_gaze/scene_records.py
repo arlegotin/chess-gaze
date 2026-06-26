@@ -705,6 +705,16 @@ class SceneCenterEstimatorRecord(SceneSchemaModel):
     fallback_used: bool
     uncertainty: Literal["low", "medium", "high"]
 
+    @field_validator("mad_m", "thresholds_m")
+    @classmethod
+    def validate_finite_triplet(
+        cls,
+        value: tuple[float, float, float],
+        info: object,
+    ) -> tuple[float, float, float]:
+        field_name = getattr(info, "field_name", "estimator_triplet")
+        return _validate_finite_triplet(value, field_name=field_name)
+
 
 class SceneDirectionEstimatorRecord(SceneSchemaModel):
     method: Literal["angular_ransac_then_normalized_inlier_mean"]
@@ -716,6 +726,27 @@ class SceneDirectionEstimatorRecord(SceneSchemaModel):
     angular_residual_percentiles_radians: dict[str, float | None]
     fallback_used: bool
     uncertainty: Literal["low", "medium", "high"]
+
+    @field_validator("angular_residual_percentiles_radians")
+    @classmethod
+    def validate_angular_residual_percentiles(
+        cls,
+        value: dict[str, float | None],
+    ) -> dict[str, float | None]:
+        expected_keys = {"p50", "p75", "p90", "p95"}
+        actual_keys = set(value)
+        if actual_keys != expected_keys:
+            raise ValueError(
+                "angular_residual_percentiles_radians must contain exactly "
+                "p50, p75, p90, and p95"
+            )
+        for percentile_name, residual in value.items():
+            if residual is not None and not math.isfinite(residual):
+                raise ValueError(
+                    "angular_residual_percentiles_radians values must be "
+                    f"finite or null, got {percentile_name}={residual!r}"
+                )
+        return value
 
 
 class SceneOrientationEstimatorRecord(SceneSchemaModel):
