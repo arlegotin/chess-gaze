@@ -23,7 +23,7 @@
 - Every decoded frame must produce exactly one `records/scene_frames.jsonl` line with the same `frame_id` and `frame_index` identity as `records/frames.jsonl`.
 - Do not drop, sample, smooth, average across time, deduplicate, merge, clamp, cluster, or heatmap-substitute monitor hit points. A valid forward ray-plane hit produces exactly one persisted point.
 - Use `appearance_gaze` as the UniGaze source for scene rays. Do not substitute `recommended_gaze`.
-- Reuse `pitch_yaw_to_unit_vector()` from `src/chess_gaze/gaze_observation.py` and preserve its yaw sign convention.
+- Superseded by `docs/superpowers/plans/2026-06-26-nakamura-scene-pitch-coordinate-repair.md`: scene rays must preserve `pitch_yaw_to_unit_vector()` yaw and forward-Z semantics, then negate vector Y when entering `camera_opencv_pseudo_m` because frame-record positive pitch is image-up and OpenCV +Y is image-down.
 - No scene artifact may contain NaN, Infinity, silently coerced unknown enum strings, or unknown JSON fields.
 - Keep all new modules deep. Do not create pass-through packages or generic `core`, `services`, `engine`, or `domain` layers.
 - Constants from the spec must be centralized, tested for exact values, and persisted into `scene/scene_manifest.json` with unit, source, and uncertainty metadata.
@@ -763,7 +763,7 @@ Extend `tests/chess_gaze/test_scene_geometry.py` with tests for:
 - zero MAD still accepts natural small motion using `SCENE_CENTER_MIN_AXIS_TOLERANCE_M`.
 - non-finite center candidates are dropped and counted.
 - `unigaze_ray_from_frame()` uses `appearance_gaze`, never `recommended_gaze`.
-- UniGaze ray conversion matches `pitch_yaw_to_unit_vector()` for yaw and pitch sign.
+- UniGaze ray conversion preserves `pitch_yaw_to_unit_vector()` yaw and forward-Z semantics, and negates vector Y for OpenCV camera space so positive frame-record pitch maps to camera up.
 - angular RANSAC selects a dominant direction with outlier rays present.
 - angular RANSAC tie-breaks by inlier count, then lower median angular residual, then lower seed frame index.
 - fewer than `MIN_MAIN_DIRECTION_INLIER_FRAMES` valid rays falls back to `[0.0, 0.0, 1.0]`.
@@ -793,7 +793,7 @@ Implement the algorithms from the approved spec with the axis correction from th
   - persist candidate count, dropped count, inlier count, MAD values, iteration count, convergence tolerance, fallback state, and uncertainty.
 - `unigaze_ray_from_frame()`:
   - require valid `appearance_gaze`;
-  - convert pitch/yaw with the existing `pitch_yaw_to_unit_vector()`;
+  - convert pitch/yaw with the scene-specific OpenCV boundary: reuse `pitch_yaw_to_unit_vector()` for x/z and negate its y component for `camera_opencv_pseudo_m`;
   - use valid eye midpoint as origin;
   - mark invalid with `EYE_MIDPOINT_INVALID` or `UNIGAZE_INVALID` when required.
 - `robust_main_direction()`:

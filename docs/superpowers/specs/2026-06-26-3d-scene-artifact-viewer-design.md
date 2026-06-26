@@ -20,7 +20,8 @@ machine-readable evidence to reconstruct and debug an approximate 3D scene:
 
 - streamer head and eyes through time;
 - a robust scene center based on eye-midpoint positions;
-- a scene coordinate frame with explicit up, right, and forward axes;
+- a scene coordinate frame with explicit up, right, semantic forward, and
+  transform-back axes;
 - a main-monitor plane inferred from the dominant UniGaze direction plus explicit
   human/setup assumptions where monocular data cannot determine scale;
 - one per-frame scene record for every decoded frame;
@@ -164,7 +165,7 @@ All scene records must name the coordinate frame of every 3D value.
 | --- | --- |
 | `image_px` | Source decoded image pixels, origin top-left, x right, y down. |
 | `camera_opencv_pseudo_m` | OpenCV-style camera frame: +X image-right, +Y image-down, +Z camera-forward into the image. Units are pseudo-meters derived from assumptions unless calibration proves metric scale. |
-| `scene_pseudo_m` | Scene frame centered at the robust eye-midpoint center. +X scene-right, +Y scene-up, +Z scene-forward. Units match `camera_opencv_pseudo_m`. |
+| `scene_pseudo_m` | Scene frame centered at the robust eye-midpoint center. +X scene-right, +Y scene-up, +Z scene-back in the `right_up_back_columns_right_handed` transform basis. Semantic forward gaze toward the monitor is therefore negative scene Z. Units match `camera_opencv_pseudo_m`. |
 | `monitor_plane_pseudo_m` | Main monitor plane coordinates. +U monitor-right, +V monitor-up, origin at inferred monitor center. |
 | `three_view` | Browser display mapping from `scene_pseudo_m`: x stays x, y stays y-up, z is rendered with Three.js camera conventions. |
 
@@ -271,6 +272,7 @@ One JSON object per run:
   "scene_axes_camera": {
     "right": [1.0, 0.0, 0.0],
     "up": [0.0, -1.0, 0.0],
+    "back": [0.0, 0.0, -1.0],
     "forward": [0.0, 0.0, 1.0]
   },
   "main_monitor_plane": {
@@ -353,14 +355,14 @@ Each line:
     "origin_camera_m": [-0.0335, -0.010, 0.700],
     "direction_camera": [0.01, -0.02, 0.99975],
     "direction_source": "appearance_gaze_unigaze_pitch_yaw",
-    "pitch_radians": -0.02,
+    "pitch_radians": 0.02,
     "yaw_radians": 0.01,
     "reason_invalid": null
   },
   "main_monitor_hit": {
     "valid": true,
     "point_camera_m": [-0.0265, -0.024, 1.400],
-    "point_scene_m": [0.006, 0.014, 0.700],
+    "point_scene_m": [0.006, 0.014, -0.700],
     "plane_uv_m": [0.006, 0.014],
     "within_physical_monitor": true,
     "within_extended_plane": true,
@@ -480,8 +482,11 @@ UniGaze.
 
 For valid `appearance_gaze`:
 
-1. Convert pitch/yaw to a camera direction with the existing
-   `pitch_yaw_to_unit_vector()` convention in `gaze_observation.py`.
+1. Convert pitch/yaw to a camera direction by preserving
+   `pitch_yaw_to_unit_vector()` yaw and forward-Z semantics, then negating the
+   vector Y component when entering `camera_opencv_pseudo_m`. Frame-record gaze
+   angles and 2D overlays use positive pitch as image-up; OpenCV camera space
+   uses +Y image-down.
 2. Normalize the vector and validate finite norm.
 3. Set ray origin to the per-frame eye midpoint when both eyes are valid.
 4. If eyes are invalid, set the ray invalid with reason
@@ -521,18 +526,20 @@ The sign is stored so ray-plane intersection denominators are explainable.
 Build axes in camera coordinates:
 
 1. `scene_forward_camera` is the dominant UniGaze direction.
-2. `scene_right_camera` prefers the robust direction from left eye to right eye
+2. `scene_back_camera` is `-scene_forward_camera` and is the persisted +Z
+   transform basis column.
+3. `scene_right_camera` prefers the robust direction from left eye to right eye
    across valid frames.
-3. `scene_up_camera` prefers robust head-up evidence if orientation matrices or
+4. `scene_up_camera` prefers robust head-up evidence if orientation matrices or
    quaternions are persisted; otherwise use camera up `[0.0, -1.0, 0.0]`.
-4. Orthogonalize with Gram-Schmidt:
-   - remove the component of right along forward;
+5. Orthogonalize with Gram-Schmidt:
+   - remove the component of right along back;
    - normalize right;
-   - `up = normalize(cross(forward, right))` adjusted to align with preferred up;
-   - recompute `right = normalize(cross(up, forward))`.
-5. Validate finite axes, near-unit norms, pairwise dot products near zero, and
-   determinant near `+1`.
-6. If any axis degenerates, use the safest fallback axis and record the fallback
+   - `up = normalize(cross(back, right))` adjusted to align with preferred up;
+   - recompute `right = normalize(cross(up, back))`.
+6. Validate finite axes, near-unit norms, pairwise dot products near zero, and
+   determinant near `+1` for `[right, up, back]`.
+7. If any axis degenerates, use the safest fallback axis and record the fallback
    in `scene_manifest.robust_estimators.scene_orientation.fallbacks`.
 
 Do not infer mirror policy unless explicit evidence exists. Persist
