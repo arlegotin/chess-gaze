@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 
 class ConfigurationError(RuntimeError):
@@ -20,6 +21,15 @@ class AnalysisConfig(BaseModel):
     raw_frame_image_format: str = "png"
     processed_frame_image_format: str = "jpg"
     processed_frame_jpeg_quality: int = 95
+    unigaze_device: Literal["cpu", "mps"] = "cpu"
+    unigaze_batch_size: int = 1
+
+    @field_validator("unigaze_batch_size")
+    @classmethod
+    def validate_unigaze_batch_size(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("unigaze_batch_size must be at least 1")
+        return value
 
 
 def load_config(path: Path | None) -> AnalysisConfig:

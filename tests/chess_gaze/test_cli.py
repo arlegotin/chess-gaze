@@ -113,6 +113,42 @@ def test_analyze_prints_run_dir_and_viewer_path(
     ]
 
 
+def test_analyze_passes_unigaze_cli_overrides(
+    tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    run_dir = tmp_path / "runs" / "run-1"
+    viewer_index_path = run_dir / "viewer" / "index.html"
+    make_tiny_video(video_path)
+    captured_requests: list[object] = []
+
+    def fake_analyze_video(request: object) -> object:
+        captured_requests.append(request)
+        return SimpleNamespace(
+            layout=SimpleNamespace(run_dir=run_dir),
+            viewer_index_path=viewer_index_path,
+        )
+
+    monkeypatch.setattr(cli, "analyze_video", fake_analyze_video)
+
+    exit_code = main(
+        [
+            "analyze",
+            str(video_path),
+            "--unigaze-device",
+            "mps",
+            "--unigaze-batch-size",
+            "7",
+        ]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().err == ""
+    [request] = captured_requests
+    assert request.unigaze_device == "mps"
+    assert request.unigaze_batch_size == 7
+
+
 def test_view_prints_localhost_url_for_run_viewer(
     tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: MonkeyPatch
 ) -> None:

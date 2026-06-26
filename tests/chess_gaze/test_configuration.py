@@ -17,6 +17,52 @@ def test_load_config_uses_task_4_defaults(tmp_path: Path) -> None:
     assert config.processed_frame_jpeg_quality == 95
 
 
+def test_load_config_uses_unigaze_runtime_defaults() -> None:
+    config = load_config(None)
+
+    assert config.unigaze_device == "cpu"
+    assert config.unigaze_batch_size == 1
+
+
+def test_load_config_accepts_unigaze_runtime_fields(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_device": "mps", "unigaze_batch_size": 7}',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.unigaze_device == "mps"
+    assert config.unigaze_batch_size == 7
+
+
+@pytest.mark.parametrize("batch_size", [0, -1])
+def test_load_config_rejects_invalid_unigaze_batch_size(
+    tmp_path: Path, batch_size: int
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        f'{{"unigaze_batch_size": {batch_size}}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="unigaze_batch_size") as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
+
+
+def test_load_config_rejects_unsupported_unigaze_device(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"unigaze_device": "cuda"}', encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="unigaze_device") as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
+
+
 def test_load_config_rejects_unknown_keys(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(

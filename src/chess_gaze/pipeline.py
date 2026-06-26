@@ -85,6 +85,8 @@ class AnalyzeRequest:
     output_root: Path | None = None
     models_root: Path | None = None
     config_path: Path | None = None
+    unigaze_device: str | None = None
+    unigaze_batch_size: int | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
     clock: Clock = utc_now
@@ -126,6 +128,8 @@ class _ResolvedRequest:
     raw_frame_image_format: str
     processed_frame_image_format: str
     processed_frame_jpeg_quality: int
+    unigaze_device: str
+    unigaze_batch_size: int
 
 
 def analyze_video(
@@ -275,6 +279,16 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         raw_frame_image_format=config.raw_frame_image_format,
         processed_frame_image_format=config.processed_frame_image_format,
         processed_frame_jpeg_quality=config.processed_frame_jpeg_quality,
+        unigaze_device=(
+            request.unigaze_device
+            if request.unigaze_device is not None
+            else config.unigaze_device
+        ),
+        unigaze_batch_size=(
+            request.unigaze_batch_size
+            if request.unigaze_batch_size is not None
+            else config.unigaze_batch_size
+        ),
     )
 
 
