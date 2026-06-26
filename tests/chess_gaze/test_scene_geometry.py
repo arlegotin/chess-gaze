@@ -835,6 +835,42 @@ def test_unigaze_ray_from_frame_requires_valid_midpoint() -> None:
     assert ray.reason_invalid == SceneInvalidReason.EYE_MIDPOINT_INVALID
 
 
+def test_unigaze_ray_from_frame_marks_invalid_when_appearance_gaze_is_unusable(
+) -> None:
+    scene_geometry = _scene_geometry()
+    midpoint = _midpoint_record(
+        valid=True,
+        camera_point=_camera_point(0.0, 0.0, 0.7),
+        scene_point=_scene_point(0.0, 0.0, 0.0),
+        reason_invalid=None,
+    )
+
+    ray = scene_geometry.unigaze_ray_from_frame(
+        _frame_record_with_gazes(
+            appearance_gaze=_invalid_angles(ErrorCode.GAZE_MODEL_FAILED),
+            recommended_gaze=_gaze_angles(
+                valid=True,
+                pitch_radians=-0.40,
+                yaw_radians=0.80,
+                reason_invalid=None,
+            ),
+        ),
+        midpoint,
+    )
+
+    assert ray.valid is False
+    assert ray.source == "appearance_gaze"
+    assert ray.reason_invalid == SceneInvalidReason.UNIGAZE_INVALID
+    assert ray.origin_camera_m is None
+    assert ray.origin_scene_m is None
+    assert ray.direction_camera is None
+    assert ray.direction_scene is None
+    assert ray.direction_source is None
+    assert ray.pitch_radians is None
+    assert ray.yaw_radians is None
+    assert ray.source_reason_invalid == ErrorCode.GAZE_MODEL_FAILED.value
+
+
 def test_robust_main_direction_selects_dominant_cluster_with_outliers() -> None:
     scene_geometry = _scene_geometry()
     assumptions = default_scene_assumptions()

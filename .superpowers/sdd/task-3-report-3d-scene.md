@@ -118,6 +118,46 @@ UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/
 - Result: passed.
 - Output: `All checks passed!`
 
+## Review Fixes Round 3
+
+- Added a focused regression for valid midpoint plus unusable `appearance_gaze`.
+- The new test makes `recommended_gaze` valid and intentionally different, then asserts there is no fallback:
+  - `valid is False`
+  - `reason_invalid == SceneInvalidReason.UNIGAZE_INVALID`
+  - nullable origin, direction, and angle fields remain `None`
+  - `source == "appearance_gaze"`
+  - `source_reason_invalid == "GAZE_MODEL_FAILED"`
+
+Mutation-style RED evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q -k marks_invalid_when_appearance_gaze_is_unusable
+```
+
+- Current correct implementation passed immediately after adding the test, so a temporary mutation was used as allowed.
+- Temporary mutation: changed `unigaze_ray_from_frame()` to fall back to `recommended_gaze` when `appearance_gaze` was invalid.
+- Result under mutation: failed as expected.
+- Output: `1 failed, 24 deselected in 0.53s`.
+- Failure mode: the new test caught the fallback by observing `ray.valid is True`.
+
+GREEN evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py -q
+```
+
+- Result: passed.
+- Output: `25 passed in 0.56s`.
+
+Focused Ruff evidence:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run ruff check src/chess_gaze/scene_geometry.py tests/chess_gaze/test_scene_geometry.py
+```
+
+- Result: passed.
+- Output: `All checks passed!`
+
 ## Review Fixes Round 2
 
 - Strengthened `test_unigaze_ray_from_frame_uses_appearance_gaze_not_recommended_gaze` so it now asserts:
