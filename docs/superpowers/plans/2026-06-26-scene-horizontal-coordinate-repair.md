@@ -143,7 +143,7 @@ git commit -m "fix: preserve scene monitor horizontal ordering"
 - Consumes: `artifacts/input/nakamura_1.mp4`.
 - Produces: fresh real-video evidence that frame 90's positive yaw maps to the right of a straight-ahead reference and that no pitch/up-down repair regressed.
 
-- [ ] **Step 1: Audit reported run numerically**
+- [x] **Step 1: Audit reported run numerically**
 
 Run a Python audit that reads the reported run and records:
 
@@ -151,7 +151,18 @@ Run a Python audit that reads the reported run and records:
 - scene basis determinant and right/up/back vectors;
 - count of valid-hit frames where camera horizontal ordering disagrees with monitor U ordering against a straight-ahead reference from the same origin.
 
-- [ ] **Step 2: Re-run Nakamura analysis**
+Evidence from `artifacts/output/nakamura_1/runs/20260626T104848Z-21353a29`:
+
+- frame 90: `direction_camera.x = +0.3711975714751555` but
+  `direction_scene.x = -0.2008572172489131`;
+- old axes: `right_camera = (0.7964226551329736, 0.0,
+  -0.6047404024793983)`, `back_camera = (-0.5935890162117526,
+  -0.19115407280621485, -0.7817366566065327)`;
+- old monitor normal equaled old `back_camera`;
+- straight-ahead-relative monitor-U ordering mismatches: 88 of 1958 compared
+  valid rays.
+
+- [x] **Step 2: Re-run Nakamura analysis**
 
 Run:
 
@@ -161,7 +172,17 @@ UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 
 
 If sandboxed MediaPipe fails, rerun unsandboxed and record the exact sandbox error.
 
-- [ ] **Step 3: Audit fresh run**
+Real verification run:
+
+```sh
+MPLCONFIGDIR=/Volumes/git/legotin/chess-gaze/.cache/matplotlib UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 --output-root artifacts/output --models-root models
+```
+
+Generated `artifacts/output/nakamura_1/runs/20260626T123553Z-a0f00fd3`
+and completed cleanly after emitting known PyAV/OpenCV duplicate native class
+warnings and MediaPipe telemetry upload warnings.
+
+- [x] **Step 3: Audit fresh run**
 
 Run the same Python audit on the fresh run. Expected:
 
@@ -170,7 +191,30 @@ Run the same Python audit on the fresh run. Expected:
 - positive camera yaw maps to larger monitor U than straight-ahead for the same origin;
 - frame 1651 still maps positive pitch to camera-up and scene-up.
 
-- [ ] **Step 4: Browser smoke**
+Evidence from `artifacts/output/nakamura_1/runs/20260626T123553Z-a0f00fd3`:
+
+- frame counts: 1973 `records/frames.jsonl`, 1973
+  `records/scene_frames.jsonl`, 1973 viewer frames;
+- axes: `right_camera = (1,0,0)`, `up_camera = (0,-1,0)`,
+  `back_camera = (0,0,-1)`, `forward_camera = (0,0,1)`,
+  `determinant_right_up_back = 1.0`;
+- monitor normal: `(0,0,-1)`;
+- frame 90: `direction_camera.x = +0.3711975714751555`,
+  `direction_scene.x = +0.3711975714751555`, straight-ahead-relative
+  `delta_u = +0.269131707767523`;
+- frame 154: `direction_camera.x = +0.8417334780683987`,
+  `direction_scene.x = +0.8417334780683987`;
+- frame 1568: `direction_camera.x = -0.8151148789774965`,
+  `direction_scene.x = -0.8151148789774965`;
+- frame 1651: `direction_camera.y = -0.7382197511455898`,
+  `direction_scene.y = +0.7382197511455898`;
+- aggregate ray checks: 1973 valid rays, 0 X-sign mismatches, 0 Y-sign
+  mismatches after the intentional camera-down to scene-up flip, 0 positive
+  scene-Z directions, 0 viewer direction payload mismatches;
+- straight-ahead-relative monitor-U ordering mismatches: 0 of 1973 compared
+  valid rays.
+
+- [x] **Step 4: Browser smoke**
 
 Serve the fresh viewer with:
 
@@ -179,6 +223,21 @@ UV_CACHE_DIR=.uv-cache uv run chess-gaze view <fresh-run-dir> --host 127.0.0.1 -
 ```
 
 Open it in Chrome, inspect frames 90, 154, 1568, and 1651, and save screenshots under `/private/tmp/`.
+
+Evidence:
+
+- served `http://127.0.0.1:57632/` for the fresh run;
+- Chrome loaded 1973 frames and 1973 hit points;
+- frame-control inspection confirmed frames 90, 154, 1568, and 1651 expose
+  the same `unigaze_ray.direction_scene` vectors as `records/scene_frames.jsonl`;
+- screenshots saved:
+  `/private/tmp/chess-gaze-fresh-viewer-frame90.png`,
+  `/private/tmp/chess-gaze-fresh-viewer-frame154.png`,
+  `/private/tmp/chess-gaze-fresh-viewer-frame1568.png`,
+  `/private/tmp/chess-gaze-fresh-viewer-frame1651.png`;
+- browser console: no messages;
+- network: viewer document, CSS, `scene-data.json`, and pinned Three.js modules
+  returned HTTP 200.
 
 - [ ] **Step 5: Commit closeout updates if needed**
 
@@ -195,11 +254,11 @@ Only generated run artifacts are ignored; commit tracked documentation and tests
 - Consumes: root-cause evidence from Tasks 1 and 2.
 - Produces: non-contradictory coordinate guidance and closeout evidence for future agents.
 
-- [ ] **Step 1: Update coordinate guidance**
+- [x] **Step 1: Update coordinate guidance**
 
 Clarify that `scene_pseudo_m` horizontal ordering must preserve image-left/image-right monotonicity and that robust UniGaze direction remains a semantic forward/monitor placement vector, not permission to rotate horizontal coordinates until depth reverses left/right.
 
-- [ ] **Step 2: Write closeout**
+- [x] **Step 2: Write closeout**
 
 Record:
 
@@ -211,7 +270,7 @@ Record:
 - real Nakamura verification;
 - residual uncertainty.
 
-- [ ] **Step 3: Run focused doc/source checks**
+- [x] **Step 3: Run focused doc/source checks**
 
 Run:
 
@@ -221,6 +280,16 @@ UV_CACHE_DIR=.uv-cache uv run ruff check .
 UV_CACHE_DIR=.uv-cache uv run ruff format --check .
 UV_CACHE_DIR=.uv-cache uv run mypy
 ```
+
+Evidence:
+
+- `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py tests/chess_gaze/test_scene_artifacts.py tests/chess_gaze/test_scene_records.py tests/chess_gaze/test_scene_viewer.py -q`
+  passed with `93 passed in 1.91s`;
+- `UV_CACHE_DIR=.uv-cache uv run ruff check .` passed;
+- `UV_CACHE_DIR=.uv-cache uv run ruff format --check .` passed with
+  `56 files already formatted`;
+- `UV_CACHE_DIR=.uv-cache uv run mypy` passed with
+  `Success: no issues found in 56 source files`.
 
 - [ ] **Step 4: Commit**
 

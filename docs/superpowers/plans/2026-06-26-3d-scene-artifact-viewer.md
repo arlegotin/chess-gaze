@@ -11,6 +11,14 @@
 > Historical note, 2026-06-26: ADR-0003 supersedes this plan's local-vendored
 > Three.js constraint. Current generated viewers load Three.js `0.185.0` from
 > pinned jsDelivr npm module URLs and no longer copy `viewer/vendor/`.
+>
+> Historical note, 2026-06-26: the scene-axis and monitor-normal guidance in
+> this plan was superseded by
+> `docs/superpowers/plans/2026-06-26-scene-horizontal-coordinate-repair.md`.
+> Current scene axes are camera-stable right/up/back columns
+> `[1,0,0]`, `[0,-1,0]`, `[0,0,-1]`; robust dominant UniGaze direction places
+> the monitor center only and does not define the scene depth axis or monitor
+> surface normal.
 
 ## Global Constraints
 
@@ -35,7 +43,13 @@
   uploaded frames, uploaded model data, and frontend build services remain
   disallowed.
 - Do not add `package.json`, `node_modules`, Playwright, or a frontend build unless an ADR or spec update compares that dependency against the task requirements. The initial viewer is a Python-packaged static asset generator.
-- Axis convention correction: the spec's illustrative camera axes `right=[1,0,0]`, `up=[0,-1,0]`, `forward=[0,0,1]` are left-handed when stored as basis columns. Implementation must persist semantic `scene_forward_camera` for the dominant gaze direction and a right-handed transform basis with columns `[scene_right_camera, scene_up_camera, scene_back_camera]`, where `scene_back_camera = -scene_forward_camera` after orthogonalization. Tests must prove determinant near `+1` for that transform basis. Viewer copy and labels may still describe the UniGaze line as forward from the streamer toward the monitor.
+- Axis convention correction, superseded by the scene horizontal coordinate
+  repair: implementation must persist a right-handed transform basis with
+  camera-stable columns `[scene_right_camera, scene_up_camera,
+  scene_back_camera] = [[1,0,0], [0,-1,0], [0,0,-1]]`. The robust dominant
+  UniGaze direction remains semantic monitor-center evidence, not a scene-axis
+  input. Tests must prove determinant near `+1` and horizontal sign
+  preservation.
 
 ---
 
@@ -803,12 +817,13 @@ Implement the algorithms from the approved spec with the axis correction from th
   - tie-break by median angular residual and seed frame index;
   - output normalized mean of inliers or explicit fallback.
 - `build_scene_axis_basis()`:
-  - persist semantic `scene_forward_camera` as dominant UniGaze direction;
-  - build a right-handed transform basis with columns `[scene_right_camera, scene_up_camera, scene_back_camera]`;
-  - set `scene_back_camera = -scene_forward_camera` after orthogonalization;
-  - prefer robust left-eye-to-right-eye direction for right axis;
-  - prefer camera up `[0.0, -1.0, 0.0]` when head-up evidence is unavailable;
-  - record every axis fallback in the manifest diagnostics.
+  - build a right-handed transform basis with camera-stable columns
+    `[scene_right_camera, scene_up_camera, scene_back_camera]`;
+  - set `scene_right_camera = [1.0, 0.0, 0.0]`;
+  - set `scene_up_camera = [0.0, -1.0, 0.0]`;
+  - set `scene_back_camera = [0.0, 0.0, -1.0]`;
+  - set `scene_forward_camera = [0.0, 0.0, 1.0]`;
+  - do not rotate scene axes from dominant UniGaze or eye-pair evidence.
 
 - [ ] **Step 4: Verify GREEN**
 
@@ -838,8 +853,10 @@ Expected after implementation: all robust estimator and axis tests pass.
 Extend `tests/chess_gaze/test_scene_geometry.py` with tests for:
 
 - monitor center is `scene_center_camera + dominant_unigaze_direction_camera * DEFAULT_MONITOR_DISTANCE_FROM_EYES_M`.
-- monitor normal is the opposite of the dominant UniGaze direction.
-- monitor basis is finite, unit length, and orthogonal to the monitor normal.
+- monitor normal is camera-stable `scene_back_camera`, not the opposite of the
+  dominant UniGaze direction.
+- monitor basis is finite, unit length, and equal to the scene right/up/back
+  axes.
 - physical width and height are `0.600` and `0.340`.
 - extended plane width and height are physical dimensions multiplied by `3.0`.
 - valid ray-plane hit persists denominator, signed distance, `t`, camera point, scene point, monitor `u/v`, and bounds booleans.

@@ -22,8 +22,9 @@ machine-readable evidence to reconstruct and debug an approximate 3D scene:
 - a robust scene center based on eye-midpoint positions;
 - a scene coordinate frame with explicit up, right, semantic forward, and
   transform-back axes;
-- a main-monitor plane inferred from the dominant UniGaze direction plus explicit
-  human/setup assumptions where monocular data cannot determine scale;
+- a main-monitor center placed from the dominant UniGaze direction, with a
+  camera-stable plane orientation plus explicit human/setup assumptions where
+  monocular data cannot determine scale or monitor pose;
 - one per-frame scene record for every decoded frame;
 - one monitor-plane hit point for every frame that has a finite UniGaze ray and a
   valid ray-plane intersection;
@@ -171,6 +172,9 @@ All scene records must name the coordinate frame of every 3D value.
 
 The mathematical frame is `camera_opencv_pseudo_m`. The viewer frame is only a
 rendering transform. Persist the math values, not only Three.js-ready values.
+Scene X must preserve camera/image horizontal ordering: a camera-right gaze
+direction cannot become scene-left because the estimated dominant gaze direction
+is oblique.
 
 ## Explicit Assumptions And Constants
 
@@ -184,7 +188,7 @@ determine a value.
 | Constant | Value | Unit | Purpose | Uncertainty |
 | --- | ---: | --- | --- | --- |
 | `DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M` | 0.063 | m | Estimate face depth from 2D pupil distance. | medium |
-| `DEFAULT_MONITOR_DISTANCE_FROM_EYES_M` | 0.700 | m | Place main-monitor plane along robust UniGaze direction. | high |
+| `DEFAULT_MONITOR_DISTANCE_FROM_EYES_M` | 0.700 | m | Place main-monitor plane center along robust UniGaze direction. | high |
 | `DEFAULT_MONITOR_WIDTH_M` | 0.600 | m | Draw a typical 16:9 main monitor rectangle. | medium |
 | `DEFAULT_MONITOR_HEIGHT_M` | 0.340 | m | Draw a typical 16:9 main monitor rectangle. | medium |
 | `DEFAULT_EXTENDED_PLANE_SCALE` | 3.0 | multiplier | Draw monitor plane beyond physical monitor bounds. | low |
@@ -197,7 +201,7 @@ determine a value.
 | `DEFAULT_SCENE_CENTER_CAMERA_M` | `[0.0, 0.0, 0.650]` | pseudo-m | Fallback scene center when eye-midpoint data is insufficient. | high |
 | `SCENE_CENTER_MIN_AXIS_TOLERANCE_M` | 0.015 | pseudo-m | Prevent zero MAD from rejecting natural small head motion. | medium |
 | `MIN_SCENE_CENTER_INLIER_FRAMES` | 5 | frames | Minimum valid frames before using data-derived center. | low |
-| `MIN_MAIN_DIRECTION_INLIER_FRAMES` | 5 | frames | Minimum valid UniGaze rays before using data-derived monitor normal. | low |
+| `MIN_MAIN_DIRECTION_INLIER_FRAMES` | 5 | frames | Minimum valid UniGaze rays before using data-derived monitor-center direction. | low |
 | `DIRECTION_INLIER_ANGLE_RADIANS` | 0.35 | rad | Default angular inlier cutoff for dominant gaze direction. | medium |
 
 If implementation changes any constant, the active spec or an ADR must explain
@@ -263,8 +267,8 @@ One JSON object per run:
       "fallback_used": false
     },
     "scene_orientation": {
-      "method": "eye_pair_right_and_head_up_with_camera_axis_fallbacks",
-      "candidate_frame_count": 1850,
+      "method": "camera_stable_right_up_back_axes",
+      "candidate_frame_count": 0,
       "fallbacks": []
     }
   },
@@ -495,7 +499,7 @@ For valid `appearance_gaze`:
 Implementation must add regression tests that lock the yaw/pitch sign convention
 against existing 2D overlay expectations.
 
-### 4. Robust main-monitor normal
+### 4. Robust main-monitor center direction
 
 Candidate directions are valid per-frame UniGaze unit vectors.
 
@@ -513,34 +517,33 @@ Algorithm:
 7. If no candidate set has at least `MIN_MAIN_DIRECTION_INLIER_FRAMES`, use
    fallback direction `[0.0, 0.0, 1.0]` and mark high uncertainty.
 
-The monitor plane normal is the opposite of the dominant ray direction:
+The dominant ray direction estimates where the main monitor center lies relative
+to the robust scene center. It is not a measured monitor surface normal and must
+not rotate the scene horizontal/depth axes.
 
 ```text
-monitor_normal_camera = -dominant_unigaze_direction_camera
+monitor_center_camera =
+  scene_center_camera + dominant_unigaze_direction_camera * monitor_distance_m
 ```
 
-The sign is stored so ray-plane intersection denominators are explainable.
+The direction estimate and its inlier diagnostics are persisted so the inferred
+center remains auditable.
 
 ### 5. Scene orientation
 
-Build axes in camera coordinates:
+Build axes in camera coordinates and keep them camera-stable:
 
-1. `scene_forward_camera` is the dominant UniGaze direction.
-2. `scene_back_camera` is `-scene_forward_camera` and is the persisted +Z
-   transform basis column.
-3. `scene_right_camera` prefers the robust direction from left eye to right eye
-   across valid frames.
-4. `scene_up_camera` prefers robust head-up evidence if orientation matrices or
-   quaternions are persisted; otherwise use camera up `[0.0, -1.0, 0.0]`.
-5. Orthogonalize with Gram-Schmidt:
-   - remove the component of right along back;
-   - normalize right;
-   - `up = normalize(cross(back, right))` adjusted to align with preferred up;
-   - recompute `right = normalize(cross(up, back))`.
-6. Validate finite axes, near-unit norms, pairwise dot products near zero, and
+1. `scene_right_camera = [1.0, 0.0, 0.0]`.
+2. `scene_up_camera = [0.0, -1.0, 0.0]`.
+3. `scene_back_camera = [0.0, 0.0, -1.0]`.
+4. `scene_forward_camera = [0.0, 0.0, 1.0]`.
+5. Validate finite axes, unit norms, pairwise dot products near zero, and
    determinant near `+1` for `[right, up, back]`.
-7. If any axis degenerates, use the safest fallback axis and record the fallback
-   in `scene_manifest.robust_estimators.scene_orientation.fallbacks`.
+
+Do not rotate scene axes from dominant gaze or eye-pair evidence. Eye labels and
+eye-pair ordering remain validation evidence, but they are not a basis-estimation
+input for the scene frame. This keeps camera/image right monotonic with scene
+right and prevents forward depth from changing the horizontal sign.
 
 Do not infer mirror policy unless explicit evidence exists. Persist
 `mirror_policy="unknown"` when unknown.
@@ -559,10 +562,14 @@ provides measured monitor distance.
 
 Plane basis:
 
-- `normal_camera = -dominant_unigaze_direction_camera`;
-- `up_camera = scene_up_camera` projected onto the monitor plane and normalized;
-- `right_camera = normalize(cross(up_camera, normal_camera))`;
-- if projection degenerates, use `scene_right_camera` projected onto the plane.
+- `normal_camera = scene_back_camera`;
+- `up_camera = scene_up_camera`;
+- `right_camera = scene_right_camera`.
+
+This is a frontoparallel scene plane, not a calibrated physical monitor pose.
+`monitor_plane_pseudo_m.u` is relative to the inferred monitor center. For
+left/right ray semantics, use `unigaze_ray.direction_scene.x`; the sign of
+`plane_uv_m[0]` alone can differ when the inferred center is off-axis.
 
 Persist physical monitor dimensions and extended plane dimensions. The viewer
 must draw both:
@@ -698,11 +705,10 @@ Official docs state that the result can contain face landmarks, blendshapes, and
 an optional facial transformation matrix. Source:
 `https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/python`.
 
-NumPy remains the core numerical dependency. Official docs cover median,
-percentile, and SVD APIs used for robust summaries and orthogonalization checks:
+NumPy remains the core numerical dependency. Official docs cover median and
+percentile APIs used for robust summaries:
 `https://numpy.org/doc/stable/reference/generated/numpy.median.html`,
-`https://numpy.org/doc/stable/reference/generated/numpy.percentile.html`,
-`https://numpy.org/doc/stable/reference/generated/numpy.linalg.svd.html`.
+`https://numpy.org/doc/stable/reference/generated/numpy.percentile.html`.
 
 ## Source Integration Points
 
@@ -815,17 +821,19 @@ Record the run directory, counts, scene summary, and viewer smoke result.
    deduplicated.
 6. Scene center is a geometric median over valid eye midpoints after outlier
    screening, or an explicit persisted fallback if too few valid frames exist.
-7. Main-monitor normal is inferred from robust dominant UniGaze direction, or an
-   explicit persisted fallback if too few valid rays exist.
-8. Monitor distance, monitor size, IPD, and head dimensions are persisted as
+7. Main-monitor center direction is inferred from robust dominant UniGaze
+   direction, or an explicit persisted fallback if too few valid rays exist.
+8. Main-monitor normal is camera-stable `scene_back_camera`, and monitor right
+   and up match the scene right/up axes.
+9. Monitor distance, monitor size, IPD, and head dimensions are persisted as
    explicit assumptions with units and uncertainty.
-9. Scene axes are finite, unit-length within tolerance, mutually orthogonal
+10. Scene axes are finite, unit-length within tolerance, mutually orthogonal
    within tolerance, and have determinant near `+1`, or the manifest records the
    fallback axes used.
-10. Ray-plane intersection diagnostics include denominator, signed distance,
+11. Ray-plane intersection diagnostics include denominator, signed distance,
     `t`, bounds booleans, and invalid reason.
-11. `qa_summary.json` validates scene artifacts and includes their byte counts.
-12. The generated viewer renders a light-themed 3D scene with orbit/pan/zoom,
+12. `qa_summary.json` validates scene artifacts and includes their byte counts.
+13. The generated viewer renders a light-themed 3D scene with orbit/pan/zoom,
     head ellipsoid, eye spheres, UniGaze ray, monitor plane, current hit point,
     and accumulated points mode.
 13. The temporal slider supports exact frame scrubbing and mode switch between
