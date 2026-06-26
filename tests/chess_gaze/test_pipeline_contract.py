@@ -510,6 +510,35 @@ def test_config_models_root_controls_default_model_observer_factory(
     assert result.layout.run_dir.is_relative_to(output_root)
 
 
+@pytest.mark.parametrize(
+    ("request_overrides", "expected_field"),
+    [
+        ({"unigaze_device": "cuda"}, "unigaze_device"),
+        ({"unigaze_batch_size": 0}, "unigaze_batch_size"),
+    ],
+)
+def test_invalid_runtime_request_overrides_fail_with_usage_before_io(
+    tmp_path: Path,
+    request_overrides: dict[str, object],
+    expected_field: str,
+) -> None:
+    output_root = tmp_path / "output"
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=tmp_path / "missing.mp4",
+                output_root=output_root,
+                **request_overrides,
+            ),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+    assert expected_field in str(exc_info.value)
+    assert not output_root.exists()
+
+
 def test_no_face_fake_observer_records_face_not_found_and_processed_frames(
     tmp_path: Path,
 ) -> None:

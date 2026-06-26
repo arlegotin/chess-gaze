@@ -13,7 +13,13 @@ import numpy.typing as npt
 
 from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
-from chess_gaze.configuration import ConfigurationError, load_config
+from pydantic import ValidationError
+
+from chess_gaze.configuration import (
+    ConfigurationError,
+    apply_analysis_overrides,
+    load_config,
+)
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
     CalibrationRecord,
@@ -271,24 +277,26 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         config = load_config(request.config_path)
     except ConfigurationError as exc:
         raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
+    try:
+        resolved_config = apply_analysis_overrides(
+            config,
+            output_root=request.output_root,
+            models_root=request.models_root,
+            unigaze_device=request.unigaze_device,
+            unigaze_batch_size=request.unigaze_batch_size,
+        )
+    except ValidationError as exc:
+        raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
 
     return _ResolvedRequest(
         video_path=request.video_path,
-        output_root=request.output_root or config.output_root,
-        models_root=request.models_root or config.models_root,
-        raw_frame_image_format=config.raw_frame_image_format,
-        processed_frame_image_format=config.processed_frame_image_format,
-        processed_frame_jpeg_quality=config.processed_frame_jpeg_quality,
-        unigaze_device=(
-            request.unigaze_device
-            if request.unigaze_device is not None
-            else config.unigaze_device
-        ),
-        unigaze_batch_size=(
-            request.unigaze_batch_size
-            if request.unigaze_batch_size is not None
-            else config.unigaze_batch_size
-        ),
+        output_root=resolved_config.output_root,
+        models_root=resolved_config.models_root,
+        raw_frame_image_format=resolved_config.raw_frame_image_format,
+        processed_frame_image_format=resolved_config.processed_frame_image_format,
+        processed_frame_jpeg_quality=resolved_config.processed_frame_jpeg_quality,
+        unigaze_device=resolved_config.unigaze_device,
+        unigaze_batch_size=resolved_config.unigaze_batch_size,
     )
 
 

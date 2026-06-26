@@ -7,6 +7,7 @@ from pytest import CaptureFixture, MonkeyPatch
 
 import chess_gaze.cli as cli
 from chess_gaze.cli import main
+from chess_gaze.pipeline import ObserverBundle, analyze_video as real_analyze_video
 
 
 def make_tiny_video(path: Path) -> None:
@@ -147,6 +148,43 @@ def test_analyze_passes_unigaze_cli_overrides(
     [request] = captured_requests
     assert request.unigaze_device == "mps"
     assert request.unigaze_batch_size == 7
+
+
+def test_analyze_rejects_invalid_unigaze_batch_size_override(
+    tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path)
+
+    def fail_if_observer_runs(frame: object) -> object:
+        del frame
+        raise AssertionError("invalid overrides must fail before observer execution")
+
+    def analyze_with_fake_observer(request: object) -> object:
+        return real_analyze_video(
+            request,
+            observers=ObserverBundle(frame_observer=fail_if_observer_runs),
+        )
+
+    monkeypatch.setattr(cli, "analyze_video", analyze_with_fake_observer)
+
+    exit_code = main(
+        [
+            "analyze",
+            str(video_path),
+            "--output-root",
+            str(output_root),
+            "--unigaze-batch-size",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "USAGE" in captured.err
+    assert "unigaze_batch_size" in captured.err
+    assert not output_root.exists()
 
 
 def test_view_prints_localhost_url_for_run_viewer(

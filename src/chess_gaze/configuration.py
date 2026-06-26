@@ -32,6 +32,28 @@ class AnalysisConfig(BaseModel):
         return value
 
 
+def apply_analysis_overrides(
+    config: AnalysisConfig,
+    *,
+    output_root: Path | None = None,
+    models_root: Path | None = None,
+    unigaze_device: str | None = None,
+    unigaze_batch_size: int | None = None,
+) -> AnalysisConfig:
+    payload = config.model_dump(mode="python")
+
+    if output_root is not None:
+        payload["output_root"] = output_root
+    if models_root is not None:
+        payload["models_root"] = models_root
+    if unigaze_device is not None:
+        payload["unigaze_device"] = unigaze_device
+    if unigaze_batch_size is not None:
+        payload["unigaze_batch_size"] = unigaze_batch_size
+
+    return AnalysisConfig.model_validate(payload)
+
+
 def load_config(path: Path | None) -> AnalysisConfig:
     if path is None:
         return AnalysisConfig()
