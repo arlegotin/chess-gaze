@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+Status: completed on 2026-06-26. See
+`docs/superpowers/closeouts/2026-06-26-nakamura-scene-pitch-coordinate-repair.md`
+for root cause, verification evidence, and residual limitations.
+
 **Goal:** Repair the systematic gaze pitch sign mismatch that makes upward-looking frames render as downward-looking scene rays.
 
 **Architecture:** Frame gaze angles remain image-overlay semantic values: positive yaw means image-right and positive pitch means image-up. Scene camera vectors are OpenCV-style: +X image-right, +Y image-down, +Z camera-forward. The durable boundary is the conversion from frame-record gaze angles into scene camera vectors.
@@ -30,7 +34,7 @@
 - Consumes: `FrameRecord.appearance_gaze` yaw/pitch values in image-overlay convention.
 - Produces: `unigaze_ray_from_frame(...).direction_camera` in `camera_opencv_pseudo_m`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add focused tests proving that positive pitch maps to negative camera Y and that the reported Nakamura frame values produce an upward camera ray:
 
@@ -97,7 +101,7 @@ def test_unigaze_ray_from_frame_preserves_nakamura_upward_gaze_direction() -> No
     assert ray.direction_camera.z > 0.0
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -107,7 +111,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py::te
 
 Expected: both tests fail because current scene conversion stores positive pitch as positive camera Y.
 
-- [ ] **Step 3: Implement the minimal durable conversion**
+- [x] **Step 3: Implement the minimal durable conversion**
 
 Add a scene-local conversion helper in `src/chess_gaze/scene_geometry.py`:
 
@@ -124,7 +128,7 @@ def _frame_gaze_angles_to_camera_direction(
 
 Use it only in `unigaze_ray_from_frame()` when producing `direction_camera`.
 
-- [ ] **Step 4: Run focused tests to verify GREEN**
+- [x] **Step 4: Run focused tests to verify GREEN**
 
 Run:
 
@@ -134,7 +138,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py::te
 
 Expected: all selected tests pass after updating any stale expected values to the OpenCV camera convention.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -154,15 +158,15 @@ git commit -m "fix: map scene gaze pitch into opencv camera space"
 - Consumes: AGENTS authority order and current implemented `right_up_back_columns_right_handed` scene basis.
 - Produces: Non-contradictory coordinate guidance for future coding agents.
 
-- [ ] **Step 1: Update canonical spec text**
+- [x] **Step 1: Update canonical spec text**
 
 Change scene frame wording from `+Z scene-forward` to the implemented and schema-validated `+Z scene-back` / `right_up_back_columns_right_handed` convention. Clarify that frame-record positive pitch is image-up, so conversion to `camera_opencv_pseudo_m` negates the vector Y component.
 
-- [ ] **Step 2: Update historical plan notes**
+- [x] **Step 2: Update historical plan notes**
 
 Replace the misleading instruction to reuse `pitch_yaw_to_unit_vector()` directly with the corrected scene conversion boundary. Preserve the historical plan as history, but add a note that this repair supersedes that line.
 
-- [ ] **Step 3: Write closeout**
+- [x] **Step 3: Write closeout**
 
 Record:
 
@@ -172,7 +176,7 @@ Record:
 - real Nakamura artifact verification;
 - remaining uncertainty, if any.
 
-- [ ] **Step 4: Run doc/source focused checks**
+- [x] **Step 4: Run doc/source focused checks**
 
 Run:
 
@@ -180,7 +184,7 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_geometry.py tests/chess_gaze/test_scene_artifacts.py tests/chess_gaze/test_scene_records.py -q
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -198,7 +202,7 @@ git commit -m "docs: record scene coordinate sign repair"
 - Consumes: `artifacts/input/nakamura_1.mp4`, local models under `models`.
 - Produces: Fresh scene artifacts showing frame 1651 upward gaze as negative camera Y and positive scene-up direction when visually upward.
 
-- [ ] **Step 1: Re-run Nakamura analysis**
+- [x] **Step 1: Re-run Nakamura analysis**
 
 Run:
 
@@ -208,7 +212,7 @@ UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 
 
 Expected: command succeeds and prints or creates a fresh run under `artifacts/output/nakamura_1/runs/`.
 
-- [ ] **Step 2: Inspect frame 1651 records**
+- [x] **Step 2: Inspect frame 1651 records**
 
 Use `jq` or Python to read the fresh run's `records/frames.jsonl` and `records/scene_frames.jsonl` for `frame_index == 1651`.
 
@@ -218,7 +222,7 @@ Expected:
 - `unigaze_ray.direction_camera.y` is negative.
 - `unigaze_ray.direction_scene.y` is positive when the scene axis basis up vector is aligned with camera up.
 
-- [ ] **Step 3: Visually inspect generated frame**
+- [x] **Step 3: Visually inspect generated frame**
 
 Open:
 
@@ -228,7 +232,7 @@ artifacts/output/nakamura_1/runs/<fresh-run-id>/processed_frames/f000001651.jpg
 
 Expected: source overlay still shows upward gaze, confirming frame-record semantics did not regress.
 
-- [ ] **Step 4: Run real-video contract tests**
+- [x] **Step 4: Run real-video contract tests**
 
 Run:
 
@@ -236,7 +240,7 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_artifacts_real_video_contract.py tests/chess_gaze/test_pipeline_real_video_contract.py tests/chess_gaze/test_visualization_real_video.py -q
 ```
 
-- [ ] **Step 5: Commit if tracked verification artifacts or closeout updates changed**
+- [x] **Step 5: Commit if tracked verification artifacts or closeout updates changed**
 
 Run:
 
@@ -255,7 +259,7 @@ git commit -m "docs: close out nakamura scene pitch verification"
 - Consumes: all repaired source/docs.
 - Produces: final confidence that coordinate interpretation is consistent.
 
-- [ ] **Step 1: Run broad local gates**
+- [x] **Step 1: Run broad local gates**
 
 Run:
 
@@ -266,10 +270,10 @@ UV_CACHE_DIR=.uv-cache uv run ruff format --check .
 UV_CACHE_DIR=.uv-cache uv run mypy
 ```
 
-- [ ] **Step 2: Request final code review**
+- [x] **Step 2: Request final code review**
 
 Dispatch a fresh review subagent with the branch diff, asking specifically for coordinate sign, scene axis, test, and doc contradictions.
 
-- [ ] **Step 3: Fix any Critical or Important findings**
+- [x] **Step 3: Fix any Critical or Important findings**
 
 Use focused tests first for any required code fix, then rerun the relevant broad gate.
