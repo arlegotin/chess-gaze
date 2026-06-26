@@ -79,7 +79,8 @@ artifacts/output/<video-stem>/runs/<run-id>
 viewer: artifacts/output/<video-stem>/runs/<run-id>/viewer/index.html
 ```
 
-Open the viewer through the localhost-only static server:
+Open `viewer/index.html` directly in a browser, or serve the same files through
+the localhost-only static server:
 
 ```sh
 uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>

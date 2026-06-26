@@ -79,6 +79,7 @@ def build_scene_viewer(
         viewer_dir,
         updated_scene_result.viewer_data,
     )
+    _write_file_url_compatible_index(viewer_dir, updated_scene_result.viewer_data)
     return ViewerBuildResult(
         viewer_dir=viewer_dir,
         index_path=viewer_dir / "index.html",
@@ -96,6 +97,124 @@ def write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
     path = viewer_dir / "scene-data.json"
     _write_json(path, data.model_dump(mode="json", by_alias=True))
     return path
+
+
+def _write_file_url_compatible_index(
+    viewer_dir: Path,
+    data: ViewerSceneData,
+) -> None:
+    index_path = viewer_dir / "index.html"
+    html = index_path.read_text(encoding="utf-8")
+    module_tag = '    <script type="module" src="./scene_viewer.js"></script>'
+    if module_tag not in html:
+        raise ViewerServerError("viewer index template is missing module script tag")
+
+    scene_data_json = json.dumps(
+        data.model_dump(mode="json", by_alias=True),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    embedded_bootstrap = "\n".join(
+        (
+            '    <script type="application/json" id="scene-data-json">',
+            _safe_script_payload(scene_data_json),
+            "    </script>",
+            _module_source_script(
+                "three-core-source",
+                (viewer_dir / "vendor" / "three.core.js").read_text(encoding="utf-8"),
+            ),
+            _module_source_script(
+                "three-module-source",
+                (viewer_dir / "vendor" / "three.module.js").read_text(encoding="utf-8"),
+            ),
+            _module_source_script(
+                "orbit-controls-source",
+                (viewer_dir / "vendor" / "OrbitControls.js").read_text(
+                    encoding="utf-8"
+                ),
+            ),
+            _module_source_script(
+                "scene-viewer-source",
+                (viewer_dir / "scene_viewer.js").read_text(encoding="utf-8"),
+            ),
+            "    <script>",
+            _file_url_bootstrap_script(),
+            "    </script>",
+        )
+    )
+    html = html.replace(module_tag, embedded_bootstrap)
+    atomic_write_bytes(index_path, html.encode("utf-8"))
+
+
+def _module_source_script(script_id: str, source: str) -> str:
+    return "\n".join(
+        (
+            f'    <script type="application/json" id="{script_id}">',
+            _safe_script_payload(json.dumps(source, ensure_ascii=True)),
+            "    </script>",
+        )
+    )
+
+
+def _safe_script_payload(payload: str) -> str:
+    return payload.replace("</", "<\\/")
+
+
+def _file_url_bootstrap_script() -> str:
+    return r"""(() => {
+      const sourceText = (id) => JSON.parse(document.getElementById(id).textContent);
+      const moduleUrl = (source) =>
+        URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      const replaceSpecifier = (source, specifier, replacementUrl) =>
+        source
+          .replaceAll(`"${specifier}"`, JSON.stringify(replacementUrl))
+          .replaceAll(`'${specifier}'`, JSON.stringify(replacementUrl));
+
+      window.__CHESS_GAZE_SCENE_DATA__ = JSON.parse(
+        document.getElementById("scene-data-json").textContent,
+      );
+
+      const threeCoreUrl = moduleUrl(sourceText("three-core-source"));
+      const threeModuleUrl = moduleUrl(
+        replaceSpecifier(
+          sourceText("three-module-source"),
+          "./three.core.js",
+          threeCoreUrl,
+        ),
+      );
+      const orbitControlsUrl = moduleUrl(
+        replaceSpecifier(
+          sourceText("orbit-controls-source"),
+          "./three.module.js",
+          threeModuleUrl,
+        ),
+      );
+      const sceneViewerUrl = moduleUrl(
+        sourceText("scene-viewer-source")
+          .replace(
+            'import * as THREE from "./vendor/three.module.js";',
+            `import * as THREE from ${JSON.stringify(threeModuleUrl)};`,
+          )
+          .replace(
+            'import { OrbitControls } from "./vendor/OrbitControls.js";',
+            `import { OrbitControls } from ${JSON.stringify(orbitControlsUrl)};`,
+          ),
+      );
+
+      import(sceneViewerUrl).catch((error) => {
+        const message = `Scene viewer unavailable: ${error.message}`;
+        const frameStatus = document.querySelector('[data-testid="frame-status"]');
+        const fallbackStatus = document.querySelector(".fallback-status");
+        if (frameStatus) {
+          frameStatus.textContent = message;
+        }
+        if (fallbackStatus) {
+          fallbackStatus.textContent = message;
+          fallbackStatus.dataset.state = "error";
+        }
+        console.error(error);
+      });
+    })();"""
 
 
 def serve_viewer(run_dir: Path, host: str = "127.0.0.1", port: int = 0) -> ViewerServer:

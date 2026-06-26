@@ -460,6 +460,9 @@ function applySceneData(sceneData) {
 }
 
 async function loadSceneData() {
+  if (window.__CHESS_GAZE_SCENE_DATA__) {
+    return window.__CHESS_GAZE_SCENE_DATA__;
+  }
   const response = await fetch("./scene-data.json", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`scene-data.json returned ${response.status}`);

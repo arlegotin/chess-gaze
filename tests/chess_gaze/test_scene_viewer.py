@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import urllib.error
@@ -289,7 +290,7 @@ def test_generated_html_js_and_css_reference_only_local_assets(
 ) -> None:
     layout, _viewer_data = built_viewer
 
-    for relative_path in ("index.html", "scene_viewer.js", "styles.css"):
+    for relative_path in ("scene_viewer.js", "styles.css"):
         text = (layout.viewer_dir / relative_path).read_text(encoding="utf-8")
         assert "http://" not in text
         assert "https://" not in text
@@ -298,11 +299,43 @@ def test_generated_html_js_and_css_reference_only_local_assets(
 
     html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
     js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    load_references = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html)
+    assert load_references
+    assert all(
+        not reference.startswith(("http://", "https://", "//"))
+        for reference in load_references
+    )
     assert 'rel="icon" href="data:,"' in html
     assert 'href="./styles.css"' in html
-    assert 'src="./scene_viewer.js"' in html
+    assert 'src="./scene_viewer.js"' not in html
     assert 'from "./vendor/three.module.js"' in js
     assert 'from "./vendor/OrbitControls.js"' in js
+
+
+def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+
+    assert 'type="module" src="./scene_viewer.js"' not in html
+    assert 'id="scene-data-json"' in html
+    assert 'id="three-core-source"' in html
+    assert 'id="three-module-source"' in html
+    assert 'id="orbit-controls-source"' in html
+    assert 'id="scene-viewer-source"' in html
+    assert "window.__CHESS_GAZE_SCENE_DATA__" in html
+    assert viewer_data.run_id in html
+
+
+def test_generated_js_prefers_embedded_scene_data_for_file_url_viewer(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "window.__CHESS_GAZE_SCENE_DATA__" in js
+    assert 'fetch("./scene-data.json"' in js
 
 
 def test_generated_css_uses_light_theme_and_semantic_color_roles(
