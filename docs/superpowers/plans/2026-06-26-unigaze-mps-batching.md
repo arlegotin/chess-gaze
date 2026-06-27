@@ -286,7 +286,7 @@ class UniGazeBatchBenchmarkReport(StrictSchemaModel):
 - Consumes: existing unmodified `chess-gaze analyze` CPU batch-1 behavior.
 - Produces: baseline run directory, wall-clock timing, QA counts, checksums, and environment evidence used by Task 9.
 
-- [ ] **Step 1: Verify clean implementation state**
+- [x] **Step 1: Verify clean implementation state**
 
 Run:
 
@@ -296,7 +296,7 @@ git status --short
 
 Expected: only planning docs may be modified or untracked. No source or test implementation files may be modified before this task finishes.
 
-- [ ] **Step 2: Verify required local inputs**
+- [x] **Step 2: Verify required local inputs**
 
 Run:
 
@@ -312,7 +312,7 @@ a336e7234738e9a9517fc6af7a9bc69cee16958388ad648d48c0f6b0df42ac8f  models/unigaze
 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff  models/mediapipe/face_landmarker.task
 ```
 
-- [ ] **Step 3: Run current CPU batch-1 Nakamura baseline**
+- [x] **Step 3: Run current CPU batch-1 Nakamura baseline**
 
 Run unsandboxed if MediaPipe native initialization fails in the managed sandbox:
 
@@ -323,7 +323,7 @@ UV_CACHE_DIR=.uv-cache /usr/bin/time -lp uv run chess-gaze analyze artifacts/inp
 
 Expected: command exits `0`, prints a fresh run directory under `artifacts/output/nakamura_1/runs/`, and prints a second line beginning with `viewer: artifacts/output/nakamura_1/runs/`.
 
-- [ ] **Step 4: Extract baseline artifact facts**
+- [x] **Step 4: Extract baseline artifact facts**
 
 Extract the run directory printed in Step 3 and run:
 
@@ -389,7 +389,7 @@ PY
 
 Expected: JSON reports `qa_final_status: "complete"`, `qa_decoded_frames: 1973`, `qa_counts_match: true`, and `qa_schema_validation_passed: true`.
 
-- [ ] **Step 5: Do not commit ignored baseline artifacts**
+- [x] **Step 5: Do not commit ignored baseline artifacts**
 
 Run:
 
@@ -414,7 +414,7 @@ Expected: `artifacts/output/benchmarks/2026-06-26-current-cpu1-baseline.txt` and
 - Consumes: existing `AnalysisConfig`, `AnalyzeRequest`, and CLI parser.
 - Produces: `AnalyzeRequest.unigaze_device: str | None`, `AnalyzeRequest.unigaze_batch_size: int | None`, resolved runtime values in `_ResolvedRequest`, and CLI-over-config behavior used by later tasks.
 
-- [ ] **Step 1: Write failing config tests**
+- [x] **Step 1: Write failing config tests**
 
 Add to `tests/chess_gaze/test_configuration.py`:
 
@@ -465,7 +465,7 @@ def test_load_config_rejects_unsupported_unigaze_device(tmp_path: Path) -> None:
     assert exc_info.value.code == "CONFIG_LOAD_INVALID"
 ```
 
-- [ ] **Step 2: Write failing CLI tests**
+- [x] **Step 2: Write failing CLI tests**
 
 Add to `tests/chess_gaze/test_cli.py`:
 
@@ -506,7 +506,7 @@ def test_analyze_passes_unigaze_cli_overrides(
     assert request.unigaze_batch_size == 7
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -516,7 +516,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_configuration.py::tes
 
 Expected: FAIL because the config fields and CLI flags do not exist.
 
-- [ ] **Step 4: Implement config fields**
+- [x] **Step 4: Implement config fields**
 
 Modify `src/chess_gaze/configuration.py`:
 
@@ -528,7 +528,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 Update `AnalysisConfig` with the shared-interface fields and validator.
 
-- [ ] **Step 5: Implement request fields and resolution**
+- [x] **Step 5: Implement request fields and resolution**
 
 Modify `src/chess_gaze/pipeline.py`:
 
@@ -584,7 +584,7 @@ return _ResolvedRequest(
 )
 ```
 
-- [ ] **Step 6: Implement CLI flags**
+- [x] **Step 6: Implement CLI flags**
 
 Modify `src/chess_gaze/cli.py` parser:
 
@@ -600,7 +600,7 @@ unigaze_device=args.unigaze_device,
 unigaze_batch_size=args.unigaze_batch_size,
 ```
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -610,7 +610,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_configuration.py test
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```sh
 git add src/chess_gaze/configuration.py src/chess_gaze/cli.py src/chess_gaze/pipeline.py tests/chess_gaze/test_configuration.py tests/chess_gaze/test_cli.py
@@ -634,7 +634,7 @@ git commit -m "feat: expose unigaze runtime options"
 - Consumes: resolved `unigaze_device` and `unigaze_batch_size` from Task 1.
 - Produces: `InferenceRuntimeRecord`, required `RunManifest.inference`, and truthful `external_observer` metadata for injected observers.
 
-- [ ] **Step 1: Write failing frame-record schema tests**
+- [x] **Step 1: Write failing frame-record schema tests**
 
 Add to `tests/chess_gaze/test_frame_records.py`:
 
@@ -707,7 +707,7 @@ def test_run_manifest_requires_inference_runtime_record() -> None:
     assert manifest.inference.observer_source == "external_observer"
 ```
 
-- [ ] **Step 2: Write failing pipeline manifest test**
+- [x] **Step 2: Write failing pipeline manifest test**
 
 Add to `tests/chess_gaze/test_pipeline_contract.py`:
 
@@ -744,7 +744,7 @@ def test_model_free_observer_run_manifest_records_external_observer(
     }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -754,11 +754,11 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_frame_records.py::tes
 
 Expected: FAIL because `InferenceRuntimeRecord` and `RunManifest.inference` do not exist.
 
-- [ ] **Step 4: Implement strict manifest records**
+- [x] **Step 4: Implement strict manifest records**
 
 Modify `src/chess_gaze/frame_records.py` with the shared-interface `InferenceRuntimeRecord`, then add `inference: InferenceRuntimeRecord` to `RunManifest`.
 
-- [ ] **Step 5: Write external-observer metadata in pipeline**
+- [x] **Step 5: Write external-observer metadata in pipeline**
 
 In `src/chess_gaze/pipeline.py`, import `InferenceRuntimeRecord`.
 
@@ -790,7 +790,7 @@ Then pass `inference=inference` into `RunManifest(...)`.
 
 Task 6 will replace this value for default model-backed runs.
 
-- [ ] **Step 6: Update test fixture constructors**
+- [x] **Step 6: Update test fixture constructors**
 
 Update every direct `RunManifest(...)` construction in tests to include `inference=_external_observer_inference_record_for_tests()`.
 
@@ -818,7 +818,7 @@ Affected files found during planning:
 - `tests/chess_gaze/test_scene_artifacts.py`
 - `tests/chess_gaze/test_scene_viewer.py`
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -828,7 +828,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_frame_records.py test
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```sh
 git add src/chess_gaze/frame_records.py src/chess_gaze/pipeline.py tests/chess_gaze/test_frame_records.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_qa_summary.py tests/chess_gaze/test_scene_artifacts.py tests/chess_gaze/test_scene_viewer.py
@@ -847,7 +847,7 @@ git commit -m "feat: record inference runtime metadata"
 - Consumes: existing `UniGazeModel.from_local_asset()` and `FaceModelGaze`.
 - Produces: `UniGazeModel.device`, `UniGazeModel.predict_batch()`, and single-item `predict()` wrapper.
 
-- [ ] **Step 1: Update fake backend for batches**
+- [x] **Step 1: Update fake backend for batches**
 
 In `tests/chess_gaze/test_gaze_observation.py`, replace `FakeUniGazeBackend.__call__` with:
 
@@ -861,7 +861,7 @@ def __call__(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
     return {"pred_gaze": torch.tensor(rows, dtype=torch.float32, device=batch.device)}
 ```
 
-- [ ] **Step 2: Write failing batch prediction tests**
+- [x] **Step 2: Write failing batch prediction tests**
 
 Add:
 
@@ -951,7 +951,7 @@ def test_unigaze_predict_batch_marks_non_finite_row_invalid(
     assert invalid_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
 ```
 
-- [ ] **Step 3: Add a device-transfer test with a backend spy**
+- [x] **Step 3: Add a device-transfer test with a backend spy**
 
 Add:
 
@@ -978,7 +978,7 @@ def test_unigaze_predict_batch_moves_input_to_model_device(
     assert backend.observed_device == torch.device("cpu")
 ```
 
-- [ ] **Step 4: Run tests to verify failure**
+- [x] **Step 4: Run tests to verify failure**
 
 Run:
 
@@ -988,7 +988,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_gaze_observation.py::
 
 Expected: FAIL because `predict_batch()` does not exist and `predict()` still assumes one row.
 
-- [ ] **Step 5: Implement model device ownership**
+- [x] **Step 5: Implement model device ownership**
 
 Modify `src/chess_gaze/gaze_observation.py`:
 
@@ -1009,7 +1009,7 @@ Update `from_local_asset()` return:
 return cls(backend, device=device)
 ```
 
-- [ ] **Step 6: Implement `predict_batch()` and wrapper `predict()`**
+- [x] **Step 6: Implement `predict_batch()` and wrapper `predict()`**
 
 Use this behavior:
 
@@ -1081,7 +1081,7 @@ def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
     return gazes[0]
 ```
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -1091,7 +1091,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_gaze_observation.py -
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```sh
 git add src/chess_gaze/gaze_observation.py tests/chess_gaze/test_gaze_observation.py
@@ -1110,7 +1110,7 @@ git commit -m "feat: support batched unigaze predictions"
 - Consumes: resolved `unigaze_batch_size` from Task 1.
 - Produces: optional `FrameBatchRecordObserver`, batched `_process_frame_batch()`, ordered JSONL writes, final partial-batch flush, and single-observer fallback.
 
-- [ ] **Step 1: Write fake batch observer test**
+- [x] **Step 1: Write fake batch observer test**
 
 Add to `tests/chess_gaze/test_pipeline_contract.py`:
 
@@ -1187,7 +1187,7 @@ def test_batch_observer_identity_mismatch_fails_schema_validation(
     assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -1197,7 +1197,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py:
 
 Expected: FAIL because `ObserverBundle.frame_batch_observer` does not exist.
 
-- [ ] **Step 3: Add batch observer protocol**
+- [x] **Step 3: Add batch observer protocol**
 
 Modify imports in `src/chess_gaze/pipeline.py`:
 
@@ -1215,7 +1215,7 @@ class FrameBatchRecordObserver(Protocol):
 
 Update `ObserverBundle` as shown in Shared Interfaces.
 
-- [ ] **Step 4: Refactor per-frame raw/write pieces into reusable helpers**
+- [x] **Step 4: Refactor per-frame raw/write pieces into reusable helpers**
 
 Add private helper:
 
@@ -1295,7 +1295,7 @@ def _render_processed_frame_and_collect_errors(
 
 Update `_process_frame()` to use these helpers and preserve existing behavior.
 
-- [ ] **Step 5: Implement `_process_frame_batch()`**
+- [x] **Step 5: Implement `_process_frame_batch()`**
 
 Add:
 
@@ -1343,7 +1343,7 @@ def _process_frame_batch(
     return processed
 ```
 
-- [ ] **Step 6: Use accumulator in `analyze_video()`**
+- [x] **Step 6: Use accumulator in `analyze_video()`**
 
 Replace the frame loop with a batch accumulator:
 
@@ -1379,7 +1379,7 @@ if pending_batch:
 
 This uses the same path for single observers and batch observers.
 
-- [ ] **Step 7: Run focused pipeline tests**
+- [x] **Step 7: Run focused pipeline tests**
 
 Run:
 
@@ -1389,7 +1389,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py 
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```sh
 git add src/chess_gaze/pipeline.py tests/chess_gaze/test_pipeline_contract.py
@@ -1408,7 +1408,7 @@ git commit -m "feat: add frame batch transport"
 - Consumes: `FaceGazeModel.predict_batch()` from Task 3 and batch transport from Task 4.
 - Produces: `ModelBackedFrameObserver.__call__(frame)` compatibility plus `ModelBackedFrameObserver.observe_batch(frames)` for default model-backed pipeline.
 
-- [ ] **Step 1: Extend fake gaze model to support batches**
+- [x] **Step 1: Extend fake gaze model to support batches**
 
 In `tests/chess_gaze/test_frame_observation.py`, update `_FakeGazeModel`:
 
@@ -1439,7 +1439,7 @@ class _FakeGazeModel:
 
 Add equivalent `predict_batch()` to `_DisagreeingGazeModel`.
 
-- [ ] **Step 2: Write batch row-to-frame mapping test**
+- [x] **Step 2: Write batch row-to-frame mapping test**
 
 Add:
 
@@ -1498,7 +1498,7 @@ def _run_layout(tmp_path: Path) -> RunLayout:
     )
 ```
 
-- [ ] **Step 3: Write missing-face batch test**
+- [x] **Step 3: Write missing-face batch test**
 
 Add:
 
@@ -1524,7 +1524,7 @@ def test_model_backed_frame_observer_batch_preserves_missing_face_record(
     assert ErrorCode.FACE_NOT_FOUND in {error.code for error in record.errors}
 ```
 
-- [ ] **Step 4: Write per-row invalid output test**
+- [x] **Step 4: Write per-row invalid output test**
 
 Add a fake model:
 
@@ -1597,7 +1597,7 @@ def test_model_backed_frame_observer_batch_marks_only_invalid_model_row(
     assert ErrorCode.GAZE_MODEL_FAILED in {error.code for error in second.errors}
 ```
 
-- [ ] **Step 5: Run tests to verify failure**
+- [x] **Step 5: Run tests to verify failure**
 
 Run:
 
@@ -1607,7 +1607,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_frame_observation.py:
 
 Expected: FAIL because `observe_batch()` does not exist.
 
-- [ ] **Step 6: Implement batch model protocol**
+- [x] **Step 6: Implement batch model protocol**
 
 Modify `FaceGazeModel` in `src/chess_gaze/frame_observation.py`:
 
@@ -1620,7 +1620,7 @@ class FaceGazeModel(Protocol):
         raise NotImplementedError
 ```
 
-- [ ] **Step 7: Refactor observer into evidence and assembly helpers**
+- [x] **Step 7: Refactor observer into evidence and assembly helpers**
 
 Add private dataclass:
 
@@ -1655,7 +1655,7 @@ def _record_from_evidence(
 
 This helper must use the existing `synthesize_recommended_gaze()`, `_face_model_gaze_record()`, and `_frame_status()` logic.
 
-- [ ] **Step 8: Implement `observe_batch()`**
+- [x] **Step 8: Implement `observe_batch()`**
 
 Add:
 
@@ -1715,7 +1715,7 @@ def __call__(self, frame: Any) -> FrameRecord:
     return self.observe_batch([frame])[0]
 ```
 
-- [ ] **Step 9: Run focused tests**
+- [x] **Step 9: Run focused tests**
 
 Run:
 
@@ -1725,7 +1725,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_frame_observation.py 
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```sh
 git add src/chess_gaze/frame_observation.py tests/chess_gaze/test_frame_observation.py
@@ -1746,7 +1746,7 @@ git commit -m "feat: batch model-backed frame observation"
 - Consumes: `InferenceRuntimeRecord` from Task 2, `UniGazeModel.predict_batch()` from Task 3, batch observer from Tasks 4 and 5.
 - Produces: pre-run MPS failure behavior, default model-backed inference metadata, and default observer `frame_batch_observer=observer.observe_batch`.
 
-- [ ] **Step 1: Write MPS env/preflight tests**
+- [x] **Step 1: Write MPS env/preflight tests**
 
 Add to `tests/chess_gaze/test_pipeline_contract.py`:
 
@@ -1882,7 +1882,7 @@ def test_default_model_observer_manifest_records_unigaze_runtime(
     assert manifest["inference"]["unigaze_batch_size"] == 7
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -1892,7 +1892,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py:
 
 Expected: FAIL because `unigaze_runtime.py` and default runtime preparation do not exist.
 
-- [ ] **Step 3: Implement `unigaze_runtime.py`**
+- [x] **Step 3: Implement `unigaze_runtime.py`**
 
 Create `src/chess_gaze/unigaze_runtime.py` using the shared interfaces. Use these helper rules:
 
@@ -1926,7 +1926,7 @@ def _env_enabled(name: str) -> bool:
 
 Because `unigaze_runtime.py` must not import `PipelineError` from `pipeline.py`, define local `UniGazeRuntimeError(RuntimeError)` with `message: str`; catch it in `pipeline.py` and raise `PipelineError(CliErrorCode.USAGE, str(exc))`.
 
-- [ ] **Step 4: Integrate runtime preparation before run layout**
+- [x] **Step 4: Integrate runtime preparation before run layout**
 
 Modify `src/chess_gaze/pipeline.py`:
 
@@ -1970,7 +1970,7 @@ inference = (
 )
 ```
 
-- [ ] **Step 5: Update default observer factory signature**
+- [x] **Step 5: Update default observer factory signature**
 
 Change `DefaultObserverBundleFactory`:
 
@@ -1992,7 +1992,7 @@ return ObserverBundle(
 
 Call it with `prepared_unigaze_runtime.model`.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -2002,7 +2002,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_pipeline_contract.py 
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```sh
 git add src/chess_gaze/unigaze_runtime.py src/chess_gaze/pipeline.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_frame_records.py
@@ -2021,7 +2021,7 @@ git commit -m "feat: preflight unigaze runtime"
 - Consumes: completed run directories containing `records/frames.jsonl`, `records/scene_frames.jsonl`, `qa_summary.json`, and viewer data.
 - Produces: `compare_runs()` and `EquivalenceReport` used by the benchmark module and closeout.
 
-- [ ] **Step 1: Write run-equivalence tests**
+- [x] **Step 1: Write run-equivalence tests**
 
 Create `tests/chess_gaze/test_run_equivalence.py` with:
 
@@ -2118,7 +2118,7 @@ def test_compare_runs_rejects_status_mismatch(tmp_path: Path) -> None:
     assert report.exact_mismatch_count == 1
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -2128,7 +2128,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_run_equivalence.py -q
 
 Expected: FAIL because `run_equivalence.py` does not exist.
 
-- [ ] **Step 3: Implement `run_equivalence.py`**
+- [x] **Step 3: Implement `run_equivalence.py`**
 
 Implement:
 
@@ -2145,7 +2145,7 @@ Implement:
 
 When a numeric field is absent or invalid in both runs, require the corresponding validity and invalid reason to match exactly and do not count it as a numeric delta.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -2155,7 +2155,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_run_equivalence.py -q
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add src/chess_gaze/run_equivalence.py tests/chess_gaze/test_run_equivalence.py
@@ -2174,7 +2174,7 @@ git commit -m "feat: compare analysis runs for equivalence"
 - Consumes: `compare_runs()` from Task 7 and `chess-gaze analyze` CLI with runtime options from prior tasks.
 - Produces: benchmark report JSON, one result row per approved candidate, selected fastest passing MPS `batch_size > 1`, and `--print-selected-batch-size`.
 
-- [ ] **Step 1: Write benchmark report schema tests**
+- [x] **Step 1: Write benchmark report schema tests**
 
 Create `tests/chess_gaze/test_unigaze_batch_benchmark.py`:
 
@@ -2324,7 +2324,7 @@ def test_benchmark_report_ignores_failed_mps_candidates() -> None:
     assert selected_mps_batch_size(report) is None
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -2334,7 +2334,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_unigaze_batch_benchma
 
 Expected: FAIL because benchmark module does not exist.
 
-- [ ] **Step 3: Implement report models and selection**
+- [x] **Step 3: Implement report models and selection**
 
 Create `src/chess_gaze/unigaze_batch_benchmark.py` with the shared-interface report models.
 
@@ -2355,7 +2355,7 @@ def selected_mps_batch_size(report: UniGazeBatchBenchmarkReport) -> int | None:
     return min(passing, key=lambda item: item.analysis_wall_seconds).batch_size
 ```
 
-- [ ] **Step 4: Implement benchmark CLI**
+- [x] **Step 4: Implement benchmark CLI**
 
 Support:
 
@@ -2388,7 +2388,7 @@ Implementation behavior:
 
 Pure UniGaze forward microbenchmark can initially use real normalized crops harvested during candidate analysis by reading the same model-backed path. If that proves too invasive, use the full-run wall time as binding selection and record `unigaze_forward_repetitions_seconds=[]` with `unigaze_forward_median_seconds=None`; that is an explicit residual limitation to record in closeout. Do not invent microbenchmark values.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -2398,7 +2398,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_unigaze_batch_benchma
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add src/chess_gaze/unigaze_batch_benchmark.py tests/chess_gaze/test_unigaze_batch_benchmark.py
@@ -2418,7 +2418,7 @@ git commit -m "feat: benchmark unigaze batch profiles"
 - Consumes: all implementation tasks and benchmark module.
 - Produces: selected MPS `batch_size > 1`, documented usage, final run evidence, benchmark report, and closeout.
 
-- [ ] **Step 1: Run focused unit and integration gates**
+- [x] **Step 1: Run focused unit and integration gates**
 
 Run:
 
@@ -2444,7 +2444,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_real
 
 Expected: PASS when `artifacts/input/nakamura_1.mp4` and local MediaPipe model exist.
 
-- [ ] **Step 2: Run benchmark grid**
+- [x] **Step 2: Run benchmark grid**
 
 Run unsandboxed if MediaPipe native initialization fails in the managed sandbox:
 
@@ -2454,7 +2454,7 @@ env -u PYTORCH_ENABLE_MPS_FALLBACK -u PYTORCH_MPS_FAST_MATH -u PYTORCH_MPS_PREFE
 
 Expected: benchmark report JSON exists, includes candidate rows for `cpu` and `mps` batch sizes `1, 2, 4, 7, 8, 16, 32, 64`, records failures as rows, and includes `selected_batch_size` with an integer greater than `1` if any MPS batch candidate passed.
 
-- [ ] **Step 3: Extract selected MPS batch size**
+- [x] **Step 3: Extract selected MPS batch size**
 
 Run:
 
@@ -2465,7 +2465,7 @@ printf '%s\n' "$SELECTED_MPS_BATCH_SIZE"
 
 Expected: prints a concrete integer greater than `1`. If it prints nothing, stop and report that no passing MPS `batch_size > 1` exists.
 
-- [ ] **Step 4: Run final optimized Nakamura analysis**
+- [x] **Step 4: Run final optimized Nakamura analysis**
 
 Run:
 
@@ -2475,7 +2475,7 @@ env -u PYTORCH_ENABLE_MPS_FALLBACK -u PYTORCH_MPS_FAST_MATH -u PYTORCH_MPS_PREFE
 
 Expected: command exits `0`, prints a fresh run dir and viewer path, and the fresh run has `qa_summary.final_status == "complete"`, `counts.decoded_frames == 1973`, `counts.frame_records == 1973`, `counts.scene_frame_records == 1973`, `artifact_validation.schema_validation_passed == true`, and `artifact_validation.counts_match == true`.
 
-- [ ] **Step 5: Update README**
+- [x] **Step 5: Update README**
 
 Add to the Analyze section:
 
@@ -2489,14 +2489,14 @@ uv run chess-gaze analyze artifacts/input/test_1.mp4 \
 ```
 
 On Apple Silicon with local models and MPS available, use the concrete
-benchmarked profile recorded in the latest UniGaze MPS batching closeout. If the
-benchmark selects batch size `16`, the command is:
+benchmarked profile recorded in the latest UniGaze MPS batching closeout. This
+benchmark selected batch size `7`, so the command is:
 
 ```sh
 uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 \
   --models-root models \
   --unigaze-device mps \
-  --unigaze-batch-size 16
+  --unigaze-batch-size 7
 ```
 
 MPS runs are explicit because PyTorch does not guarantee bitwise-identical CPU
@@ -2508,7 +2508,7 @@ fast-math drift cannot silently change the runtime contract.
 If Step 3 prints a different integer, write that exact integer instead of `16`
 before committing README changes. Do not commit symbolic batch-size text.
 
-- [ ] **Step 6: Update source layout docs**
+- [x] **Step 6: Update source layout docs**
 
 Add under `src/chess_gaze/` map in `docs/development/architecture/source-layout.md`:
 
@@ -2521,7 +2521,7 @@ Add under `src/chess_gaze/` map in `docs/development/architecture/source-layout.
     and benchmark report schema.
 ```
 
-- [ ] **Step 7: Write closeout**
+- [x] **Step 7: Write closeout**
 
 Create `docs/superpowers/closeouts/2026-06-26-unigaze-mps-batching.md` with sections:
 
@@ -2561,7 +2561,7 @@ Include:
 - candidates rejected for OOM, unsupported ops, equivalence drift, analysis failure, or no speed improvement;
 - exact commands and whether unsandboxed execution was required.
 
-- [ ] **Step 8: Run broad local gates**
+- [x] **Step 8: Run broad local gates**
 
 Run:
 
@@ -2574,7 +2574,7 @@ UV_CACHE_DIR=.uv-cache uv run mypy
 
 Expected: PASS. If full `pytest` fails only because ignored legacy media such as `artifacts/input/test_1.mp4` or `artifacts/input/test_2.mp4` is absent, record exact failures in the closeout and rerun the broadest available subset that excludes only absent-media tests.
 
-- [ ] **Step 9: Commit docs and closeout**
+- [x] **Step 9: Commit docs and closeout**
 
 ```sh
 git add README.md docs/development/architecture/source-layout.md docs/superpowers/closeouts/2026-06-26-unigaze-mps-batching.md
@@ -2586,6 +2586,6 @@ git commit -m "docs: close out unigaze mps batching"
 ## Plan Self-Review Notes
 
 - Spec coverage: every approved spec section maps to at least one task. Config/CLI is Task 1, manifest semantics are Task 2, model wrapper is Task 3, pipeline batching is Task 4, model-backed batching is Task 5, MPS preflight is Task 6, equivalence is Task 7, benchmark grid is Task 8, docs/closeout/final gates are Task 9.
-- Red-flag scan: there are no TBD/TODO/fill-in implementation decisions in the plan. The README closeout step gives a concrete example batch size and instructs the executor to use the measured winner from Task 8 if it differs.
+- Red-flag scan: there are no TBD/TODO/fill-in implementation decisions in the plan. The README closeout step records the measured winner from Task 8.
 - Type consistency: `unigaze_batch_size` is an `int` in config, request, resolved request, manifest, and benchmark report. Device values are `"cpu"` and `"mps"` for actual UniGaze runs, and `"not_applicable"` only for external-observer manifests.
 - Risk called out by subagents: semantic equivalence is a first-class harness in Task 7; QA summary alone is not treated as sufficient. Preflight happens before run creation in Task 6. External-observer manifests are explicitly truthful in Task 2.
