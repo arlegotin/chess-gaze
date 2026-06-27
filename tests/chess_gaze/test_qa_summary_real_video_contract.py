@@ -149,22 +149,22 @@ def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
 
     summary = QASummary.model_validate_json(qa_summary_path.read_text(encoding="utf-8"))
 
-    assert summary.source_artifacts == summary.artifact_validation.source_artifacts
-    assert {
-        "run_manifest",
-        "calibration",
-        "video_manifest",
-        "frames_jsonl",
-        "errors_jsonl",
-        "scene_manifest",
-        "scene_summary",
-        "scene_frames_jsonl",
-        "viewer_index",
-        "viewer_scene_data",
-        "raw_frames",
-        "processed_frames",
-        "crops",
-    }.issubset(summary.source_artifacts)
+    assert summary.source_artifacts == {
+        "run_manifest": "run_manifest.json",
+        "calibration": "calibration.json",
+        "video_manifest": "video_manifest.json",
+        "frames_jsonl": "records/frames.jsonl",
+        "errors_jsonl": "records/errors.jsonl",
+        "scene_manifest": "scene/scene_manifest.json",
+        "scene_summary": "scene/scene_summary.json",
+        "scene_frames_jsonl": "records/scene_frames.jsonl",
+        "viewer_index": "viewer/index.html",
+        "viewer_scene_data": "viewer/scene-data.json",
+        "raw_frames": "raw_frames",
+        "processed_frames": "processed_frames",
+        "crops": "crops",
+    }
+    assert summary.artifact_validation.source_artifacts == summary.source_artifacts
     assert summary.counts.decoded_frames == expected_count
     assert summary.counts.raw_frames == expected_count
     assert summary.counts.processed_frames == expected_count

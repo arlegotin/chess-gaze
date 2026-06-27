@@ -79,3 +79,24 @@ Result:
 
 - The task brief described only fixture-input/count changes, but the current repository also required one owned-test assertion refresh in `test_qa_summary_real_video_contract.py` because scene/viewer artifacts are now part of the emitted QA-summary contract.
 - I ran only the focused five-file pytest command required by the task, not the broader suite.
+
+## Review Fix 1
+
+- Restored an exact `summary.source_artifacts` map assertion in
+  `tests/chess_gaze/test_qa_summary_real_video_contract.py` while preserving the
+  current scene and viewer artifact keys.
+- Kept the cross-check that `summary.artifact_validation.source_artifacts`
+  matches the summary-level map.
+
+Covering test command:
+
+```sh
+uv run pytest tests/chess_gaze/test_video_decode_real_video.py tests/chess_gaze/test_pipeline_real_video_contract.py tests/chess_gaze/test_qa_summary_real_video_contract.py tests/chess_gaze/test_visualization_real_video.py tests/chess_gaze/test_scene_artifacts_real_video_contract.py -q
+```
+
+Result:
+
+```text
+.....                                                                    [100%]
+5 passed in 121.34s (0:02:01)
+```
