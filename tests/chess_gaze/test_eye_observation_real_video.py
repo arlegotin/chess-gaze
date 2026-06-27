@@ -16,9 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_REGISTRY_PATH = REPO_ROOT / "src" / "chess_gaze" / "model_registry.json"
 MODELS_ROOT = REPO_ROOT / "models"
 MEDIAPIPE_MODEL_ID = "mediapipe-face-landmarker"
+NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
+NAKAMURA_SHORT_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
 SAMPLED_FRAME_INDICES = {
-    Path("artifacts/input/test_1.mp4"): (0, 300, 900, 1800, 2700, 3600),
-    Path("artifacts/input/test_2.mp4"): (0, 300, 900, 1500, 1972),
+    NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
 
 
