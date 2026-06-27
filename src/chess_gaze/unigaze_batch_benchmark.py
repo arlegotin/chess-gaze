@@ -88,6 +88,13 @@ def selected_mps_batch_size(report: UniGazeBatchBenchmarkReport) -> int | None:
 def _selected_mps_batch_size_from_results(
     candidate_results: list[BenchmarkCandidateResult],
 ) -> int | None:
+    if not any(
+        result.device == "cpu"
+        and result.batch_size == 1
+        and result.status == "passed"
+        for result in candidate_results
+    ):
+        return None
     passing = [
         result
         for result in candidate_results
@@ -185,6 +192,7 @@ def _run_benchmark(
             device == "cpu"
             and batch_size == 1
             and result.full_run_dir is not None
+            and result.status == "passed"
             and _candidate_has_valid_artifacts(result)
         ):
             fresh_cpu1_run_dir = Path(result.full_run_dir)
