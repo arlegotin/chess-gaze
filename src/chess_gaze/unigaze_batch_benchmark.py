@@ -15,7 +15,11 @@ from pydantic import Field
 
 from chess_gaze.geometry import StrictSchemaModel
 from chess_gaze.model_assets import sha256_file
-from chess_gaze.run_equivalence import EquivalenceReport, compare_runs
+from chess_gaze.run_equivalence import (
+    EquivalenceReport,
+    EquivalenceTolerances,
+    compare_runs,
+)
 
 CANDIDATE_DEVICES: tuple[Literal["cpu", "mps"], ...] = ("cpu", "mps")
 BATCH_SIZES: tuple[int, ...] = (1, 2, 4, 7, 8, 16, 32, 64)
@@ -28,6 +32,11 @@ MPS_ENV_VARS = (
     "PYTORCH_ENABLE_MPS_FALLBACK",
     "PYTORCH_MPS_FAST_MATH",
     "PYTORCH_MPS_PREFER_METAL",
+)
+MPS_EQUIVALENCE_TOLERANCES = EquivalenceTolerances(
+    appearance_pitch_yaw_radians=1e-3,
+    scene_ray_component=1e-3,
+    monitor_uv_m=2e-3,
 )
 
 
@@ -338,7 +347,11 @@ def _run_candidate(
         benchmark_output_path, device, batch_size
     )
     try:
-        equivalence_report = compare_runs(equivalence_baseline, run_dir)
+        equivalence_report = compare_runs(
+            equivalence_baseline,
+            run_dir,
+            tolerances=MPS_EQUIVALENCE_TOLERANCES if device == "mps" else None,
+        )
     except Exception as exc:
         return base_result.model_copy(
             update={

@@ -161,7 +161,7 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
     output_path = tmp_path / "benchmark.json"
     commands: list[list[str]] = []
     subprocess_envs: list[dict[str, str]] = []
-    compared_runs: list[tuple[str, str]] = []
+    compared_runs: list[tuple[str, str, tuple[float, float, float] | None]] = []
 
     monkeypatch.setattr(benchmark, "CANDIDATE_DEVICES", ("cpu", "mps"))
     monkeypatch.setattr(benchmark, "BATCH_SIZES", (1, 2))
@@ -204,8 +204,23 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
             stderr="",
         )
 
-    def fake_compare_runs(baseline: str | Path, candidate: str | Path) -> object:
-        compared_runs.append((str(baseline), str(candidate)))
+    def fake_compare_runs(
+        baseline: str | Path, candidate: str | Path, **kwargs: object
+    ) -> object:
+        tolerances = kwargs.get("tolerances")
+        compared_runs.append(
+            (
+                str(baseline),
+                str(candidate),
+                None
+                if tolerances is None
+                else (
+                    tolerances.appearance_pitch_yaw_radians,
+                    tolerances.scene_ray_component,
+                    tolerances.monitor_uv_m,
+                ),
+            )
+        )
         return EquivalenceReport(
             baseline_run_dir=str(baseline),
             candidate_run_dir=str(candidate),
@@ -249,9 +264,9 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
     assert report.candidate_results[1].error_code == "OOM"
     assert report.candidate_results[1].full_run_dir is None
     assert compared_runs == [
-        (str(baseline_run_dir), str(tmp_path / "cpu1")),
-        (str(tmp_path / "cpu1"), str(tmp_path / "mps1")),
-        (str(tmp_path / "cpu1"), str(tmp_path / "mps2")),
+        (str(baseline_run_dir), str(tmp_path / "cpu1"), None),
+        (str(tmp_path / "cpu1"), str(tmp_path / "mps1"), (1e-3, 1e-3, 2e-3)),
+        (str(tmp_path / "cpu1"), str(tmp_path / "mps2"), (1e-3, 1e-3, 2e-3)),
     ]
     assert all(command[:2] == ["chess-gaze", "analyze"] for command in commands)
     for env in subprocess_envs:
