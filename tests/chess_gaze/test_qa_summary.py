@@ -10,7 +10,13 @@ import pytest
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
-from chess_gaze.frame_records import FrameRecord, RunManifest, VideoManifest
+from chess_gaze.frame_records import (
+    FrameRecord,
+    InferenceRuntimeRecord,
+    RunManifest,
+    VideoManifest,
+    read_run_manifest_artifact_json,
+)
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.image_io import save_rgb_png
 from chess_gaze.qa_summary import (
@@ -141,6 +147,21 @@ def _eye_payload(present: bool, reason: ErrorCode) -> dict[str, object]:
     }
 
 
+def _external_observer_inference_record() -> InferenceRuntimeRecord:
+    return InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
 def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
     layout = _make_layout(tmp_path)
     video_path = tmp_path / "source.mp4"
@@ -157,6 +178,7 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
             frame_height=8,
             frame_count_decoded=frame_count,
         ),
+        inference=_external_observer_inference_record(),
     )
     (layout.run_dir / "run_manifest.json").write_text(
         run_manifest.model_dump_json(), encoding="utf-8"
@@ -219,6 +241,26 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
     )
     _write_scene_and_viewer_artifacts(layout)
     return layout
+
+
+def test_build_qa_summary_reads_legacy_run_manifest_without_inference(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path)
+    run_manifest_path = layout.run_dir / "run_manifest.json"
+    legacy_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    legacy_manifest.pop("inference")
+    run_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
+
+    summary = build_qa_summary(layout)
+    manifest = read_run_manifest_artifact_json(
+        run_manifest_path.read_text(encoding="utf-8")
+    )
+
+    assert summary.run_id == layout.run_dir.name
+    assert summary.source_video_path == str(tmp_path / "source.mp4")
+    assert summary.artifact_validation.schema_validation_passed is True
+    assert manifest.inference.observer_source == "legacy_manifest_without_inference"
 
 
 def _make_layout(tmp_path: Path) -> RunLayout:

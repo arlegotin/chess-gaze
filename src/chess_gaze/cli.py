@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--output-root", default=None)
     analyze.add_argument("--models-root", default=None)
     analyze.add_argument("--config", default=None)
+    analyze.add_argument("--unigaze-device", choices=("cpu", "mps"), default=None)
+    analyze.add_argument("--unigaze-batch-size", type=int, default=None)
     view = subparsers.add_parser("view")
     view.add_argument("run_dir")
     view.add_argument("--host", default="127.0.0.1")
@@ -82,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
                     Path(args.models_root) if args.models_root is not None else None
                 ),
                 config_path=Path(args.config) if args.config is not None else None,
+                unigaze_device=args.unigaze_device,
+                unigaze_batch_size=args.unigaze_batch_size,
             )
         )
     except PipelineError as exc:

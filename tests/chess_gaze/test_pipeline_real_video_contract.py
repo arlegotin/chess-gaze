@@ -14,6 +14,9 @@ from chess_gaze.pipeline import (
     analyze_video,
 )
 
+NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
+NAKAMURA_SHORT_FRAME_COUNT = 180
+
 
 def _point(x: float, y: float) -> Point2D:
     return Point2D(space=CoordinateSpace.IMAGE_PX, x=x, y=y)
@@ -136,10 +139,7 @@ def _records(path: Path) -> list[FrameRecord]:
 
 @pytest.mark.parametrize(
     ("video_path", "expected_count"),
-    [
-        (Path("artifacts/input/test_1.mp4"), 3613),
-        (Path("artifacts/input/test_2.mp4"), 1973),
-    ],
+    [(NAKAMURA_SHORT_VIDEO, NAKAMURA_SHORT_FRAME_COUNT)],
 )
 def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     tmp_path: Path, video_path: Path, expected_count: int

@@ -20,6 +20,8 @@ package instead of accidentally importing Python files from the repository root.
   - `face_observation.py`, `eye_observation.py`, `head_pose.py`,
     `gaze_observation.py`, and `frame_observation.py` own per-frame evidence
     extraction.
+  - `unigaze_runtime.py` owns UniGaze device/batch runtime validation, MPS
+    preflight, synchronization, and inference metadata assembly.
   - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record
     and primitive geometry contracts.
   - `scene_calibration.py` owns persisted adult-male, monitor, and robust
@@ -31,8 +33,20 @@ package instead of accidentally importing Python files from the repository root.
     scene JSON/JSONL artifacts.
   - `scene_viewer.py` owns viewer-data generation, packaged static asset
     copying, and localhost-only static serving.
+  - `run_equivalence.py` owns strict run-to-run artifact equivalence checks for
+    CPU/MPS optimization validation.
+  - `unigaze_batch_benchmark.py` owns the Nakamura UniGaze device/batch
+    benchmark harness and selected-batch report schema.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration, validation,
     and command-line entry points.
+
+Source-layout review, 2026-06-27: `unigaze_batch_benchmark.py` is intentionally
+deep despite crossing the 800-line review trigger. The module is a finite
+CLI-only benchmark harness for one optimization workflow, and keeping report
+schema, candidate execution, equivalence writing, and artifact-retention policy
+together keeps the benchmark contract auditable. If it grows toward 1,500 lines
+or becomes a reusable benchmark framework, split report/schema, subprocess
+runner, forward-timing, and retention helpers into separate concept modules.
 - `src/chess_gaze/viewer_assets/` contains package resources for the generated
   local viewer: HTML, CSS, JavaScript, and pinned remote Three.js dependency
   metadata. The app assets are copied into each run's `viewer/` directory; the

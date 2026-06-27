@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Literal
 
 from pydantic import ConfigDict, model_validator
 
@@ -187,11 +188,151 @@ class VideoManifest(StrictSchemaModel):
     frame_count_decoded: int
 
 
+class InferenceRuntimeRecord(StrictSchemaModel):
+    schema_version: Literal["inference-runtime-v1"] = "inference-runtime-v1"
+    observer_source: Literal[
+        "default_model_observer",
+        "external_observer",
+        "legacy_manifest_without_inference",
+    ]
+    unigaze_model_id: str | None
+    unigaze_device: Literal["cpu", "mps", "not_applicable"]
+    unigaze_batch_size: int | None
+    torch_version: str | None
+    torch_mps_available: bool | None
+    mps_fallback_env: str
+    mps_fast_math_env: str
+    mps_prefer_metal_env: str
+    mps_preflight_passed: bool | None
+
+    @model_validator(mode="after")
+    def validate_runtime_semantics(self) -> InferenceRuntimeRecord:
+        issues: list[str] = []
+
+        if self.observer_source in {
+            "external_observer",
+            "legacy_manifest_without_inference",
+        }:
+            if self.unigaze_model_id is not None:
+                issues.append(
+                    f"{self.observer_source} cannot declare a UniGaze model identifier"
+                )
+            if self.unigaze_device != "not_applicable":
+                issues.append(
+                    f"{self.observer_source} must use unigaze_device=not_applicable"
+                )
+            if self.unigaze_batch_size is not None:
+                issues.append(
+                    f"{self.observer_source} cannot declare unigaze_batch_size"
+                )
+            if self.torch_version is not None:
+                issues.append(f"{self.observer_source} cannot declare torch_version")
+            if self.torch_mps_available is not None:
+                issues.append(
+                    f"{self.observer_source} cannot declare torch_mps_available"
+                )
+            if self.mps_fallback_env != "not_applicable":
+                issues.append(
+                    f"{self.observer_source} must use mps_fallback_env=not_applicable"
+                )
+            if self.mps_fast_math_env != "not_applicable":
+                issues.append(
+                    f"{self.observer_source} must use mps_fast_math_env=not_applicable"
+                )
+            if self.mps_prefer_metal_env != "not_applicable":
+                issues.append(
+                    f"{self.observer_source} must use "
+                    "mps_prefer_metal_env=not_applicable"
+                )
+            if self.mps_preflight_passed is not None:
+                issues.append(
+                    f"{self.observer_source} cannot declare mps_preflight_passed"
+                )
+
+        if self.observer_source == "default_model_observer":
+            if self.unigaze_model_id is None or not self.unigaze_model_id.strip():
+                issues.append(
+                    "default_model_observer requires a UniGaze model identifier"
+                )
+            if self.unigaze_device == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use unigaze_device=not_applicable"
+                )
+            if self.unigaze_batch_size is None:
+                issues.append("default_model_observer requires unigaze_batch_size")
+            elif self.unigaze_batch_size <= 0:
+                issues.append("default_model_observer requires unigaze_batch_size >= 1")
+            if self.torch_version is None or not self.torch_version.strip():
+                issues.append("default_model_observer requires torch_version")
+            if self.torch_mps_available is None:
+                issues.append("default_model_observer requires torch_mps_available")
+            if self.mps_fallback_env == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use mps_fallback_env=not_applicable"
+                )
+            if self.mps_fast_math_env == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use mps_fast_math_env=not_applicable"
+                )
+            if self.mps_prefer_metal_env == "not_applicable":
+                issues.append(
+                    "default_model_observer cannot use "
+                    "mps_prefer_metal_env=not_applicable"
+                )
+            if self.unigaze_device == "cpu" and self.mps_preflight_passed is not None:
+                issues.append(
+                    "default_model_observer with unigaze_device=cpu requires "
+                    "mps_preflight_passed=None"
+                )
+            elif self.unigaze_device == "mps" and self.mps_preflight_passed is not True:
+                issues.append(
+                    "default_model_observer with unigaze_device=mps requires "
+                    "mps_preflight_passed=True"
+                )
+            if self.unigaze_device == "mps" and self.torch_mps_available is not True:
+                issues.append(
+                    "default_model_observer with unigaze_device=mps requires "
+                    "torch_mps_available=True"
+                )
+
+        if issues:
+            raise ValueError("; ".join(issues))
+        return self
+
+
 class RunManifest(StrictSchemaModel):
     run_id: str
     created_at_utc: str
     input_path: str
     video: VideoManifest
+    inference: InferenceRuntimeRecord
+
+
+def _legacy_artifact_inference_record() -> InferenceRuntimeRecord:
+    # Legacy run manifests predate inference metadata. Use the least-claiming valid
+    # record so artifact readers stay strict without inventing model-runtime facts.
+    return InferenceRuntimeRecord(
+        observer_source="legacy_manifest_without_inference",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
+def read_run_manifest_artifact_json(payload: str) -> RunManifest:
+    raw_manifest = json.loads(payload)
+    if not isinstance(raw_manifest, dict) or "inference" in raw_manifest:
+        return RunManifest.model_validate(raw_manifest)
+
+    legacy_manifest = dict(raw_manifest)
+    legacy_manifest["inference"] = _legacy_artifact_inference_record().model_dump()
+    return RunManifest.model_validate(legacy_manifest)
 
 
 class CalibrationRecord(StrictSchemaModel):

@@ -65,8 +65,13 @@ class RecommendedGaze:
 
 
 class UniGazeModel:
-    def __init__(self, backend: Any) -> None:
+    def __init__(self, backend: Any, *, device: str) -> None:
         self._backend = backend
+        self._device = torch.device(device)
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
 
     @classmethod
     def from_local_asset(
@@ -83,39 +88,42 @@ class UniGazeModel:
             backend = _build_unigaze_backend(UNIGAZE_BUILDER_KEY)
             backend.load_unigaze_weights(str(asset.resolved_path))
             backend = backend.to(device).eval()
-        return cls(backend)
+        return cls(backend, device=device)
 
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
+        gazes = self.predict_batch(normalized_batch)
+        if len(gazes) != 1:
+            raise ValueError("UniGaze predict() requires exactly one batch row")
+        return gazes[0]
+
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
         if normalized_batch.ndim != 4 or normalized_batch.shape[1] != 3:
             raise ValueError("normalized_batch must have shape (batch, 3, H, W)")
+        if normalized_batch.shape[0] < 1:
+            raise ValueError("normalized_batch must contain a non-empty batch")
 
-        with torch.no_grad():
+        normalized_batch = normalized_batch.to(self._device)
+        with torch.inference_mode():
             output = self._backend(normalized_batch)
 
         pred_gaze = output.get("pred_gaze") if isinstance(output, dict) else None
         if not isinstance(pred_gaze, torch.Tensor):
             raise ValueError("UniGaze output must contain tensor pred_gaze")
-        if pred_gaze.ndim != 2 or pred_gaze.shape[0] != 1 or pred_gaze.shape[1] != 2:
-            raise ValueError("UniGaze pred_gaze must have shape (1, 2)")
+        if (
+            pred_gaze.ndim != 2
+            or pred_gaze.shape[0] != normalized_batch.shape[0]
+            or pred_gaze.shape[1] != 2
+        ):
+            raise ValueError(
+                "UniGaze pred_gaze must have shape (batch, 2) matching input batch"
+            )
 
-        pitch_radians = float(pred_gaze[0, 0].detach().cpu())
-        # UniGaze's reference drawing treats positive yaw as image-left. Frame
-        # records and overlays use positive yaw as image-right.
-        yaw_radians = -float(pred_gaze[0, 1].detach().cpu())
-        _require_finite(pitch_radians, "pitch_radians")
-        _require_finite(yaw_radians, "yaw_radians")
-
-        return FaceModelGaze(
-            valid=True,
-            method=UNIGAZE_METHOD,
-            pitch_radians=pitch_radians,
-            yaw_radians=yaw_radians,
-            unit_vector=pitch_yaw_to_unit_vector(
-                pitch_radians=pitch_radians, yaw_radians=yaw_radians
-            ),
-            confidence=None,
-            confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
-            reason_invalid=None,
+        pred_gaze_cpu = pred_gaze.detach().cpu()
+        return tuple(
+            _face_model_gaze_from_pred_row(pred_gaze_cpu[index])
+            for index in range(pred_gaze_cpu.shape[0])
         )
 
 
@@ -364,6 +372,36 @@ def _eye_offset_xy(eye: Any) -> tuple[float | None, float | None]:
         return float(point_offset.x), float(point_offset.y)
 
     return None, None
+
+
+def _face_model_gaze_from_pred_row(pred_row: torch.Tensor) -> FaceModelGaze:
+    pitch_radians = float(pred_row[0])
+    # UniGaze's reference drawing treats positive yaw as image-left. Frame
+    # records and overlays use positive yaw as image-right.
+    yaw_radians = -float(pred_row[1])
+    if not math.isfinite(pitch_radians) or not math.isfinite(yaw_radians):
+        return FaceModelGaze(
+            valid=False,
+            method=UNIGAZE_METHOD,
+            pitch_radians=None,
+            yaw_radians=None,
+            unit_vector=None,
+            confidence=None,
+            confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
+            reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
+        )
+    return FaceModelGaze(
+        valid=True,
+        method=UNIGAZE_METHOD,
+        pitch_radians=pitch_radians,
+        yaw_radians=yaw_radians,
+        unit_vector=pitch_yaw_to_unit_vector(
+            pitch_radians=pitch_radians, yaw_radians=yaw_radians
+        ),
+        confidence=None,
+        confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
+        reason_invalid=None,
+    )
 
 
 def _build_unigaze_backend(builder_key: str) -> Any:

@@ -5,7 +5,14 @@ import pytest
 from pydantic import ValidationError
 
 from chess_gaze.errors import ErrorCode
-from chess_gaze.frame_records import FrameRecord, GazeAngles
+from chess_gaze.frame_records import (
+    FrameRecord,
+    GazeAngles,
+    InferenceRuntimeRecord,
+    RunManifest,
+    VideoManifest,
+    read_run_manifest_artifact_json,
+)
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 
 
@@ -167,3 +174,199 @@ def test_frame_record_rejects_infinite_head_pose_angle(
 def test_error_code_names_are_stable() -> None:
     assert ErrorCode.FACE_NOT_FOUND.value == "FACE_NOT_FOUND"
     assert ErrorCode.GAZE_ESTIMATORS_DISAGREE.value == "GAZE_ESTIMATORS_DISAGREE"
+
+
+def _default_model_inference_payload() -> dict[str, Any]:
+    return {
+        "observer_source": "default_model_observer",
+        "unigaze_model_id": "unigaze-h14-joint",
+        "unigaze_device": "mps",
+        "unigaze_batch_size": 16,
+        "torch_version": "2.12.1",
+        "torch_mps_available": True,
+        "mps_fallback_env": "unset",
+        "mps_fast_math_env": "unset",
+        "mps_prefer_metal_env": "unset",
+        "mps_preflight_passed": True,
+    }
+
+
+def _external_observer_inference_payload() -> dict[str, Any]:
+    return {
+        "observer_source": "external_observer",
+        "unigaze_model_id": None,
+        "unigaze_device": "not_applicable",
+        "unigaze_batch_size": None,
+        "torch_version": None,
+        "torch_mps_available": None,
+        "mps_fallback_env": "not_applicable",
+        "mps_fast_math_env": "not_applicable",
+        "mps_prefer_metal_env": "not_applicable",
+        "mps_preflight_passed": None,
+    }
+
+
+def test_inference_runtime_record_accepts_default_model_observer() -> None:
+    record = InferenceRuntimeRecord(**_default_model_inference_payload())
+
+    assert record.schema_version == "inference-runtime-v1"
+    assert record.unigaze_device == "mps"
+    assert record.unigaze_batch_size == 16
+
+
+def test_inference_runtime_record_accepts_current_cpu_default_model_runtime() -> None:
+    payload = _default_model_inference_payload()
+    payload.update(
+        {
+            "unigaze_device": "cpu",
+            "unigaze_batch_size": 1,
+            "torch_mps_available": False,
+            "mps_preflight_passed": None,
+        }
+    )
+
+    record = InferenceRuntimeRecord(**payload)
+
+    assert record.unigaze_device == "cpu"
+    assert record.unigaze_batch_size == 1
+    assert record.mps_preflight_passed is None
+
+
+def test_inference_runtime_record_accepts_external_observer() -> None:
+    record = InferenceRuntimeRecord(**_external_observer_inference_payload())
+
+    assert record.observer_source == "external_observer"
+    assert record.unigaze_model_id is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unigaze_model_id": None},
+        {"unigaze_device": "not_applicable"},
+        {"unigaze_batch_size": None},
+        {"unigaze_batch_size": 0},
+        {"unigaze_batch_size": -1},
+        {"torch_version": None},
+        {"torch_mps_available": None},
+        {"mps_fallback_env": "not_applicable"},
+        {"mps_preflight_passed": None},
+    ],
+)
+def test_inference_runtime_record_rejects_default_model_observer_contradictions(
+    overrides: dict[str, Any],
+) -> None:
+    payload = _default_model_inference_payload()
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match="default_model_observer"):
+        InferenceRuntimeRecord(**payload)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unigaze_device": "cpu", "mps_preflight_passed": False},
+        {"unigaze_device": "cpu", "mps_preflight_passed": True},
+        {
+            "unigaze_device": "mps",
+            "torch_mps_available": False,
+            "mps_preflight_passed": True,
+        },
+        {
+            "unigaze_device": "mps",
+            "torch_mps_available": True,
+            "mps_preflight_passed": False,
+        },
+    ],
+)
+def test_inference_runtime_record_rejects_default_model_runtime_device_contradictions(
+    overrides: dict[str, Any],
+) -> None:
+    payload = _default_model_inference_payload()
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match="default_model_observer"):
+        InferenceRuntimeRecord(**payload)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unigaze_model_id": "unigaze-h14-joint"},
+        {"unigaze_device": "cpu"},
+        {"unigaze_batch_size": 1},
+        {"torch_version": "2.12.1"},
+        {"torch_mps_available": False},
+        {"mps_fallback_env": "unset"},
+        {"mps_preflight_passed": False},
+    ],
+)
+def test_inference_runtime_record_rejects_external_observer_contradictions(
+    overrides: dict[str, Any],
+) -> None:
+    payload = _external_observer_inference_payload()
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match="external_observer"):
+        InferenceRuntimeRecord(**payload)
+
+
+def test_run_manifest_requires_inference_runtime_record() -> None:
+    manifest = RunManifest(
+        run_id="run-1",
+        created_at_utc="2026-06-26T00:00:00Z",
+        input_path="artifacts/input/nakamura_short.mp4",
+        video=VideoManifest(
+            source_path="artifacts/input/nakamura_short.mp4",
+            source_sha256="0" * 64,
+            frame_width=1920,
+            frame_height=1080,
+            frame_count_decoded=180,
+        ),
+        inference=InferenceRuntimeRecord(**_external_observer_inference_payload()),
+    )
+
+    assert manifest.inference.observer_source == "external_observer"
+
+
+def test_run_manifest_direct_validation_rejects_missing_inference() -> None:
+    with pytest.raises(ValidationError, match="inference"):
+        RunManifest.model_validate(
+            {
+                "run_id": "run-1",
+                "created_at_utc": "2026-06-26T00:00:00Z",
+                "input_path": "artifacts/input/nakamura_short.mp4",
+                "video": {
+                    "source_path": "artifacts/input/nakamura_short.mp4",
+                    "source_sha256": "0" * 64,
+                    "frame_width": 1920,
+                    "frame_height": 1080,
+                    "frame_count_decoded": 180,
+                },
+            }
+        )
+
+
+def test_legacy_manifest_json_gets_compatibility_inference() -> None:
+    manifest = read_run_manifest_artifact_json(
+        """
+        {
+          "run_id": "run-1",
+          "created_at_utc": "2026-06-26T00:00:00Z",
+          "input_path": "artifacts/input/nakamura_short.mp4",
+          "video": {
+            "source_path": "artifacts/input/nakamura_short.mp4",
+            "source_sha256": "%s",
+            "frame_width": 1920,
+            "frame_height": 1080,
+            "frame_count_decoded": 180
+          }
+        }
+        """
+        % ("0" * 64)
+    )
+
+    assert manifest.inference.observer_source == "legacy_manifest_without_inference"
+    assert manifest.inference.unigaze_device == "not_applicable"
+    assert manifest.inference.mps_preflight_passed is None

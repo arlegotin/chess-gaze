@@ -16,8 +16,10 @@ from chess_gaze.frame_records import (
     FrameRecord,
     GazeAngles,
     HeadPoseRecord,
+    InferenceRuntimeRecord,
     RunManifest,
     VideoManifest,
+    read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.scene_artifacts import (
@@ -158,6 +160,21 @@ def _frame(index: int, *, gaze_valid: bool = True) -> FrameRecord:
     )
 
 
+def _external_observer_inference_record() -> InferenceRuntimeRecord:
+    return InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
 def _write_minimal_run(run_dir: Path) -> RunLayout:
     layout = _layout(run_dir)
     layout.records_dir.mkdir(parents=True)
@@ -174,6 +191,7 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
         created_at_utc=datetime(2026, 6, 26, 12, tzinfo=UTC).isoformat(),
         input_path=video.source_path,
         video=video,
+        inference=_external_observer_inference_record(),
     )
 
     (run_dir / "run_manifest.json").write_text(
@@ -190,6 +208,25 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
         encoding="utf-8",
     )
     return layout
+
+
+def test_build_scene_artifacts_reads_legacy_run_manifest_without_inference(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+    run_manifest_path = layout.run_dir / "run_manifest.json"
+    legacy_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    legacy_manifest.pop("inference")
+    run_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
+
+    result = build_scene_artifacts(layout)
+    manifest = read_run_manifest_artifact_json(
+        run_manifest_path.read_text(encoding="utf-8")
+    )
+
+    assert result.manifest.run_id == "20260626T120000Z-scene"
+    assert result.scene_frame_count == 7
+    assert manifest.inference.observer_source == "legacy_manifest_without_inference"
 
 
 def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
@@ -378,6 +415,7 @@ def test_scene_frame_direction_maps_positive_pitch_to_scene_up(
         created_at_utc=datetime(2026, 6, 26, 12, 30, tzinfo=UTC).isoformat(),
         input_path=video.source_path,
         video=video,
+        inference=_external_observer_inference_record(),
     )
     neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
     upward_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.20)
@@ -442,6 +480,7 @@ def test_scene_frame_direction_maps_image_right_to_streamer_left(
         created_at_utc=datetime(2026, 6, 26, 12, 40, tzinfo=UTC).isoformat(),
         input_path=video.source_path,
         video=video,
+        inference=_external_observer_inference_record(),
     )
     neutral_gaze = _gaze(valid=True, yaw_radians=0.0, pitch_radians=0.0)
     image_right_gaze = _gaze(valid=True, yaw_radians=0.20, pitch_radians=0.0)

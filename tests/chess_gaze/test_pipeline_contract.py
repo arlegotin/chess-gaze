@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, TextIO, cast
 
 import av
@@ -9,8 +11,10 @@ import numpy as np
 import pytest
 
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
+from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
+from chess_gaze.model_assets import ResolvedModelAsset
 from chess_gaze.pipeline import (
     AnalyzeRequest,
     ObserverBundle,
@@ -323,6 +327,203 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     )
 
 
+def test_analyze_video_uses_batch_observer_without_reordering_frames(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=5)
+    observed_batches: list[list[str]] = []
+
+    def fake_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        observed_batches.append([frame.frame_id for frame in frames])
+        return [_fake_record(frame) for frame in frames]
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            unigaze_batch_size=2,
+        ),
+        observers=ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=fake_batch_record,
+        ),
+    )
+
+    records = _records_from(result.frames_jsonl_path)
+    assert observed_batches == [
+        ["f000000000", "f000000001"],
+        ["f000000002", "f000000003"],
+        ["f000000004"],
+    ]
+    assert [record.frame_id for record in records] == [
+        "f000000000",
+        "f000000001",
+        "f000000002",
+        "f000000003",
+        "f000000004",
+    ]
+    assert len(list(result.layout.raw_frames_dir.glob("*.png"))) == 5
+    assert len(list(result.layout.processed_frames_dir.glob("*.jpg"))) == 5
+    assert result.decoded_frame_count == 5
+
+
+def test_batch_observer_identity_mismatch_fails_schema_validation(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    def wrong_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        records = [_fake_record(frame) for frame in frames]
+        payload = records[0].model_dump(mode="python")
+        payload["frame_index"] = 99
+        return [FrameRecord.model_validate(payload), records[1]]
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=wrong_batch_record,
+            ),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+
+
+def test_single_observer_fallback_keeps_immediate_frame_processing(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+    observed_frames: list[str] = []
+
+    def fail_on_first_frame(frame: ObserverFrame) -> FrameRecord:
+        observed_frames.append(frame.frame_id)
+        if frame.frame_index == 0:
+            raise RuntimeError("stop after first frame")
+        return _fake_record(frame)
+
+    with pytest.raises(RuntimeError, match="stop after first frame"):
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(frame_observer=fail_on_first_frame),
+        )
+
+    assert observed_frames == ["f000000000"]
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    assert len(list((run_dir / "raw_frames").glob("*.png"))) == 1
+
+
+def test_batch_observer_record_count_mismatch_fails_schema_validation(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    def short_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        return [_fake_record(frames[0])]
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=short_batch_record,
+            ),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+
+
+def test_default_model_batch_inference_failure_returns_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=2)
+    _write_model_registry_with_assets(models_root, registry_path)
+
+    from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
+
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        return SimpleNamespace(
+            model=object(),
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=cast(Any, device),
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=True,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=None,
+            ),
+        )
+
+    def fake_default_observer_bundle_factory(
+        resolved_assets: list[Any],
+        calibration: object,
+        run_layout: object,
+        gaze_model: object,
+    ) -> ObserverBundle:
+        del resolved_assets, calibration, run_layout, gaze_model
+
+        def fail_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+            del frames
+            raise ModelInferenceError("UniGaze batch inference failed: simulated")
+
+        return ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=fail_batch,
+        )
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "default_observer_bundle_factory",
+        fake_default_observer_bundle_factory,
+    )
+
+    with pytest.raises(PipelineError, match="simulated") as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                models_root=models_root,
+                model_registry_path=registry_path,
+                unigaze_device="cpu",
+                unigaze_batch_size=2,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+
+
 def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     tmp_path: Path,
 ) -> None:
@@ -394,6 +595,344 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
         for path in result.layout.run_dir.rglob("*")
         if path.is_file()
     )
+
+
+def test_model_free_observer_run_manifest_records_external_observer(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=1)
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            unigaze_device="mps",
+            unigaze_batch_size=7,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["inference"] == {
+        "schema_version": "inference-runtime-v1",
+        "observer_source": "external_observer",
+        "unigaze_model_id": None,
+        "unigaze_device": "not_applicable",
+        "unigaze_batch_size": None,
+        "torch_version": None,
+        "torch_mps_available": None,
+        "mps_fallback_env": "not_applicable",
+        "mps_fast_math_env": "not_applicable",
+        "mps_prefer_metal_env": "not_applicable",
+        "mps_preflight_passed": None,
+    }
+
+
+def test_default_mps_unavailable_fails_before_run_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+
+    from chess_gaze import unigaze_runtime
+
+    runtime_module = cast(Any, unigaze_runtime)
+    monkeypatch.setattr(
+        runtime_module.torch.backends.mps, "is_available", lambda: False
+    )
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                models_root=models_root,
+                model_registry_path=registry_path,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+    assert "MPS is unavailable" in str(exc_info.value)
+    assert not output_root.exists()
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "PYTORCH_ENABLE_MPS_FALLBACK",
+        "PYTORCH_MPS_FAST_MATH",
+        "PYTORCH_MPS_PREFER_METAL",
+    ],
+)
+def test_default_mps_rejects_unsafe_env_before_run_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env_name: str
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+    monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
+    monkeypatch.delenv("PYTORCH_MPS_FAST_MATH", raising=False)
+    monkeypatch.delenv("PYTORCH_MPS_PREFER_METAL", raising=False)
+    monkeypatch.setenv(env_name, "1")
+
+    from chess_gaze import unigaze_runtime
+
+    runtime_module = cast(Any, unigaze_runtime)
+    monkeypatch.setattr(runtime_module.torch.backends.mps, "is_available", lambda: True)
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                models_root=models_root,
+                model_registry_path=registry_path,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+    assert env_name in str(exc_info.value)
+    assert not output_root.exists()
+
+
+def test_default_model_observer_manifest_records_unigaze_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+
+    from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
+
+    prepared_model = object()
+    captured_gaze_models: list[object] = []
+
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        unigaze_device = cast(Any, device)
+        return SimpleNamespace(
+            model=prepared_model,
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=unigaze_device,
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=True,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=True,
+            ),
+        )
+
+    def fake_default_observer_bundle_factory(
+        resolved_assets: list[Any],
+        calibration: object,
+        run_layout: object,
+        gaze_model: object,
+    ) -> ObserverBundle:
+        del resolved_assets, calibration, run_layout
+        captured_gaze_models.append(gaze_model)
+        return ObserverBundle(frame_observer=_fake_record)
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "default_observer_bundle_factory",
+        fake_default_observer_bundle_factory,
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            models_root=models_root,
+            model_registry_path=registry_path,
+        )
+    )
+
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["inference"]["observer_source"] == "default_model_observer"
+    assert manifest["inference"]["unigaze_device"] == "mps"
+    assert manifest["inference"]["unigaze_batch_size"] == 7
+    assert captured_gaze_models == [prepared_model]
+
+
+def test_explicit_cpu_batch_one_override_reaches_default_model_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+
+    from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
+
+    captured_runtime_requests: list[tuple[str, int]] = []
+
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        captured_runtime_requests.append((device, batch_size))
+        return SimpleNamespace(
+            model=object(),
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=cast(Any, device),
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=True,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=None,
+            ),
+        )
+
+    def fake_default_observer_bundle_factory(
+        resolved_assets: list[Any],
+        calibration: object,
+        run_layout: object,
+        gaze_model: object,
+    ) -> ObserverBundle:
+        del resolved_assets, calibration, run_layout, gaze_model
+        return ObserverBundle(frame_observer=_fake_record)
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "default_observer_bundle_factory",
+        fake_default_observer_bundle_factory,
+    )
+
+    analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            models_root=models_root,
+            model_registry_path=registry_path,
+            unigaze_device="cpu",
+            unigaze_batch_size=1,
+        )
+    )
+
+    assert captured_runtime_requests == [("cpu", 1)]
+
+
+def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chess_gaze import (
+        face_observation,
+        frame_observation,
+        gaze_observation,
+        pipeline,
+    )
+    from chess_gaze.calibration import default_calibration
+
+    face_path = tmp_path / "mediapipe" / "face_landmarker.task"
+    gaze_path = tmp_path / "unigaze" / "unigaze_h14_joint.safetensors"
+    face_path.parent.mkdir(parents=True)
+    gaze_path.parent.mkdir(parents=True)
+    face_path.write_bytes(b"mediapipe")
+    gaze_path.write_bytes(b"unigaze")
+    prepared_model = object()
+    captured: dict[str, object] = {}
+
+    def fail_if_model_loaded(asset: object, *, device: str) -> object:
+        del asset, device
+        raise AssertionError("default factory must reuse prepared UniGaze model")
+
+    class FakeFaceObserver:
+        def __init__(self, *, model_asset_path: Path, calibration: object) -> None:
+            captured["face_model_asset_path"] = model_asset_path
+            captured["face_calibration"] = calibration
+
+    class FakeModelBackedFrameObserver:
+        def __init__(
+            self,
+            *,
+            face_observer: object,
+            gaze_model: object,
+            calibration: object,
+            run_layout: object,
+        ) -> None:
+            captured["face_observer"] = face_observer
+            captured["gaze_model"] = gaze_model
+            captured["calibration"] = calibration
+            captured["run_layout"] = run_layout
+
+        def __call__(self, frame: ObserverFrame) -> FrameRecord:
+            return _fake_record(frame)
+
+        def observe_batch(self, frames: list[ObserverFrame]) -> list[FrameRecord]:
+            return [_fake_record(frame) for frame in frames]
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    monkeypatch.setattr(
+        gaze_observation.UniGazeModel,
+        "from_local_asset",
+        fail_if_model_loaded,
+    )
+    monkeypatch.setattr(face_observation, "MediaPipeFaceObserver", FakeFaceObserver)
+    monkeypatch.setattr(
+        frame_observation, "ModelBackedFrameObserver", FakeModelBackedFrameObserver
+    )
+    calibration = default_calibration()
+    run_layout = cast(Any, object())
+    resolved_assets = [
+        ResolvedModelAsset(
+            model_id="mediapipe-face-landmarker",
+            task_name="face_landmarks",
+            resolved_path=face_path,
+            source_url="https://example.invalid/mediapipe",
+            checksum_sha256=None,
+            license="Google AI Edge Terms",
+        ),
+        ResolvedModelAsset(
+            model_id="unigaze-h14-joint",
+            task_name="gaze_estimation",
+            resolved_path=gaze_path,
+            source_url="https://example.invalid/unigaze",
+            checksum_sha256=None,
+            license="MG-NC-RAI-2.0",
+        ),
+    ]
+
+    bundle = pipeline.default_observer_bundle_factory(
+        resolved_assets, calibration, run_layout, prepared_model
+    )
+
+    assert captured["face_model_asset_path"] == face_path
+    assert captured["gaze_model"] is prepared_model
+    assert bundle.frame_batch_observer is not None
+    assert bundle.close is not None
 
 
 def test_analyze_video_fails_when_scene_artifact_validation_fails(
@@ -476,18 +1015,46 @@ def test_config_models_root_controls_default_model_observer_factory(
         encoding="utf-8",
     )
     captured_asset_paths: list[Path] = []
+    captured_runtime_requests: list[tuple[str, int]] = []
 
     from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
 
     def fake_default_observer_bundle_factory(
         resolved_assets: list[Any],
         calibration: object,
         run_layout: object,
+        gaze_model: object,
     ) -> ObserverBundle:
-        del calibration, run_layout
+        del calibration, run_layout, gaze_model
         captured_asset_paths.extend(asset.resolved_path for asset in resolved_assets)
         return ObserverBundle(frame_observer=_fake_record)
 
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        unigaze_device = cast(Any, device)
+        captured_runtime_requests.append((device, batch_size))
+        return SimpleNamespace(
+            model=object(),
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=unigaze_device,
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=True,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=True if device == "mps" else None,
+            ),
+        )
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
     monkeypatch.setattr(
         pipeline,
         "default_observer_bundle_factory",
@@ -507,7 +1074,37 @@ def test_config_models_root_controls_default_model_observer_factory(
         Path("mediapipe/face_landmarker.task"),
         Path("unigaze/unigaze_h14_joint.safetensors"),
     ]
+    assert captured_runtime_requests == [("mps", 7)]
     assert result.layout.run_dir.is_relative_to(output_root)
+
+
+@pytest.mark.parametrize(
+    ("request_overrides", "expected_field"),
+    [
+        ({"unigaze_device": "cuda"}, "unigaze_device"),
+        ({"unigaze_batch_size": 0}, "unigaze_batch_size"),
+    ],
+)
+def test_invalid_runtime_request_overrides_fail_with_usage_before_io(
+    tmp_path: Path,
+    request_overrides: dict[str, Any],
+    expected_field: str,
+) -> None:
+    output_root = tmp_path / "output"
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=tmp_path / "missing.mp4",
+                output_root=output_root,
+                **request_overrides,
+            ),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+    assert expected_field in str(exc_info.value)
+    assert not output_root.exists()
 
 
 def test_no_face_fake_observer_records_face_not_found_and_processed_frames(

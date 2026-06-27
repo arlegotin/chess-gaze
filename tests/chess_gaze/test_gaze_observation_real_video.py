@@ -34,17 +34,18 @@ MODEL_REGISTRY_PATH = REPO_ROOT / "src" / "chess_gaze" / "model_registry.json"
 MODELS_ROOT = REPO_ROOT / "models"
 MEDIAPIPE_MODEL_ID = "mediapipe-face-landmarker"
 UNIGAZE_MODEL_ID = "unigaze-h14-joint"
+NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
+NAKAMURA_SHORT_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
 SAMPLED_FRAME_INDICES = {
-    Path("artifacts/input/test_1.mp4"): (300, 900, 1800, 2700, 3600),
-    Path("artifacts/input/test_2.mp4"): (300, 900, 1500, 1972),
+    NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
-TEST_0_RECOMMENDED_FRAME_INDICES = (90, 155, 217)
+NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES = (50, 60, 70)
 
 
-def test_default_model_observer_recommends_gaze_on_repaired_test0_frames(
+def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    video_path = REPO_ROOT / "artifacts/input/test_0.mp4"
+    video_path = REPO_ROOT / NAKAMURA_SHORT_VIDEO
     if not video_path.is_file():
         pytest.skip(f"BLOCKED: missing mandatory real-data video: {video_path}")
 
@@ -71,7 +72,7 @@ def test_default_model_observer_recommends_gaze_on_repaired_test0_frames(
     calibration = default_calibration()
     run_layout = create_run_layout(
         input_path=video_path,
-        output_root=tmp_path / "test0-observer",
+        output_root=tmp_path / "nakamura-short-observer",
         clock=lambda: datetime(2026, 6, 25, 12, 0, 0, tzinfo=UTC),
         run_suffix="abcdef12",
     )
@@ -97,13 +98,16 @@ def test_default_model_observer_recommends_gaze_on_repaired_test0_frames(
     )
 
     try:
-        sampled_frames = _sample_frames(video_path, TEST_0_RECOMMENDED_FRAME_INDICES)
+        sampled_frames = _sample_frames(
+            video_path,
+            NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES,
+        )
         records = [observer(_observer_frame(frame)) for frame in sampled_frames]
     finally:
         observer.close()
 
     assert [record.frame_index for record in records] == list(
-        TEST_0_RECOMMENDED_FRAME_INDICES
+        NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES
     )
     assert all(record.status is FrameStatus.OK for record in records)
     assert all(record.face.present for record in records)

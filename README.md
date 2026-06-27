@@ -49,6 +49,35 @@ uv run chess-gaze analyze artifacts/input/test_1.mp4 --models-root models
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --config analysis.json
 ```
 
+By default, UniGaze runs on Apple Silicon MPS with batch size 7:
+
+```sh
+uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 \
+  --output-root artifacts/output \
+  --models-root models
+```
+
+For accepted MPS runs, leave `PYTORCH_ENABLE_MPS_FALLBACK`,
+`PYTORCH_MPS_FAST_MATH`, and `PYTORCH_MPS_PREFER_METAL` unset. The MPS path
+preflights the verified local UniGaze checkpoint on batch shape
+`(7, 3, 224, 224)` before creating a run directory, then records runtime
+metadata in
+`run_manifest.json`.
+
+For CPU compatibility or non-MPS machines, opt in explicitly:
+
+```sh
+uv run chess-gaze analyze artifacts/input/test_1.mp4 \
+  --unigaze-device cpu \
+  --unigaze-batch-size 1
+```
+
+The selected batch size comes from the full Nakamura benchmark report at
+`artifacts/output/benchmarks/2026-06-26-unigaze-mps-batching.json`: MPS batch 7
+was the fastest passing MPS batch above 1 on this Apple M3 Max run. The
+benchmark keeps frame processing independent and compares MPS outputs to the
+CPU batch-1 flow with the approved tolerances.
+
 Runs are written under:
 
 ```text

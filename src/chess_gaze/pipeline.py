@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TextIO
+from typing import Any, Protocol, TextIO, cast
 
 import numpy as np
 import numpy.typing as npt
+from pydantic import ValidationError
 
 from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
-from chess_gaze.configuration import ConfigurationError, load_config
+from chess_gaze.configuration import (
+    ConfigurationError,
+    apply_analysis_overrides,
+    load_config,
+)
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
+from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import (
     CalibrationRecord,
     ErrorRecord,
@@ -22,6 +28,7 @@ from chess_gaze.frame_records import (
     FrameRecord,
     RunManifest,
 )
+from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
 from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
 from chess_gaze.model_assets import (
     ModelAssetError,
@@ -32,6 +39,13 @@ from chess_gaze.model_assets import (
 from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
 from chess_gaze.scene_artifacts import build_scene_artifacts
 from chess_gaze.scene_viewer import build_scene_viewer
+from chess_gaze.unigaze_runtime import (
+    PreparedUniGazeRuntime,
+    UniGazeDevice,
+    UniGazeRuntimeError,
+    external_observer_inference_record,
+    prepare_unigaze_runtime,
+)
 from chess_gaze.video_decode import (
     DecodedFrame,
     VideoDecodeError,
@@ -47,12 +61,16 @@ RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
 DefaultObserverBundleFactory = Callable[
-    [list[ResolvedModelAsset], CalibrationRecord, RunLayout], "ObserverBundle"
+    [list[ResolvedModelAsset], CalibrationRecord, RunLayout, object], "ObserverBundle"
 ]
 
 
 class FrameRecordObserver(Protocol):
     def __call__(self, frame: ObserverFrame) -> FrameRecord: ...
+
+
+class FrameBatchRecordObserver(Protocol):
+    def __call__(self, frames: Sequence[ObserverFrame]) -> Sequence[FrameRecord]: ...
 
 
 Clock = Callable[[], datetime]
@@ -76,6 +94,7 @@ class ObserverFrame:
 @dataclass(frozen=True)
 class ObserverBundle:
     frame_observer: FrameRecordObserver
+    frame_batch_observer: FrameBatchRecordObserver | None = None
     close: Callable[[], None] | None = None
 
 
@@ -85,6 +104,8 @@ class AnalyzeRequest:
     output_root: Path | None = None
     models_root: Path | None = None
     config_path: Path | None = None
+    unigaze_device: str | None = None
+    unigaze_batch_size: int | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
     clock: Clock = utc_now
@@ -126,6 +147,15 @@ class _ResolvedRequest:
     raw_frame_image_format: str
     processed_frame_image_format: str
     processed_frame_jpeg_quality: int
+    unigaze_device: str
+    unigaze_batch_size: int
+
+
+@dataclass(frozen=True)
+class _PreparedDecodedFrame:
+    decoded_frame: DecodedFrame
+    observer_frame: ObserverFrame
+    raw_frame_errors: list[ErrorRecord]
 
 
 def analyze_video(
@@ -139,16 +169,29 @@ def analyze_video(
     except VideoDecodeError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
 
+    calibration = default_calibration()
     resolved_model_assets: list[ResolvedModelAsset] | None = None
+    prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
+    inference = external_observer_inference_record()
     if observers is None:
         resolved_model_assets = _validate_model_assets(
             request.model_registry_path, resolved
         )
+        gaze_asset = _asset_by_id(resolved_model_assets, UNIGAZE_MODEL_ID)
+        try:
+            prepared_unigaze_runtime = prepare_unigaze_runtime(
+                gaze_asset,
+                device=cast(UniGazeDevice, resolved.unigaze_device),
+                batch_size=resolved.unigaze_batch_size,
+                input_size_px=calibration.unigaze_input_size_px,
+            )
+        except UniGazeRuntimeError as exc:
+            raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
+        inference = prepared_unigaze_runtime.inference
 
     _estimate_disk_space(resolved.output_root)
 
     created_at = request.clock()
-    calibration = default_calibration()
     layout = create_run_layout(
         input_path=resolved.video_path,
         output_root=resolved.output_root / resolved.video_path.stem / "runs",
@@ -169,6 +212,7 @@ def analyze_video(
             created_at_utc=_format_utc(created_at),
             input_path=str(resolved.video_path),
             video=inspection.video_manifest,
+            inference=inference,
         ).model_dump(mode="json"),
     )
     _write_json(calibration_path, calibration.model_dump(mode="json"))
@@ -179,8 +223,13 @@ def analyze_video(
     if observers is None:
         if resolved_model_assets is None:
             raise AssertionError("resolved_model_assets must be set for default run")
+        if prepared_unigaze_runtime is None:
+            raise AssertionError("prepared_unigaze_runtime must be set for default run")
         observers = default_observer_bundle_factory(
-            resolved_model_assets, calibration, layout
+            resolved_model_assets,
+            calibration,
+            layout,
+            prepared_unigaze_runtime.model,
         )
 
     decoded_frame_count = 0
@@ -190,17 +239,48 @@ def analyze_video(
             frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
             errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
         ):
+            use_batch_accumulator = (
+                observers.frame_batch_observer is not None
+                and resolved.unigaze_batch_size > 1
+            )
+            pending_batch: list[DecodedFrame] = []
             for decoded_frame in iter_decoded_frames(resolved.video_path):
                 decoded_frame_count += 1
-                record, frame_errors = _process_frame(
-                    decoded_frame,
+                if not use_batch_accumulator:
+                    record, frame_errors = _process_frame(
+                        decoded_frame,
+                        observers,
+                        resolved,
+                        layout,
+                        errors_handle=errors_handle,
+                    )
+                    frame_error_count += len(frame_errors)
+                    frames_handle.write(record.model_dump_json() + "\n")
+                    continue
+                pending_batch.append(decoded_frame)
+                if len(pending_batch) < resolved.unigaze_batch_size:
+                    continue
+                for record, frame_errors in _process_frame_batch(
+                    pending_batch,
                     observers,
                     resolved,
                     layout,
                     errors_handle=errors_handle,
-                )
-                frame_error_count += len(frame_errors)
-                frames_handle.write(record.model_dump_json() + "\n")
+                ):
+                    frame_error_count += len(frame_errors)
+                    frames_handle.write(record.model_dump_json() + "\n")
+                pending_batch = []
+
+            if pending_batch:
+                for record, frame_errors in _process_frame_batch(
+                    pending_batch,
+                    observers,
+                    resolved,
+                    layout,
+                    errors_handle=errors_handle,
+                ):
+                    frame_error_count += len(frame_errors)
+                    frames_handle.write(record.model_dump_json() + "\n")
     finally:
         if observers.close is not None:
             observers.close()
@@ -267,14 +347,26 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         config = load_config(request.config_path)
     except ConfigurationError as exc:
         raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
+    try:
+        resolved_config = apply_analysis_overrides(
+            config,
+            output_root=request.output_root,
+            models_root=request.models_root,
+            unigaze_device=request.unigaze_device,
+            unigaze_batch_size=request.unigaze_batch_size,
+        )
+    except ValidationError as exc:
+        raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
 
     return _ResolvedRequest(
         video_path=request.video_path,
-        output_root=request.output_root or config.output_root,
-        models_root=request.models_root or config.models_root,
-        raw_frame_image_format=config.raw_frame_image_format,
-        processed_frame_image_format=config.processed_frame_image_format,
-        processed_frame_jpeg_quality=config.processed_frame_jpeg_quality,
+        output_root=resolved_config.output_root,
+        models_root=resolved_config.models_root,
+        raw_frame_image_format=resolved_config.raw_frame_image_format,
+        processed_frame_image_format=resolved_config.processed_frame_image_format,
+        processed_frame_jpeg_quality=resolved_config.processed_frame_jpeg_quality,
+        unigaze_device=resolved_config.unigaze_device,
+        unigaze_batch_size=resolved_config.unigaze_batch_size,
     )
 
 
@@ -307,23 +399,26 @@ def _default_observer_bundle_factory(
     resolved_assets: list[ResolvedModelAsset],
     calibration: CalibrationRecord,
     run_layout: RunLayout,
+    gaze_model: object,
 ) -> ObserverBundle:
     from chess_gaze.face_observation import MediaPipeFaceObserver
     from chess_gaze.frame_observation import ModelBackedFrameObserver
-    from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID, UniGazeModel
 
     face_asset = _asset_by_id(resolved_assets, "mediapipe-face-landmarker")
-    gaze_asset = _asset_by_id(resolved_assets, UNIGAZE_MODEL_ID)
     observer = ModelBackedFrameObserver(
         face_observer=MediaPipeFaceObserver(
             model_asset_path=face_asset.resolved_path,
             calibration=calibration,
         ),
-        gaze_model=UniGazeModel.from_local_asset(gaze_asset, device="cpu"),
+        gaze_model=cast(Any, gaze_model),
         calibration=calibration,
         run_layout=run_layout,
     )
-    return ObserverBundle(frame_observer=observer, close=observer.close)
+    return ObserverBundle(
+        frame_observer=observer,
+        frame_batch_observer=observer.observe_batch,
+        close=observer.close,
+    )
 
 
 def _asset_by_id(
@@ -371,10 +466,23 @@ def _process_frame(
     *,
     errors_handle: TextIO,
 ) -> tuple[FrameRecord, list[ErrorRecord]]:
+    [processed] = _process_frame_batch(
+        [decoded_frame],
+        observers,
+        resolved,
+        layout,
+        errors_handle=errors_handle,
+    )
+    return processed
+
+
+def _prepare_decoded_frame(
+    decoded_frame: DecodedFrame,
+    resolved: _ResolvedRequest,
+    layout: RunLayout,
+) -> _PreparedDecodedFrame:
     frame_errors: list[ErrorRecord] = []
     raw_path = layout.raw_frames_dir / f"{decoded_frame.frame_id}.png"
-    processed_path = layout.processed_frames_dir / f"{decoded_frame.frame_id}.jpg"
-
     try:
         _validate_image_format(resolved.raw_frame_image_format, "png")
         raw_frame_writer(raw_path, decoded_frame.rgb)
@@ -385,7 +493,6 @@ def _process_frame(
                 message=f"Raw frame write failed: {exc}",
             )
         )
-
     observer_frame = ObserverFrame(
         frame_id=decoded_frame.frame_id,
         frame_index=decoded_frame.frame_index,
@@ -395,10 +502,21 @@ def _process_frame(
         pts_seconds=decoded_frame.pts_seconds,
         duration_seconds=decoded_frame.duration_seconds,
     )
-    record = observers.frame_observer(observer_frame)
-    _validate_observer_record_identity(record, decoded_frame)
-    record = _record_with_errors(record, frame_errors)
+    return _PreparedDecodedFrame(
+        decoded_frame=decoded_frame,
+        observer_frame=observer_frame,
+        raw_frame_errors=frame_errors,
+    )
 
+
+def _render_processed_frame_and_collect_errors(
+    decoded_frame: DecodedFrame,
+    record: FrameRecord,
+    resolved: _ResolvedRequest,
+    layout: RunLayout,
+) -> tuple[FrameRecord, list[ErrorRecord]]:
+    frame_errors: list[ErrorRecord] = []
+    processed_path = layout.processed_frames_dir / f"{decoded_frame.frame_id}.jpg"
     try:
         _validate_image_format(resolved.processed_frame_image_format, "jpg")
         render_processed_frame(
@@ -415,9 +533,60 @@ def _process_frame(
             )
         )
         record = _record_with_errors(record, frame_errors)
-
-    frame_error_writer(errors_handle, record)
     return record, frame_errors
+
+
+def _process_frame_batch(
+    decoded_frames: Sequence[DecodedFrame],
+    observers: ObserverBundle,
+    resolved: _ResolvedRequest,
+    layout: RunLayout,
+    *,
+    errors_handle: TextIO,
+) -> list[tuple[FrameRecord, list[ErrorRecord]]]:
+    prepared = [
+        _prepare_decoded_frame(decoded_frame, resolved, layout)
+        for decoded_frame in decoded_frames
+    ]
+    if observers.frame_batch_observer is None:
+        try:
+            records = [
+                observers.frame_observer(item.observer_frame) for item in prepared
+            ]
+        except ModelInferenceError as exc:
+            raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
+    else:
+        try:
+            records = list(
+                observers.frame_batch_observer(
+                    [item.observer_frame for item in prepared]
+                )
+            )
+        except ModelInferenceError as exc:
+            raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
+    if len(records) != len(prepared):
+        raise PipelineError(
+            CliErrorCode.SCHEMA_VALIDATION_FAILED,
+            (
+                "Batch observer returned a different record count: "
+                f"{len(records)} != {len(prepared)}"
+            ),
+        )
+
+    processed: list[tuple[FrameRecord, list[ErrorRecord]]] = []
+    for item, record in zip(prepared, records, strict=True):
+        _validate_observer_record_identity(record, item.decoded_frame)
+        record = _record_with_errors(record, item.raw_frame_errors)
+        record, processed_errors = _render_processed_frame_and_collect_errors(
+            item.decoded_frame,
+            record,
+            resolved,
+            layout,
+        )
+        frame_errors = item.raw_frame_errors + processed_errors
+        frame_error_writer(errors_handle, record)
+        processed.append((record, frame_errors))
+    return processed
 
 
 def _timestamp_seconds(decoded_frame: DecodedFrame) -> float:

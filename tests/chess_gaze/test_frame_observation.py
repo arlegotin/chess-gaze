@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from chess_gaze.artifact_runs import RunLayout
@@ -15,7 +16,7 @@ from chess_gaze.face_observation import (
     FaceObservation,
     FaceSelection,
 )
-from chess_gaze.frame_observation import ModelBackedFrameObserver
+from chess_gaze.frame_observation import ModelBackedFrameObserver, ModelInferenceError
 from chess_gaze.frame_records import ErrorRecord
 from chess_gaze.gaze_observation import (
     CropTransformRecord,
@@ -26,6 +27,20 @@ from chess_gaze.gaze_observation import (
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D, Transform2D
 from chess_gaze.head_pose import HeadPoseObservation, ImageSize
 from chess_gaze.pipeline import ObserverFrame
+
+
+def _run_layout(tmp_path: Path) -> RunLayout:
+    return RunLayout(
+        run_dir=tmp_path,
+        raw_frames_dir=tmp_path / "raw_frames",
+        processed_frames_dir=tmp_path / "processed_frames",
+        crops_dir=tmp_path / "crops",
+        face_crops_dir=tmp_path / "crops" / "face",
+        eyes_crops_dir=tmp_path / "crops" / "eyes",
+        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
+        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
+        records_dir=tmp_path / "records",
+    )
 
 
 def _point(x: float, y: float) -> Point2D:
@@ -82,31 +97,101 @@ class _FakeFaceObserver:
 
 class _FakeGazeModel:
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
-        assert tuple(normalized_batch.shape) == (1, 3, 224, 224)
-        return FaceModelGaze(
-            valid=True,
-            method="fake_unigaze",
-            pitch_radians=0.02,
-            yaw_radians=0.01,
-            unit_vector=pitch_yaw_to_unit_vector(pitch_radians=0.02, yaw_radians=0.01),
-            confidence=None,
-            confidence_source="not_provided_by_unigaze",
-            reason_invalid=None,
+        return self.predict_batch(normalized_batch)[0]
+
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
+        assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
+        return tuple(
+            FaceModelGaze(
+                valid=True,
+                method="fake_unigaze",
+                pitch_radians=0.02 + index,
+                yaw_radians=0.01 + index,
+                unit_vector=pitch_yaw_to_unit_vector(
+                    pitch_radians=0.02 + index,
+                    yaw_radians=0.01 + index,
+                ),
+                confidence=None,
+                confidence_source="not_provided_by_unigaze",
+                reason_invalid=None,
+            )
+            for index in range(normalized_batch.shape[0])
         )
 
 
 class _DisagreeingGazeModel:
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
-        assert tuple(normalized_batch.shape) == (1, 3, 224, 224)
-        return FaceModelGaze(
-            valid=True,
-            method="fake_unigaze",
-            pitch_radians=1.0,
-            yaw_radians=1.0,
-            unit_vector=pitch_yaw_to_unit_vector(pitch_radians=1.0, yaw_radians=1.0),
-            confidence=None,
-            confidence_source="not_provided_by_unigaze",
-            reason_invalid=None,
+        return self.predict_batch(normalized_batch)[0]
+
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
+        assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
+        return tuple(
+            FaceModelGaze(
+                valid=True,
+                method="fake_unigaze",
+                pitch_radians=1.0 + index,
+                yaw_radians=1.0 + index,
+                unit_vector=pitch_yaw_to_unit_vector(
+                    pitch_radians=1.0 + index,
+                    yaw_radians=1.0 + index,
+                ),
+                confidence=None,
+                confidence_source="not_provided_by_unigaze",
+                reason_invalid=None,
+            )
+            for index in range(normalized_batch.shape[0])
+        )
+
+
+class _OneInvalidRowGazeModel:
+    def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
+        return self.predict_batch(normalized_batch)[0]
+
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
+        assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
+        return (
+            FaceModelGaze(
+                valid=True,
+                method="fake_unigaze",
+                pitch_radians=0.02,
+                yaw_radians=0.01,
+                unit_vector=pitch_yaw_to_unit_vector(
+                    pitch_radians=0.02,
+                    yaw_radians=0.01,
+                ),
+                confidence=None,
+                confidence_source="not_provided_by_unigaze",
+                reason_invalid=None,
+            ),
+            FaceModelGaze(
+                valid=False,
+                method="fake_unigaze",
+                pitch_radians=None,
+                yaw_radians=None,
+                unit_vector=None,
+                confidence=None,
+                confidence_source="not_provided_by_unigaze",
+                reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
+            ),
+        )
+
+
+class _RaisingBatchGazeModel:
+    def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
+        return self.predict_batch(normalized_batch)[0]
+
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
+        del normalized_batch
+        raise ValueError(
+            "UniGaze pred_gaze must have shape (batch, 2) matching input batch"
         )
 
 
@@ -342,17 +427,7 @@ def _observer_frame() -> ObserverFrame:
 def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
     tmp_path: Path,
 ) -> None:
-    run_layout = RunLayout(
-        run_dir=tmp_path,
-        raw_frames_dir=tmp_path / "raw_frames",
-        processed_frames_dir=tmp_path / "processed_frames",
-        crops_dir=tmp_path / "crops",
-        face_crops_dir=tmp_path / "crops" / "face",
-        eyes_crops_dir=tmp_path / "crops" / "eyes",
-        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
-        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
-        records_dir=tmp_path / "records",
-    )
+    run_layout = _run_layout(tmp_path)
     candidate = _candidate()
     face_observer = _FakeFaceObserver(_face_observation(candidate))
     observer = ModelBackedFrameObserver(
@@ -387,17 +462,7 @@ def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
 def test_model_backed_frame_observer_preserves_missing_right_eye_reason(
     tmp_path: Path,
 ) -> None:
-    run_layout = RunLayout(
-        run_dir=tmp_path,
-        raw_frames_dir=tmp_path / "raw_frames",
-        processed_frames_dir=tmp_path / "processed_frames",
-        crops_dir=tmp_path / "crops",
-        face_crops_dir=tmp_path / "crops" / "face",
-        eyes_crops_dir=tmp_path / "crops" / "eyes",
-        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
-        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
-        records_dir=tmp_path / "records",
-    )
+    run_layout = _run_layout(tmp_path)
     candidate = _candidate()
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
@@ -424,17 +489,7 @@ def test_model_backed_frame_observer_preserves_missing_right_eye_reason(
 def test_model_backed_frame_observer_records_missing_face_without_later_models(
     tmp_path: Path,
 ) -> None:
-    run_layout = RunLayout(
-        run_dir=tmp_path,
-        raw_frames_dir=tmp_path / "raw_frames",
-        processed_frames_dir=tmp_path / "processed_frames",
-        crops_dir=tmp_path / "crops",
-        face_crops_dir=tmp_path / "crops" / "face",
-        eyes_crops_dir=tmp_path / "crops" / "eyes",
-        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
-        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
-        records_dir=tmp_path / "records",
-    )
+    run_layout = _run_layout(tmp_path)
 
     def fail_eye_observer(*args: object, **kwargs: object) -> EyePairObservation:
         raise AssertionError("eye observer must not run without a selected face")
@@ -463,17 +518,7 @@ def test_model_backed_frame_observer_records_missing_face_without_later_models(
 def test_model_backed_frame_observer_marks_gaze_disagreement_as_warning(
     tmp_path: Path,
 ) -> None:
-    run_layout = RunLayout(
-        run_dir=tmp_path,
-        raw_frames_dir=tmp_path / "raw_frames",
-        processed_frames_dir=tmp_path / "processed_frames",
-        crops_dir=tmp_path / "crops",
-        face_crops_dir=tmp_path / "crops" / "face",
-        eyes_crops_dir=tmp_path / "crops" / "eyes",
-        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
-        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
-        records_dir=tmp_path / "records",
-    )
+    run_layout = _run_layout(tmp_path)
     candidate = _candidate()
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
@@ -503,17 +548,7 @@ def test_model_backed_frame_observer_marks_gaze_disagreement_as_warning(
 def test_model_backed_frame_observer_marks_multiple_face_candidates_as_warning(
     tmp_path: Path,
 ) -> None:
-    run_layout = RunLayout(
-        run_dir=tmp_path,
-        raw_frames_dir=tmp_path / "raw_frames",
-        processed_frames_dir=tmp_path / "processed_frames",
-        crops_dir=tmp_path / "crops",
-        face_crops_dir=tmp_path / "crops" / "face",
-        eyes_crops_dir=tmp_path / "crops" / "eyes",
-        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
-        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
-        records_dir=tmp_path / "records",
-    )
+    run_layout = _run_layout(tmp_path)
     candidate = _candidate()
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(
@@ -552,17 +587,7 @@ def test_model_backed_frame_observer_marks_multiple_face_candidates_as_warning(
 def test_model_backed_observer_marks_multiple_candidates_and_gaze_disagreement_warning(
     tmp_path: Path,
 ) -> None:
-    run_layout = RunLayout(
-        run_dir=tmp_path,
-        raw_frames_dir=tmp_path / "raw_frames",
-        processed_frames_dir=tmp_path / "processed_frames",
-        crops_dir=tmp_path / "crops",
-        face_crops_dir=tmp_path / "crops" / "face",
-        eyes_crops_dir=tmp_path / "crops" / "eyes",
-        left_eye_crops_dir=tmp_path / "crops" / "eyes" / "left",
-        right_eye_crops_dir=tmp_path / "crops" / "eyes" / "right",
-        records_dir=tmp_path / "records",
-    )
+    run_layout = _run_layout(tmp_path)
     candidate = _candidate()
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(
@@ -598,3 +623,115 @@ def test_model_backed_observer_marks_multiple_candidates_and_gaze_disagreement_w
         ErrorCode.MULTIPLE_FACE_CANDIDATES,
         ErrorCode.GAZE_ESTIMATORS_DISAGREE,
     ]
+
+
+def test_model_backed_frame_observer_batch_maps_model_rows_to_frames(
+    tmp_path: Path,
+) -> None:
+    run_layout = _run_layout(tmp_path)
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=_FakeGazeModel(),
+        calibration=default_calibration(),
+        run_layout=run_layout,
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+    frames = [
+        _observer_frame(),
+        ObserverFrame(
+            frame_id="f000000001",
+            frame_index=1,
+            timestamp_seconds=1.0,
+            rgb=np.zeros((48, 64, 3), dtype=np.uint8),
+            pts=None,
+            pts_seconds=None,
+            duration_seconds=None,
+        ),
+    ]
+
+    records = observer.observe_batch(frames)
+
+    assert [record.frame_id for record in records] == ["f000000000", "f000000001"]
+    assert records[0].appearance_gaze.pitch_radians == 0.02
+    assert records[1].appearance_gaze.pitch_radians == 1.02
+    assert records[0].recommended_gaze.valid is True
+    assert records[1].recommended_gaze.valid is False
+    assert (
+        records[1].recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+    )
+
+
+def test_model_backed_frame_observer_batch_preserves_missing_face_record(
+    tmp_path: Path,
+) -> None:
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_missing_face_observation()),
+        gaze_model=_FakeGazeModel(),
+        calibration=default_calibration(),
+        run_layout=_run_layout(tmp_path),
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    [record] = observer.observe_batch([_observer_frame()])
+
+    assert record.face.present is False
+    assert record.appearance_gaze.valid is False
+    assert record.appearance_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
+    assert ErrorCode.FACE_NOT_FOUND in {error.code for error in record.errors}
+
+
+def test_model_backed_frame_observer_batch_marks_only_invalid_model_row(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=_OneInvalidRowGazeModel(),
+        calibration=default_calibration(),
+        run_layout=_run_layout(tmp_path),
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+    frames = [
+        _observer_frame(),
+        ObserverFrame(
+            frame_id="f000000001",
+            frame_index=1,
+            timestamp_seconds=1.0,
+            rgb=np.zeros((48, 64, 3), dtype=np.uint8),
+            pts=None,
+            pts_seconds=None,
+            duration_seconds=None,
+        ),
+    ]
+
+    first, second = observer.observe_batch(frames)
+
+    assert first.appearance_gaze.valid is True
+    assert second.appearance_gaze.valid is False
+    assert second.status is FrameStatus.ERROR
+    assert ErrorCode.GAZE_MODEL_FAILED in {error.code for error in second.errors}
+
+
+def test_model_backed_frame_observer_batch_propagates_model_contract_errors(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=_RaisingBatchGazeModel(),
+        calibration=default_calibration(),
+        run_layout=_run_layout(tmp_path),
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    with pytest.raises(ModelInferenceError, match="pred_gaze must have shape"):
+        observer.observe_batch([_observer_frame()])

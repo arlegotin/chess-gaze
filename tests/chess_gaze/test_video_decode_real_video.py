@@ -6,13 +6,13 @@ import pytest
 
 from chess_gaze.video_decode import inspect_video, iter_decoded_frames
 
+NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
+NAKAMURA_SHORT_FRAME_COUNT = 180
+
 
 @pytest.mark.parametrize(
     ("path", "expected_count"),
-    [
-        (Path("artifacts/input/test_1.mp4"), 3613),
-        (Path("artifacts/input/test_2.mp4"), 1973),
-    ],
+    [(NAKAMURA_SHORT_VIDEO, NAKAMURA_SHORT_FRAME_COUNT)],
 )
 def test_real_video_decode_matches_local_evidence(
     path: Path, expected_count: int

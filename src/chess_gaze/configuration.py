@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 
 class ConfigurationError(RuntimeError):
@@ -20,6 +21,37 @@ class AnalysisConfig(BaseModel):
     raw_frame_image_format: str = "png"
     processed_frame_image_format: str = "jpg"
     processed_frame_jpeg_quality: int = 95
+    unigaze_device: Literal["cpu", "mps"] = "mps"
+    unigaze_batch_size: int = 7
+
+    @field_validator("unigaze_batch_size")
+    @classmethod
+    def validate_unigaze_batch_size(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("unigaze_batch_size must be at least 1")
+        return value
+
+
+def apply_analysis_overrides(
+    config: AnalysisConfig,
+    *,
+    output_root: Path | None = None,
+    models_root: Path | None = None,
+    unigaze_device: str | None = None,
+    unigaze_batch_size: int | None = None,
+) -> AnalysisConfig:
+    payload = config.model_dump(mode="python")
+
+    if output_root is not None:
+        payload["output_root"] = output_root
+    if models_root is not None:
+        payload["models_root"] = models_root
+    if unigaze_device is not None:
+        payload["unigaze_device"] = unigaze_device
+    if unigaze_batch_size is not None:
+        payload["unigaze_batch_size"] = unigaze_batch_size
+
+    return AnalysisConfig.model_validate(payload)
 
 
 def load_config(path: Path | None) -> AnalysisConfig:
