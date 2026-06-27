@@ -102,6 +102,32 @@ Task review:
 - Findings: no Critical, no Important. Minor residual risk: source-string tests
   cannot prove all geometry behavior without browser smoke.
 
+Final branch review before completion found one Important issue:
+
+- `hitAreaGeometry()` could render a patch from an inconsistent future payload
+  where `main_monitor_hit.valid=true` but `unigaze_ray.valid=false` and stale
+  direction fields were still present.
+
+Fix applied after final review:
+
+- added an explicit `frame?.unigaze_ray?.valid` guard before hit-area geometry;
+- changed degenerate projected-direction handling so monitor-right is the first
+  fallback axis before an arbitrary safe axis;
+- added source-level regression assertions for the invalid-ray guard and
+  projected-direction fallback.
+
+Focused regression after the fix:
+
+```sh
+node --check src/chess_gaze/viewer_assets/scene_viewer.js
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q
+```
+
+Results:
+
+- `node --check`: exit `0`
+- `1 passed in 1.23s`
+
 ## Verification Commands
 
 Focused suite in sandbox:
@@ -120,7 +146,9 @@ Focused suite with loopback permission:
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py tests/chess_gaze/test_scene_artifacts_real_video_contract.py -q
 ```
 
-Result: `25 passed in 41.44s`.
+Result before final-review fix: `25 passed in 41.44s`.
+
+Result after final-review fix: `25 passed in 43.74s`.
 
 Static gates:
 
@@ -135,6 +163,9 @@ Results:
 - `All checks passed!`
 - `65 files already formatted`
 - `Success: no issues found in 65 source files`
+
+These static gates were rerun after the final-review fix with the same passing
+results.
 
 Full suite with loopback permission:
 

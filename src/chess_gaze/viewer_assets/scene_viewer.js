@@ -304,12 +304,19 @@ function addHitArea(group, geometry) {
 }
 
 function axisInMonitorPlane(preferredAxis, normal) {
+  if (!preferredAxis) {
+    return null;
+  }
   const axis = preferredAxis
     .clone()
     .sub(normal.clone().multiplyScalar(preferredAxis.dot(normal)));
   if (axis.lengthSq() > HIT_AREA_VECTOR_EPSILON ** 2) {
     return axis.normalize();
   }
+  return null;
+}
+
+function fallbackAxisInMonitorPlane(normal) {
   const fallback = Math.abs(normal.z) < 0.9
     ? new THREE.Vector3(0, 0, 1)
     : new THREE.Vector3(1, 0, 0);
@@ -320,7 +327,7 @@ function axisInMonitorPlane(preferredAxis, normal) {
 
 function hitAreaGeometry(frame, angularErrorDegreesValue) {
   const hit = frame?.main_monitor_hit;
-  if (!hit?.valid || !hit.point_scene_m) {
+  if (!hit?.valid || !frame?.unigaze_ray?.valid || !hit.point_scene_m) {
     return null;
   }
 
@@ -352,13 +359,13 @@ function hitAreaGeometry(frame, angularErrorDegreesValue) {
     return null;
   }
 
-  const majorAxis = axisInMonitorPlane(
-    direction.clone().sub(normal.clone().multiplyScalar(direction.dot(normal))),
-    normal,
+  const projectedDirection = direction.clone().sub(
+    normal.clone().multiplyScalar(direction.dot(normal)),
   );
-  const rightAxis = axisInMonitorPlane(monitorRightScene(), normal);
   const orientedMajorAxis =
-    majorAxis.lengthSq() > HIT_AREA_VECTOR_EPSILON ** 2 ? majorAxis : rightAxis;
+    axisInMonitorPlane(projectedDirection, normal) ||
+    axisInMonitorPlane(monitorRightScene(), normal) ||
+    fallbackAxisInMonitorPlane(normal);
   const minorAxis = new THREE.Vector3()
     .crossVectors(normal, orientedMajorAxis)
     .normalize();

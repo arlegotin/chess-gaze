@@ -418,6 +418,8 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "rayT * Math.tan(alphaRadians)" in js
     assert "minorRadius / normalDirectionDot" in js
     assert "direction.clone().sub(" in js
+    assert "frame?.unigaze_ray?.valid" in js
+    assert "projectedDirection" in js
     assert "renderCurrentHitArea" in js
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
