@@ -424,6 +424,12 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "renderAccumulatedHitAreas" in js
     assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" in js
     assert "addHitArea(groups.accumulated, geometry)" in js
+    accumulated_hit_area_body = js.split(
+        "function renderAccumulatedHitAreas() {", 1
+    )[1].split("\nfunction renderAccumulatedHits()", 1)[0]
+    assert "elements.toggles.hitArea.checked" in accumulated_hit_area_body
+    assert "hitPoints" not in accumulated_hit_area_body
+    assert "valid_hit_points" not in accumulated_hit_area_body
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
 
