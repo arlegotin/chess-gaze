@@ -476,7 +476,7 @@ def test_default_model_run_manifest_records_truthful_current_runtime(
         "mps_fallback_env": os.environ["PYTORCH_ENABLE_MPS_FALLBACK"],
         "mps_fast_math_env": os.environ["PYTORCH_MPS_FAST_MATH"],
         "mps_prefer_metal_env": os.environ["PYTORCH_MPS_PREFER_METAL"],
-        "mps_preflight_passed": False,
+        "mps_preflight_passed": None,
     }
 
 

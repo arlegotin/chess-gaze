@@ -15,6 +15,7 @@ from chess_gaze.frame_records import (
     InferenceRuntimeRecord,
     RunManifest,
     VideoManifest,
+    read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.image_io import save_rgb_png
@@ -252,10 +253,14 @@ def test_build_qa_summary_reads_legacy_run_manifest_without_inference(
     run_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
 
     summary = build_qa_summary(layout)
+    manifest = read_run_manifest_artifact_json(
+        run_manifest_path.read_text(encoding="utf-8")
+    )
 
     assert summary.run_id == layout.run_dir.name
     assert summary.source_video_path == str(tmp_path / "source.mp4")
     assert summary.artifact_validation.schema_validation_passed is True
+    assert manifest.inference.observer_source == "legacy_manifest_without_inference"
 
 
 def _make_layout(tmp_path: Path) -> RunLayout:

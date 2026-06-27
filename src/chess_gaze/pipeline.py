@@ -176,7 +176,7 @@ def _default_model_observer_inference_record(
         mps_fallback_env=os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "unset"),
         mps_fast_math_env=os.environ.get("PYTORCH_MPS_FAST_MATH", "unset"),
         mps_prefer_metal_env=os.environ.get("PYTORCH_MPS_PREFER_METAL", "unset"),
-        mps_preflight_passed=False,
+        mps_preflight_passed=None,
     )
 
 

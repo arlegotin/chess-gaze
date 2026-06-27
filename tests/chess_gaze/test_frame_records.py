@@ -11,6 +11,7 @@ from chess_gaze.frame_records import (
     InferenceRuntimeRecord,
     RunManifest,
     VideoManifest,
+    read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 
@@ -220,7 +221,7 @@ def test_inference_runtime_record_accepts_current_cpu_default_model_runtime() ->
             "unigaze_device": "cpu",
             "unigaze_batch_size": 1,
             "torch_mps_available": False,
-            "mps_preflight_passed": False,
+            "mps_preflight_passed": None,
         }
     )
 
@@ -228,7 +229,7 @@ def test_inference_runtime_record_accepts_current_cpu_default_model_runtime() ->
 
     assert record.unigaze_device == "cpu"
     assert record.unigaze_batch_size == 1
-    assert record.mps_preflight_passed is False
+    assert record.mps_preflight_passed is None
 
 
 def test_inference_runtime_record_accepts_external_observer() -> None:
@@ -265,6 +266,7 @@ def test_inference_runtime_record_rejects_default_model_observer_contradictions(
 @pytest.mark.parametrize(
     "overrides",
     [
+        {"unigaze_device": "cpu", "mps_preflight_passed": False},
         {"unigaze_device": "cpu", "mps_preflight_passed": True},
         {
             "unigaze_device": "mps",
@@ -344,3 +346,28 @@ def test_run_manifest_direct_validation_rejects_missing_inference() -> None:
                 },
             }
         )
+
+
+def test_read_run_manifest_artifact_json_marks_legacy_manifest_compatibility_source(
+) -> None:
+    manifest = read_run_manifest_artifact_json(
+        """
+        {
+          "run_id": "run-1",
+          "created_at_utc": "2026-06-26T00:00:00Z",
+          "input_path": "artifacts/input/nakamura_1.mp4",
+          "video": {
+            "source_path": "artifacts/input/nakamura_1.mp4",
+            "source_sha256": "%s",
+            "frame_width": 1920,
+            "frame_height": 1080,
+            "frame_count_decoded": 1973
+          }
+        }
+        """
+        % ("0" * 64)
+    )
+
+    assert manifest.inference.observer_source == "legacy_manifest_without_inference"
+    assert manifest.inference.unigaze_device == "not_applicable"
+    assert manifest.inference.mps_preflight_passed is None

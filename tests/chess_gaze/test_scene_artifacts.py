@@ -19,6 +19,7 @@ from chess_gaze.frame_records import (
     InferenceRuntimeRecord,
     RunManifest,
     VideoManifest,
+    read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.scene_artifacts import (
@@ -219,9 +220,13 @@ def test_build_scene_artifacts_reads_legacy_run_manifest_without_inference(
     run_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
 
     result = build_scene_artifacts(layout)
+    manifest = read_run_manifest_artifact_json(
+        run_manifest_path.read_text(encoding="utf-8")
+    )
 
     assert result.manifest.run_id == "20260626T120000Z-scene"
     assert result.scene_frame_count == 7
+    assert manifest.inference.observer_source == "legacy_manifest_without_inference"
 
 
 def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
