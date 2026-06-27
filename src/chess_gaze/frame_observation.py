@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
 import numpy.typing as npt
+import torch
 
 from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import ErrorCode, FrameStatus
@@ -59,6 +60,24 @@ class FaceCropNormalizer(Protocol):
 class FaceGazeModel(Protocol):
     def predict(self, normalized_batch: Any) -> FaceModelGaze: ...
 
+    def predict_batch(self, normalized_batch: Any) -> tuple[FaceModelGaze, ...]: ...
+
+
+@dataclass(frozen=True)
+class _FrameEvidence:
+    frame: Any
+    face_observation: FaceObservation | None
+    errors: list[ErrorRecord]
+    face_record: FaceRecord
+    selected_face: FaceCandidate | None
+    left_eye: EyeRecord
+    right_eye: EyeRecord
+    head_pose_record: HeadPoseRecord
+    left_geometric: GazeAngles
+    right_geometric: GazeAngles
+    geometric_gaze: GazeAngles
+    normalized_face_crop: NormalizedFaceCrop | None
+
 
 @dataclass(frozen=True)
 class ModelBackedFrameObserver:
@@ -78,6 +97,79 @@ class ModelBackedFrameObserver:
     )
 
     def __call__(self, frame: Any) -> FrameRecord:
+        return self.observe_batch([frame])[0]
+
+    def observe_batch(self, frames: Sequence[Any]) -> list[FrameRecord]:
+        evidence_items = [self._collect_frame_evidence(frame) for frame in frames]
+        crop_items = [
+            (index, evidence.normalized_face_crop.tensor)
+            for index, evidence in enumerate(evidence_items)
+            if evidence.selected_face is not None
+            and evidence.normalized_face_crop is not None
+        ]
+        appearance_by_index: dict[int, FaceModelGaze] = {}
+        if crop_items:
+            batch = torch.cat([tensor for _index, tensor in crop_items], dim=0)
+            try:
+                gazes = self.gaze_model.predict_batch(batch)
+            except Exception as exc:
+                for index, _tensor in crop_items:
+                    _append_error_once(
+                        evidence_items[index].errors,
+                        ErrorRecord(
+                            code=ErrorCode.GAZE_MODEL_FAILED,
+                            message=f"Appearance gaze model failed: {exc}",
+                        ),
+                    )
+                    appearance_by_index[index] = _invalid_face_model_gaze()
+            else:
+                if len(gazes) != len(crop_items):
+                    raise ValueError(
+                        "Appearance gaze model returned a different number of rows"
+                    )
+                for (index, _tensor), gaze in zip(crop_items, gazes, strict=True):
+                    appearance_by_index[index] = gaze
+
+        records: list[FrameRecord] = []
+        for index, evidence in enumerate(evidence_items):
+            if evidence.selected_face is None:
+                if evidence.face_observation is None:
+                    raise AssertionError(
+                        "missing face evidence requires face observation"
+                    )
+                records.append(
+                    _missing_face_record(
+                        evidence.frame,
+                        evidence.face_observation,
+                        evidence.errors,
+                    )
+                )
+                continue
+
+            appearance_gaze = appearance_by_index.get(index, _invalid_face_model_gaze())
+            if (
+                index in appearance_by_index
+                and not appearance_gaze.valid
+                and appearance_gaze.reason_invalid is not None
+                and not any(
+                    error.code is appearance_gaze.reason_invalid
+                    for error in evidence.errors
+                )
+            ):
+                _append_error_once(
+                    evidence.errors,
+                    ErrorRecord(
+                        code=appearance_gaze.reason_invalid,
+                        message=(
+                            "Appearance gaze model failed: "
+                            "non-finite UniGaze output."
+                        ),
+                    ),
+                )
+            records.append(self._record_from_evidence(evidence, appearance_gaze))
+        return records
+
+    def _collect_frame_evidence(self, frame: Any) -> _FrameEvidence:
         face_observation = self.face_observer.observe(
             frame.rgb, frame_id=frame.frame_id
         )
@@ -91,7 +183,34 @@ class ModelBackedFrameObserver:
                     message="No selected face candidate is available for frame.",
                 ),
             )
-            return _missing_face_record(frame, face_observation, errors)
+            return _FrameEvidence(
+                frame=frame,
+                face_observation=face_observation,
+                errors=errors,
+                face_record=FaceRecord(
+                    present=False,
+                    bounding_box=None,
+                    landmarks=None,
+                    reason_invalid=(
+                        face_observation.selection.reason_invalid
+                        or ErrorCode.FACE_NOT_FOUND
+                    ),
+                ),
+                selected_face=None,
+                left_eye=_missing_eye_record(ErrorCode.LEFT_EYE_NOT_FOUND),
+                right_eye=_missing_eye_record(ErrorCode.RIGHT_EYE_NOT_FOUND),
+                head_pose_record=HeadPoseRecord(
+                    valid=False,
+                    yaw_radians=None,
+                    pitch_radians=None,
+                    roll_radians=None,
+                    reason_invalid=ErrorCode.HEAD_POSE_INVALID,
+                ),
+                left_geometric=_invalid_gaze(ErrorCode.LEFT_EYE_NOT_FOUND),
+                right_geometric=_invalid_gaze(ErrorCode.RIGHT_EYE_NOT_FOUND),
+                geometric_gaze=_invalid_gaze(ErrorCode.FACE_NOT_FOUND),
+                normalized_face_crop=None,
+            )
 
         face_record = FaceRecord(
             present=True,
@@ -138,17 +257,42 @@ class ModelBackedFrameObserver:
             missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
         )
         geometric_gaze = _combine_eye_gazes(left_geometric, right_geometric)
-        appearance_gaze = self._appearance_gaze(frame.rgb, selected_face, errors)
+        normalized_face_crop = self._normalized_face_crop(
+            frame.rgb,
+            selected_face,
+            errors,
+        )
+
+        return _FrameEvidence(
+            frame=frame,
+            face_observation=face_observation,
+            errors=errors,
+            face_record=face_record,
+            selected_face=selected_face,
+            left_eye=left_eye,
+            right_eye=right_eye,
+            head_pose_record=head_pose_record,
+            left_geometric=left_geometric,
+            right_geometric=right_geometric,
+            geometric_gaze=geometric_gaze,
+            normalized_face_crop=normalized_face_crop,
+        )
+
+    def _record_from_evidence(
+        self,
+        evidence: _FrameEvidence,
+        appearance_gaze: FaceModelGaze,
+    ) -> FrameRecord:
         appearance_gaze_record = _face_model_gaze_record(appearance_gaze)
         recommended = synthesize_recommended_gaze(
-            left_geometric,
-            right_geometric,
+            evidence.left_geometric,
+            evidence.right_geometric,
             appearance_gaze,
             thresholds=self.gaze_thresholds,
         ).gaze
         if not recommended.valid and recommended.reason_invalid is not None:
             _append_error_once(
-                errors,
+                evidence.errors,
                 ErrorRecord(
                     code=recommended.reason_invalid,
                     message=(
@@ -159,26 +303,26 @@ class ModelBackedFrameObserver:
             )
 
         return FrameRecord(
-            frame_id=frame.frame_id,
-            frame_index=frame.frame_index,
+            frame_id=evidence.frame.frame_id,
+            frame_index=evidence.frame.frame_index,
             status=_frame_status(
-                errors=errors,
-                face=face_record,
-                left_eye=left_eye,
-                right_eye=right_eye,
-                head_pose=head_pose_record,
+                errors=evidence.errors,
+                face=evidence.face_record,
+                left_eye=evidence.left_eye,
+                right_eye=evidence.right_eye,
+                head_pose=evidence.head_pose_record,
                 appearance_gaze=appearance_gaze,
                 recommended_gaze=recommended,
             ),
-            timestamp_seconds=frame.timestamp_seconds,
-            face=face_record,
-            left_eye=left_eye,
-            right_eye=right_eye,
-            head_pose=head_pose_record,
-            geometric_gaze=geometric_gaze,
+            timestamp_seconds=evidence.frame.timestamp_seconds,
+            face=evidence.face_record,
+            left_eye=evidence.left_eye,
+            right_eye=evidence.right_eye,
+            head_pose=evidence.head_pose_record,
+            geometric_gaze=evidence.geometric_gaze,
             appearance_gaze=appearance_gaze_record,
             recommended_gaze=recommended,
-            errors=errors,
+            errors=evidence.errors,
         )
 
     def close(self) -> None:
@@ -186,19 +330,18 @@ class ModelBackedFrameObserver:
         if callable(close):
             close()
 
-    def _appearance_gaze(
+    def _normalized_face_crop(
         self,
         rgb_frame: npt.NDArray[np.uint8],
         selected_face: FaceCandidate,
         errors: list[ErrorRecord],
-    ) -> FaceModelGaze:
+    ) -> NormalizedFaceCrop | None:
         try:
-            normalized = self.face_crop_normalizer(
+            return self.face_crop_normalizer(
                 rgb_frame,
                 selected_face.bounding_box_image_px,
                 input_size_px=self.calibration.unigaze_input_size_px,
             )
-            return self.gaze_model.predict(normalized.tensor)
         except Exception as exc:
             _append_error_once(
                 errors,
@@ -207,16 +350,7 @@ class ModelBackedFrameObserver:
                     message=f"Appearance gaze model failed: {exc}",
                 ),
             )
-            return FaceModelGaze(
-                valid=False,
-                method="unigaze_h14_joint",
-                pitch_radians=None,
-                yaw_radians=None,
-                unit_vector=None,
-                confidence=None,
-                confidence_source="not_provided_by_unigaze",
-                reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
-            )
+            return None
 
 
 def _selected_face(observation: FaceObservation) -> FaceCandidate | None:
@@ -357,6 +491,19 @@ def _face_model_gaze_record(face_gaze: FaceModelGaze) -> GazeAngles:
             reason_invalid=None,
         )
     return _invalid_gaze(face_gaze.reason_invalid or ErrorCode.GAZE_MODEL_FAILED)
+
+
+def _invalid_face_model_gaze() -> FaceModelGaze:
+    return FaceModelGaze(
+        valid=False,
+        method="unigaze_h14_joint",
+        pitch_radians=None,
+        yaw_radians=None,
+        unit_vector=None,
+        confidence=None,
+        confidence_source="not_provided_by_unigaze",
+        reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
+    )
 
 
 def _invalid_gaze(reason: ErrorCode) -> GazeAngles:
