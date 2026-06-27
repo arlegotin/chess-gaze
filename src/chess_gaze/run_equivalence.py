@@ -388,6 +388,7 @@ def _compare_scene_validity_fields(
     baseline_hit = _monitor_hit_record(baseline)
     candidate_hit = _monitor_hit_record(candidate)
     monitor_path = _monitor_hit_path(prefix, baseline, candidate)
+    _compare_monitor_hit_field_presence(comparison, prefix, baseline, candidate)
     _compare_valid_reason_record(
         comparison,
         monitor_path,
@@ -465,6 +466,7 @@ def _compare_summary_counts(
         "scene_frame_records",
         "raw_frames",
         "processed_frames",
+        "crop_files",
     ):
         comparison.exact(
             f"qa_summary.counts.{field_name}",
@@ -499,6 +501,30 @@ def _monitor_hit_record(frame: dict[str, Any]) -> dict[str, Any]:
     if isinstance(monitor_hit, dict):
         return monitor_hit
     return {}
+
+
+def _compare_monitor_hit_field_presence(
+    comparison: _Comparison,
+    prefix: str,
+    baseline: dict[str, Any],
+    candidate: dict[str, Any],
+) -> None:
+    baseline_has_current = isinstance(baseline.get("main_monitor_hit"), dict)
+    candidate_has_current = isinstance(candidate.get("main_monitor_hit"), dict)
+    baseline_has_legacy = isinstance(baseline.get("monitor_hit"), dict)
+    candidate_has_legacy = isinstance(candidate.get("monitor_hit"), dict)
+    if baseline_has_current or candidate_has_current:
+        comparison.exact(
+            f"{prefix}.main_monitor_hit.present",
+            baseline_has_current,
+            candidate_has_current,
+        )
+        return
+    comparison.exact(
+        f"{prefix}.monitor_hit.present",
+        baseline_has_legacy,
+        candidate_has_legacy,
+    )
 
 
 def _monitor_hit_path(

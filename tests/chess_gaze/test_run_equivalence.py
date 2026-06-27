@@ -22,6 +22,7 @@ def _write_minimal_run(
     monitor_v: float | None = -0.1,
     frame_status: str = "OK",
     qa_raw_frames: int = 1,
+    qa_crop_files: int = 0,
     viewer_frame_count: int = 1,
 ) -> None:
     records_dir = run_dir / "records"
@@ -49,7 +50,7 @@ def _write_minimal_run(
             "scene_frame_records": 1,
             "raw_frames": qa_raw_frames,
             "processed_frames": 1,
-            "crop_files": 0,
+            "crop_files": qa_crop_files,
         },
         "artifact_validation": {
             "schema_validation_passed": True,
@@ -434,15 +435,21 @@ def test_compare_runs_rejects_qa_count_and_viewer_frame_count_mismatches(
     baseline = tmp_path / "baseline"
     candidate = tmp_path / "candidate"
     _write_minimal_run(baseline)
-    _write_minimal_run(candidate, qa_raw_frames=2, viewer_frame_count=2)
+    _write_minimal_run(
+        candidate,
+        qa_raw_frames=2,
+        qa_crop_files=1,
+        viewer_frame_count=2,
+    )
 
     report = compare_runs(baseline, candidate)
 
     assert report.passed is False
-    assert report.exact_mismatch_count == 2
+    assert report.exact_mismatch_count == 3
     assert report.numeric_mismatch_count == 0
     assert report.mismatches == [
         "qa_summary.counts.raw_frames exact mismatch: baseline=1 candidate=2",
+        "qa_summary.counts.crop_files exact mismatch: baseline=0 candidate=1",
         "viewer.frame_count exact mismatch: baseline=1 candidate=2",
     ]
 
@@ -525,3 +532,29 @@ def test_compare_runs_requires_matching_invalid_reasons_for_absent_numeric_field
         "frames[0].appearance_gaze.reason_invalid exact mismatch: "
         "baseline='GAZE_MODEL_FAILED' candidate='FACE_NOT_FOUND'"
     ]
+
+
+def test_compare_runs_rejects_current_scene_frame_that_drops_main_monitor_hit(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_minimal_run(baseline)
+    _write_minimal_run(candidate)
+    scene_frame = json.loads(
+        (candidate / "records" / "scene_frames.jsonl").read_text(encoding="utf-8")
+    )
+    scene_frame["monitor_hit"] = deepcopy(scene_frame["main_monitor_hit"])
+    del scene_frame["main_monitor_hit"]
+    (candidate / "records" / "scene_frames.jsonl").write_text(
+        json.dumps(scene_frame, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+    report = compare_runs(baseline, candidate)
+
+    assert report.passed is False
+    assert (
+        "scene_frames[0].main_monitor_hit.present exact mismatch: "
+        "baseline=True candidate=False"
+    ) in report.mismatches
