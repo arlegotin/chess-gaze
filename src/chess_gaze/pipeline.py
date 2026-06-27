@@ -257,9 +257,24 @@ def analyze_video(
             frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
             errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
         ):
+            use_batch_accumulator = (
+                observers.frame_batch_observer is not None
+                and resolved.unigaze_batch_size > 1
+            )
             pending_batch: list[DecodedFrame] = []
             for decoded_frame in iter_decoded_frames(resolved.video_path):
                 decoded_frame_count += 1
+                if not use_batch_accumulator:
+                    record, frame_errors = _process_frame(
+                        decoded_frame,
+                        observers,
+                        resolved,
+                        layout,
+                        errors_handle=errors_handle,
+                    )
+                    frame_error_count += len(frame_errors)
+                    frames_handle.write(record.model_dump_json() + "\n")
+                    continue
                 pending_batch.append(decoded_frame)
                 if len(pending_batch) < resolved.unigaze_batch_size:
                     continue

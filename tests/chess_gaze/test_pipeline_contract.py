@@ -394,6 +394,60 @@ def test_batch_observer_identity_mismatch_fails_schema_validation(
     assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
 
 
+def test_single_observer_fallback_keeps_immediate_frame_processing(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+    observed_frames: list[str] = []
+
+    def fail_on_first_frame(frame: ObserverFrame) -> FrameRecord:
+        observed_frames.append(frame.frame_id)
+        if frame.frame_index == 0:
+            raise RuntimeError("stop after first frame")
+        return _fake_record(frame)
+
+    with pytest.raises(RuntimeError, match="stop after first frame"):
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(frame_observer=fail_on_first_frame),
+        )
+
+    assert observed_frames == ["f000000000"]
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    assert len(list((run_dir / "raw_frames").glob("*.png"))) == 1
+
+
+def test_batch_observer_record_count_mismatch_fails_schema_validation(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    def short_batch_record(frames: list[ObserverFrame]) -> list[FrameRecord]:
+        return [_fake_record(frames[0])]
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=short_batch_record,
+            ),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+
+
 def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     tmp_path: Path,
 ) -> None:
