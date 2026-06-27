@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TextIO
+from typing import Any, Protocol, TextIO, cast
 
 import numpy as np
 import numpy.typing as npt
+from pydantic import ValidationError
 
 from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
-from pydantic import ValidationError
-
 from chess_gaze.configuration import (
     ConfigurationError,
     apply_analysis_overrides,
@@ -27,9 +25,9 @@ from chess_gaze.frame_records import (
     ErrorRecord,
     FrameErrorRecord,
     FrameRecord,
-    InferenceRuntimeRecord,
     RunManifest,
 )
+from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
 from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
 from chess_gaze.model_assets import (
     ModelAssetError,
@@ -40,6 +38,13 @@ from chess_gaze.model_assets import (
 from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
 from chess_gaze.scene_artifacts import build_scene_artifacts
 from chess_gaze.scene_viewer import build_scene_viewer
+from chess_gaze.unigaze_runtime import (
+    PreparedUniGazeRuntime,
+    UniGazeDevice,
+    UniGazeRuntimeError,
+    external_observer_inference_record,
+    prepare_unigaze_runtime,
+)
 from chess_gaze.video_decode import (
     DecodedFrame,
     VideoDecodeError,
@@ -55,7 +60,7 @@ RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
 DefaultObserverBundleFactory = Callable[
-    [list[ResolvedModelAsset], CalibrationRecord, RunLayout], "ObserverBundle"
+    [list[ResolvedModelAsset], CalibrationRecord, RunLayout, object], "ObserverBundle"
 ]
 
 
@@ -152,46 +157,6 @@ class _PreparedDecodedFrame:
     raw_frame_errors: list[ErrorRecord]
 
 
-def _external_observer_inference_record() -> InferenceRuntimeRecord:
-    return InferenceRuntimeRecord(
-        observer_source="external_observer",
-        unigaze_model_id=None,
-        unigaze_device="not_applicable",
-        unigaze_batch_size=None,
-        torch_version=None,
-        torch_mps_available=None,
-        mps_fallback_env="not_applicable",
-        mps_fast_math_env="not_applicable",
-        mps_prefer_metal_env="not_applicable",
-        mps_preflight_passed=None,
-    )
-
-
-def _default_model_observer_inference_record(
-    resolved_assets: list[ResolvedModelAsset],
-) -> InferenceRuntimeRecord:
-    import torch
-
-    unigaze_asset = _asset_by_id(resolved_assets, "unigaze-h14-joint")
-    torch_mps_backend = getattr(torch.backends, "mps", None)
-    torch_mps_available = (
-        bool(torch_mps_backend is not None and torch_mps_backend.is_available())
-    )
-
-    return InferenceRuntimeRecord(
-        observer_source="default_model_observer",
-        unigaze_model_id=unigaze_asset.model_id,
-        unigaze_device="cpu",
-        unigaze_batch_size=1,
-        torch_version=torch.__version__,
-        torch_mps_available=torch_mps_available,
-        mps_fallback_env=os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "unset"),
-        mps_fast_math_env=os.environ.get("PYTORCH_MPS_FAST_MATH", "unset"),
-        mps_prefer_metal_env=os.environ.get("PYTORCH_MPS_PREFER_METAL", "unset"),
-        mps_preflight_passed=None,
-    )
-
-
 def analyze_video(
     request: AnalyzeRequest, observers: ObserverBundle | None = None
 ) -> AnalyzeResult:
@@ -203,18 +168,29 @@ def analyze_video(
     except VideoDecodeError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
 
+    calibration = default_calibration()
     resolved_model_assets: list[ResolvedModelAsset] | None = None
-    inference = _external_observer_inference_record()
+    prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
+    inference = external_observer_inference_record()
     if observers is None:
         resolved_model_assets = _validate_model_assets(
             request.model_registry_path, resolved
         )
-        inference = _default_model_observer_inference_record(resolved_model_assets)
+        gaze_asset = _asset_by_id(resolved_model_assets, UNIGAZE_MODEL_ID)
+        try:
+            prepared_unigaze_runtime = prepare_unigaze_runtime(
+                gaze_asset,
+                device=cast(UniGazeDevice, resolved.unigaze_device),
+                batch_size=resolved.unigaze_batch_size,
+                input_size_px=calibration.unigaze_input_size_px,
+            )
+        except UniGazeRuntimeError as exc:
+            raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
+        inference = prepared_unigaze_runtime.inference
 
     _estimate_disk_space(resolved.output_root)
 
     created_at = request.clock()
-    calibration = default_calibration()
     layout = create_run_layout(
         input_path=resolved.video_path,
         output_root=resolved.output_root / resolved.video_path.stem / "runs",
@@ -246,8 +222,13 @@ def analyze_video(
     if observers is None:
         if resolved_model_assets is None:
             raise AssertionError("resolved_model_assets must be set for default run")
+        if prepared_unigaze_runtime is None:
+            raise AssertionError("prepared_unigaze_runtime must be set for default run")
         observers = default_observer_bundle_factory(
-            resolved_model_assets, calibration, layout
+            resolved_model_assets,
+            calibration,
+            layout,
+            prepared_unigaze_runtime.model,
         )
 
     decoded_frame_count = 0
@@ -417,23 +398,26 @@ def _default_observer_bundle_factory(
     resolved_assets: list[ResolvedModelAsset],
     calibration: CalibrationRecord,
     run_layout: RunLayout,
+    gaze_model: object,
 ) -> ObserverBundle:
     from chess_gaze.face_observation import MediaPipeFaceObserver
     from chess_gaze.frame_observation import ModelBackedFrameObserver
-    from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID, UniGazeModel
 
     face_asset = _asset_by_id(resolved_assets, "mediapipe-face-landmarker")
-    gaze_asset = _asset_by_id(resolved_assets, UNIGAZE_MODEL_ID)
     observer = ModelBackedFrameObserver(
         face_observer=MediaPipeFaceObserver(
             model_asset_path=face_asset.resolved_path,
             calibration=calibration,
         ),
-        gaze_model=UniGazeModel.from_local_asset(gaze_asset, device="cpu"),
+        gaze_model=cast(Any, gaze_model),
         calibration=calibration,
         run_layout=run_layout,
     )
-    return ObserverBundle(frame_observer=observer, close=observer.close)
+    return ObserverBundle(
+        frame_observer=observer,
+        frame_batch_observer=observer.observe_batch,
+        close=observer.close,
+    )
 
 
 def _asset_by_id(
@@ -567,9 +551,7 @@ def _process_frame_batch(
         records = [observers.frame_observer(item.observer_frame) for item in prepared]
     else:
         records = list(
-            observers.frame_batch_observer(
-                [item.observer_frame for item in prepared]
-            )
+            observers.frame_batch_observer([item.observer_frame for item in prepared])
         )
     if len(records) != len(prepared):
         raise PipelineError(

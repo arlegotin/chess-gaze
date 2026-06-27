@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, TextIO, cast
 
 import av
 import numpy as np
 import pytest
-import torch
 
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
+from chess_gaze.model_assets import ResolvedModelAsset
 from chess_gaze.pipeline import (
     AnalyzeRequest,
     ObserverBundle,
@@ -553,7 +553,7 @@ def test_model_free_observer_run_manifest_records_external_observer(
     }
 
 
-def test_default_model_run_manifest_records_truthful_current_runtime(
+def test_explicit_mps_unavailable_fails_before_run_layout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     video_path = tmp_path / "tiny.mp4"
@@ -562,18 +562,121 @@ def test_default_model_run_manifest_records_truthful_current_runtime(
     registry_path = tmp_path / "model_registry.json"
     make_tiny_video(video_path, frame_count=1)
     _write_model_registry_with_assets(models_root, registry_path)
-    monkeypatch.setenv("PYTORCH_ENABLE_MPS_FALLBACK", "1")
-    monkeypatch.setenv("PYTORCH_MPS_FAST_MATH", "0")
-    monkeypatch.setenv("PYTORCH_MPS_PREFER_METAL", "1")
+
+    from chess_gaze import unigaze_runtime
+
+    monkeypatch.setattr(
+        unigaze_runtime.torch.backends.mps, "is_available", lambda: False
+    )
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                models_root=models_root,
+                model_registry_path=registry_path,
+                unigaze_device="mps",
+                unigaze_batch_size=2,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+    assert not output_root.exists()
+
+
+@pytest.mark.parametrize(
+    "env_name", ["PYTORCH_ENABLE_MPS_FALLBACK", "PYTORCH_MPS_FAST_MATH"]
+)
+def test_explicit_mps_rejects_unsafe_env_before_run_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env_name: str
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
+    monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
+    monkeypatch.delenv("PYTORCH_MPS_FAST_MATH", raising=False)
+    monkeypatch.setenv(env_name, "1")
+
+    from chess_gaze import unigaze_runtime
+
+    monkeypatch.setattr(
+        unigaze_runtime.torch.backends.mps, "is_available", lambda: True
+    )
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                models_root=models_root,
+                model_registry_path=registry_path,
+                unigaze_device="mps",
+                unigaze_batch_size=2,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
+    assert env_name in str(exc_info.value)
+    assert not output_root.exists()
+
+
+def test_default_model_observer_manifest_records_unigaze_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=1)
+    _write_model_registry_with_assets(models_root, registry_path)
 
     from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
 
+    prepared_model = object()
+    captured_gaze_models: list[object] = []
+
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        return SimpleNamespace(
+            model=prepared_model,
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=device,
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=True,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=True,
+            ),
+        )
+
+    def fake_default_observer_bundle_factory(
+        resolved_assets: list[Any],
+        calibration: object,
+        run_layout: object,
+        gaze_model: object,
+    ) -> ObserverBundle:
+        del resolved_assets, calibration, run_layout
+        captured_gaze_models.append(gaze_model)
+        return ObserverBundle(frame_observer=_fake_record)
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
     monkeypatch.setattr(
         pipeline,
         "default_observer_bundle_factory",
-        lambda resolved_assets, calibration, run_layout: ObserverBundle(
-            frame_observer=_fake_record
-        ),
+        fake_default_observer_bundle_factory,
     )
 
     result = analyze_video(
@@ -588,19 +691,102 @@ def test_default_model_run_manifest_records_truthful_current_runtime(
     )
 
     manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
-    assert manifest["inference"] == {
-        "schema_version": "inference-runtime-v1",
-        "observer_source": "default_model_observer",
-        "unigaze_model_id": "unigaze-h14-joint",
-        "unigaze_device": "cpu",
-        "unigaze_batch_size": 1,
-        "torch_version": torch.__version__,
-        "torch_mps_available": torch.backends.mps.is_available(),
-        "mps_fallback_env": os.environ["PYTORCH_ENABLE_MPS_FALLBACK"],
-        "mps_fast_math_env": os.environ["PYTORCH_MPS_FAST_MATH"],
-        "mps_prefer_metal_env": os.environ["PYTORCH_MPS_PREFER_METAL"],
-        "mps_preflight_passed": None,
-    }
+    assert manifest["inference"]["observer_source"] == "default_model_observer"
+    assert manifest["inference"]["unigaze_device"] == "mps"
+    assert manifest["inference"]["unigaze_batch_size"] == 7
+    assert captured_gaze_models == [prepared_model]
+
+
+def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chess_gaze import (
+        face_observation,
+        frame_observation,
+        gaze_observation,
+        pipeline,
+    )
+    from chess_gaze.calibration import default_calibration
+
+    face_path = tmp_path / "mediapipe" / "face_landmarker.task"
+    gaze_path = tmp_path / "unigaze" / "unigaze_h14_joint.safetensors"
+    face_path.parent.mkdir(parents=True)
+    gaze_path.parent.mkdir(parents=True)
+    face_path.write_bytes(b"mediapipe")
+    gaze_path.write_bytes(b"unigaze")
+    prepared_model = object()
+    captured: dict[str, object] = {}
+
+    def fail_if_model_loaded(asset: object, *, device: str) -> object:
+        del asset, device
+        raise AssertionError("default factory must reuse prepared UniGaze model")
+
+    class FakeFaceObserver:
+        def __init__(self, *, model_asset_path: Path, calibration: object) -> None:
+            captured["face_model_asset_path"] = model_asset_path
+            captured["face_calibration"] = calibration
+
+    class FakeModelBackedFrameObserver:
+        def __init__(
+            self,
+            *,
+            face_observer: object,
+            gaze_model: object,
+            calibration: object,
+            run_layout: object,
+        ) -> None:
+            captured["face_observer"] = face_observer
+            captured["gaze_model"] = gaze_model
+            captured["calibration"] = calibration
+            captured["run_layout"] = run_layout
+
+        def __call__(self, frame: ObserverFrame) -> FrameRecord:
+            return _fake_record(frame)
+
+        def observe_batch(self, frames: list[ObserverFrame]) -> list[FrameRecord]:
+            return [_fake_record(frame) for frame in frames]
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    monkeypatch.setattr(
+        gaze_observation.UniGazeModel,
+        "from_local_asset",
+        fail_if_model_loaded,
+    )
+    monkeypatch.setattr(face_observation, "MediaPipeFaceObserver", FakeFaceObserver)
+    monkeypatch.setattr(
+        frame_observation, "ModelBackedFrameObserver", FakeModelBackedFrameObserver
+    )
+    calibration = default_calibration()
+    run_layout = object()
+    resolved_assets = [
+        ResolvedModelAsset(
+            model_id="mediapipe-face-landmarker",
+            task_name="face_landmarks",
+            resolved_path=face_path,
+            source_url="https://example.invalid/mediapipe",
+            checksum_sha256=None,
+            license="Google AI Edge Terms",
+        ),
+        ResolvedModelAsset(
+            model_id="unigaze-h14-joint",
+            task_name="gaze_estimation",
+            resolved_path=gaze_path,
+            source_url="https://example.invalid/unigaze",
+            checksum_sha256=None,
+            license="MG-NC-RAI-2.0",
+        ),
+    ]
+
+    bundle = pipeline.default_observer_bundle_factory(
+        resolved_assets, calibration, run_layout, prepared_model
+    )
+
+    assert captured["face_model_asset_path"] == face_path
+    assert captured["gaze_model"] is prepared_model
+    assert bundle.frame_batch_observer is not None
+    assert bundle.close is not None
 
 
 def test_analyze_video_fails_when_scene_artifact_validation_fails(
@@ -685,16 +871,41 @@ def test_config_models_root_controls_default_model_observer_factory(
     captured_asset_paths: list[Path] = []
 
     from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
 
     def fake_default_observer_bundle_factory(
         resolved_assets: list[Any],
         calibration: object,
         run_layout: object,
+        gaze_model: object,
     ) -> ObserverBundle:
-        del calibration, run_layout
+        del calibration, run_layout, gaze_model
         captured_asset_paths.extend(asset.resolved_path for asset in resolved_assets)
         return ObserverBundle(frame_observer=_fake_record)
 
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        return SimpleNamespace(
+            model=object(),
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=device,
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=False,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=None,
+            ),
+        )
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
     monkeypatch.setattr(
         pipeline,
         "default_observer_bundle_factory",
