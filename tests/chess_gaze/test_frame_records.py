@@ -213,6 +213,24 @@ def test_inference_runtime_record_accepts_default_model_observer() -> None:
     assert record.unigaze_batch_size == 16
 
 
+def test_inference_runtime_record_accepts_current_cpu_default_model_runtime() -> None:
+    payload = _default_model_inference_payload()
+    payload.update(
+        {
+            "unigaze_device": "cpu",
+            "unigaze_batch_size": 1,
+            "torch_mps_available": False,
+            "mps_preflight_passed": False,
+        }
+    )
+
+    record = InferenceRuntimeRecord(**payload)
+
+    assert record.unigaze_device == "cpu"
+    assert record.unigaze_batch_size == 1
+    assert record.mps_preflight_passed is False
+
+
 def test_inference_runtime_record_accepts_external_observer() -> None:
     record = InferenceRuntimeRecord(**_external_observer_inference_payload())
 
@@ -235,6 +253,32 @@ def test_inference_runtime_record_accepts_external_observer() -> None:
     ],
 )
 def test_inference_runtime_record_rejects_default_model_observer_contradictions(
+    overrides: dict[str, object],
+) -> None:
+    payload = _default_model_inference_payload()
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match="default_model_observer"):
+        InferenceRuntimeRecord(**payload)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unigaze_device": "cpu", "mps_preflight_passed": True},
+        {
+            "unigaze_device": "mps",
+            "torch_mps_available": False,
+            "mps_preflight_passed": True,
+        },
+        {
+            "unigaze_device": "mps",
+            "torch_mps_available": True,
+            "mps_preflight_passed": False,
+        },
+    ],
+)
+def test_inference_runtime_record_rejects_default_model_runtime_device_contradictions(
     overrides: dict[str, object],
 ) -> None:
     payload = _default_model_inference_payload()

@@ -270,6 +270,21 @@ class InferenceRuntimeRecord(StrictSchemaModel):
                 )
             if self.mps_preflight_passed is None:
                 issues.append("default_model_observer requires mps_preflight_passed")
+            elif self.unigaze_device == "cpu" and self.mps_preflight_passed:
+                issues.append(
+                    "default_model_observer with unigaze_device=cpu cannot claim "
+                    "mps_preflight_passed=True"
+                )
+            elif self.unigaze_device == "mps" and not self.mps_preflight_passed:
+                issues.append(
+                    "default_model_observer with unigaze_device=mps requires "
+                    "mps_preflight_passed=True"
+                )
+            if self.unigaze_device == "mps" and self.torch_mps_available is not True:
+                issues.append(
+                    "default_model_observer with unigaze_device=mps requires "
+                    "torch_mps_available=True"
+                )
 
         if issues:
             raise ValueError("; ".join(issues))
