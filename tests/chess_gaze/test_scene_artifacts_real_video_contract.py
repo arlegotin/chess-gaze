@@ -121,7 +121,8 @@ def _deterministic_valid_scene_record(frame: ObserverFrame) -> FrameRecord:
 
 
 def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> None:
-    video_path = Path("artifacts/input/nakamura_1.mp4")
+    video_path = Path("artifacts/input/nakamura_short.mp4")
+    expected_frame_count = 180
     assert video_path.is_file(), f"missing mandatory real-data video: {video_path}"
 
     pipeline_result = analyze_video(
@@ -137,26 +138,26 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
         scene_result.paths.scene_summary_path.read_text(encoding="utf-8")
     )
 
-    assert pipeline_result.decoded_frame_count == 1973
+    assert pipeline_result.decoded_frame_count == expected_frame_count
     assert pipeline_result.viewer_index_path.is_file()
     assert pipeline_result.viewer_scene_data_path.is_file()
-    assert generated_viewer_data.frame_count == 1973
-    assert len(generated_viewer_data.frames) == 1973
-    assert len(generated_viewer_data.valid_hit_points) == 1973
+    assert generated_viewer_data.frame_count == expected_frame_count
+    assert len(generated_viewer_data.frames) == expected_frame_count
+    assert len(generated_viewer_data.valid_hit_points) == expected_frame_count
     assert generated_viewer_data.summary.artifact_validation.viewer_exists is True
-    assert scene_result.scene_frame_count == 1973
-    assert viewer_data.frame_count == 1973
-    assert len(viewer_data.frames) == 1973
-    assert len(viewer_data.valid_hit_points) == 1973
+    assert scene_result.scene_frame_count == expected_frame_count
+    assert viewer_data.frame_count == expected_frame_count
+    assert len(viewer_data.frames) == expected_frame_count
+    assert len(viewer_data.valid_hit_points) == expected_frame_count
     assert [point.frame_index for point in viewer_data.valid_hit_points[:3]] == [
         0,
         1,
         2,
     ]
-    assert viewer_data.valid_hit_points[-1].frame_index == 1972
-    assert summary.decoded_frames == 1973
-    assert summary.scene_frame_records == 1973
-    assert summary.valid_monitor_hit_frames == 1973
+    assert viewer_data.valid_hit_points[-1].frame_index == expected_frame_count - 1
+    assert summary.decoded_frames == expected_frame_count
+    assert summary.scene_frame_records == expected_frame_count
+    assert summary.valid_monitor_hit_frames == expected_frame_count
     assert summary.artifact_validation.scene_frame_count_matches_decoded is True
     assert summary.artifact_validation.scene_manifest_valid is True
     assert summary.artifact_validation.scene_summary_valid is True

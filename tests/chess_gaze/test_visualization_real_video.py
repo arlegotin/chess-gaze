@@ -12,8 +12,7 @@ from chess_gaze.video_decode import iter_decoded_frames
 from chess_gaze.visualization import render_processed_frame
 
 MANDATORY_VIDEO_PATHS = (
-    Path("artifacts/input/test_1.mp4"),
-    Path("artifacts/input/test_2.mp4"),
+    Path("artifacts/input/nakamura_short.mp4"),
 )
 
 

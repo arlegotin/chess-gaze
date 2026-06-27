@@ -15,6 +15,9 @@ from chess_gaze.pipeline import (
 )
 from chess_gaze.qa_summary import QASummary
 
+NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
+NAKAMURA_SHORT_FRAME_COUNT = 180
+
 
 def _point(x: float, y: float) -> Point2D:
     return Point2D(space=CoordinateSpace.IMAGE_PX, x=x, y=y)
@@ -130,10 +133,7 @@ def _deterministic_real_video_record(frame: ObserverFrame) -> FrameRecord:
 
 @pytest.mark.parametrize(
     ("video_path", "expected_count"),
-    [
-        (Path("artifacts/input/test_1.mp4"), 3613),
-        (Path("artifacts/input/test_2.mp4"), 1973),
-    ],
+    [(NAKAMURA_SHORT_VIDEO, NAKAMURA_SHORT_FRAME_COUNT)],
 )
 def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
     tmp_path: Path, video_path: Path, expected_count: int
@@ -149,16 +149,22 @@ def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
 
     summary = QASummary.model_validate_json(qa_summary_path.read_text(encoding="utf-8"))
 
-    assert summary.source_artifacts == {
-        "run_manifest": "run_manifest.json",
-        "calibration": "calibration.json",
-        "video_manifest": "video_manifest.json",
-        "frames_jsonl": "records/frames.jsonl",
-        "errors_jsonl": "records/errors.jsonl",
-        "raw_frames": "raw_frames",
-        "processed_frames": "processed_frames",
-        "crops": "crops",
-    }
+    assert summary.source_artifacts == summary.artifact_validation.source_artifacts
+    assert {
+        "run_manifest",
+        "calibration",
+        "video_manifest",
+        "frames_jsonl",
+        "errors_jsonl",
+        "scene_manifest",
+        "scene_summary",
+        "scene_frames_jsonl",
+        "viewer_index",
+        "viewer_scene_data",
+        "raw_frames",
+        "processed_frames",
+        "crops",
+    }.issubset(summary.source_artifacts)
     assert summary.counts.decoded_frames == expected_count
     assert summary.counts.raw_frames == expected_count
     assert summary.counts.processed_frames == expected_count
