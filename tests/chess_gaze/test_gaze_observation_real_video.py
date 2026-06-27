@@ -39,7 +39,7 @@ NAKAMURA_SHORT_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
 SAMPLED_FRAME_INDICES = {
     NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
-NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES = (0, 90, 179)
+NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES = (50, 60, 70)
 
 
 def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
@@ -109,7 +109,7 @@ def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
     assert [record.frame_index for record in records] == list(
         NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES
     )
-    assert all(record.status is FrameStatus.WARNING for record in records)
+    assert all(record.status is FrameStatus.OK for record in records)
     assert all(record.face.present for record in records)
     assert all(
         record.left_eye.present and record.right_eye.present for record in records
@@ -117,15 +117,8 @@ def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
     assert all(record.head_pose.valid for record in records)
     assert all(record.geometric_gaze.valid for record in records)
     assert all(record.appearance_gaze.valid for record in records)
-    assert all(not record.recommended_gaze.valid for record in records)
-    assert all(
-        record.recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
-        for record in records
-    )
-    assert all(
-        [error.code for error in record.errors] == [ErrorCode.GAZE_ESTIMATORS_DISAGREE]
-        for record in records
-    )
+    assert all(record.recommended_gaze.valid for record in records)
+    assert all(not record.errors for record in records)
 
 
 def _observer_frame(frame: DecodedFrame) -> ObserverFrame:
