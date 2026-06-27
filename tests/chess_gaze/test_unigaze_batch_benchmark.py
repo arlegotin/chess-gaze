@@ -390,7 +390,158 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
     ]
 
 
-def test_forward_benchmark_failure_does_not_skip_full_candidate_run(
+def test_preflight_failure_skips_full_candidate_run(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "source.mp4"
+    video_path.write_bytes(b"not a real video")
+    models_root = tmp_path / "models"
+    unigaze_model = models_root / "unigaze" / "unigaze_h14_joint.safetensors"
+    unigaze_model.parent.mkdir(parents=True)
+    unigaze_model.write_bytes(b"model")
+    baseline_json = tmp_path / "baseline.json"
+    baseline_run_dir = tmp_path / "baseline-run"
+    baseline_json.write_text(
+        json.dumps(
+            {
+                "run_dir": str(baseline_run_dir),
+                "qa_decoded_frames": 20,
+                "source_video_sha256": "e" * 64,
+                "unigaze_sha256": "a" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "benchmark.json"
+    commands: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(benchmark, "CANDIDATE_DEVICES", ("cpu", "mps"))
+    monkeypatch.setattr(benchmark, "BATCH_SIZES", (1, 2))
+    monkeypatch.setattr(benchmark, "CURRENT_FLOW_BASELINE_PATH", baseline_json)
+    monkeypatch.setattr(benchmark, "_git_revision", lambda: "abc123")
+    monkeypatch.setattr(benchmark, "_torch_version", lambda: "2.12.1")
+    monkeypatch.setattr(benchmark, "_unigaze_version", lambda: "0.1.3")
+    monkeypatch.setattr(benchmark, "_mps_available", lambda: True)
+
+    perf_times = iter([0.0, 10.0, 10.0, 12.0, 12.0, 18.0])
+    monkeypatch.setattr(
+        "chess_gaze.unigaze_batch_benchmark.time.perf_counter",
+        lambda: next(perf_times),
+    )
+
+    def fake_run(
+        command: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        env: dict[str, str],
+    ) -> object:
+        del capture_output, text, env
+        device = command[command.index("--unigaze-device") + 1]
+        batch_size = command[command.index("--unigaze-batch-size") + 1]
+        commands.append((device, batch_size))
+        run_dir = tmp_path / "source" / "runs" / f"{device}{batch_size}"
+        _write_qa_summary(run_dir, decoded_frames=20)
+        return SimpleNamespace(returncode=0, stdout=f"{run_dir}\n", stderr="")
+
+    def fake_compare_runs(
+        baseline: str | Path, candidate: str | Path, **kwargs: object
+    ) -> object:
+        del kwargs
+        return EquivalenceReport(
+            baseline_run_dir=str(baseline),
+            candidate_run_dir=str(candidate),
+            passed=True,
+            exact_mismatch_count=0,
+            numeric_mismatch_count=0,
+            validation_errors=[],
+            mismatches=[],
+            max_appearance_pitch_yaw_delta_radians=0.0,
+            max_scene_ray_component_delta=0.0,
+            max_monitor_uv_delta_m=0.0,
+        )
+
+    monkeypatch.setattr("chess_gaze.unigaze_batch_benchmark.subprocess.run", fake_run)
+    monkeypatch.setattr(benchmark, "compare_runs", fake_compare_runs)
+    monkeypatch.setattr(
+        benchmark,
+        "_load_forward_benchmark_crops",
+        lambda run_dir: object(),
+    )
+
+    def fake_benchmark_unigaze_forward(
+        *,
+        models_root: Path,
+        device: str,
+        batch_size: int,
+        normalized_crops: object,
+    ) -> object:
+        del models_root, normalized_crops
+        if device == "mps" and batch_size == 2:
+            return (
+                None,
+                benchmark._ForwardBenchmarkFailure(
+                    phase="preflight",
+                    preflight_seconds=0.5,
+                    error_code="UNIGAZE_PREFLIGHT_FAILED",
+                    error_message="simulated preflight failure",
+                ),
+            )
+        return (
+            benchmark._ForwardBenchmarkTiming(
+                preflight_seconds=0.25,
+                repetitions_seconds=[1.0, 1.1, 1.2],
+                median_seconds=1.1,
+                crop_count=4,
+                peak_mps_memory_bytes=None,
+            ),
+            None,
+        )
+
+    monkeypatch.setattr(
+        benchmark, "_benchmark_unigaze_forward", fake_benchmark_unigaze_forward
+    )
+
+    exit_code = benchmark.main(
+        [
+            "--video",
+            str(video_path),
+            "--models-root",
+            str(models_root),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert commands == [("cpu", "1"), ("cpu", "2"), ("mps", "1")]
+    report = UniGazeBatchBenchmarkReport.model_validate_json(
+        output_path.read_text(encoding="utf-8")
+    )
+    mps2 = report.candidate_results[3]
+    assert mps2.status == "preflight_failed"
+    assert mps2.preflight_seconds == 0.5
+    assert mps2.analysis_wall_seconds is None
+    assert mps2.full_run_dir is None
+    assert mps2.unigaze_forward_status == "failed"
+    assert mps2.unigaze_forward_error_code == "UNIGAZE_PREFLIGHT_FAILED"
+    assert mps2.error_code == "UNIGAZE_PREFLIGHT_FAILED"
+    assert "preflight failure" in str(mps2.error_message)
+    assert report.selected_batch_size is None
+
+
+def test_preflight_and_forward_failure_error_codes_are_phase_specific() -> None:
+    assert benchmark._status_for_preflight_or_forward_failure(
+        "simulated runtime failure",
+        phase="preflight",
+    ) == ("preflight_failed", "UNIGAZE_PREFLIGHT_FAILED")
+    assert benchmark._status_for_preflight_or_forward_failure(
+        "simulated runtime failure",
+        phase="forward",
+    ) == ("preflight_failed", "UNIGAZE_FORWARD_FAILED")
+
+
+def test_forward_timing_failure_does_not_skip_full_candidate_run(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     video_path = tmp_path / "source.mp4"

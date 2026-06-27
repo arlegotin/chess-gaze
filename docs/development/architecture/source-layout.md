@@ -39,6 +39,14 @@ package instead of accidentally importing Python files from the repository root.
     benchmark harness and selected-batch report schema.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration, validation,
     and command-line entry points.
+
+Source-layout review, 2026-06-27: `unigaze_batch_benchmark.py` is intentionally
+deep despite crossing the 800-line review trigger. The module is a finite
+CLI-only benchmark harness for one optimization workflow, and keeping report
+schema, candidate execution, equivalence writing, and artifact-retention policy
+together keeps the benchmark contract auditable. If it grows toward 1,500 lines
+or becomes a reusable benchmark framework, split report/schema, subprocess
+runner, forward-timing, and retention helpers into separate concept modules.
 - `src/chess_gaze/viewer_assets/` contains package resources for the generated
   local viewer: HTML, CSS, JavaScript, and pinned remote Three.js dependency
   metadata. The app assets are copied into each run's `viewer/` directory; the

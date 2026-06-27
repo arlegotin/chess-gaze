@@ -20,6 +20,7 @@ from chess_gaze.configuration import (
     load_config,
 )
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
+from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import (
     CalibrationRecord,
     ErrorRecord,
@@ -548,11 +549,21 @@ def _process_frame_batch(
         for decoded_frame in decoded_frames
     ]
     if observers.frame_batch_observer is None:
-        records = [observers.frame_observer(item.observer_frame) for item in prepared]
+        try:
+            records = [
+                observers.frame_observer(item.observer_frame) for item in prepared
+            ]
+        except ModelInferenceError as exc:
+            raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
     else:
-        records = list(
-            observers.frame_batch_observer([item.observer_frame for item in prepared])
-        )
+        try:
+            records = list(
+                observers.frame_batch_observer(
+                    [item.observer_frame for item in prepared]
+                )
+            )
+        except ModelInferenceError as exc:
+            raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
     if len(records) != len(prepared):
         raise PipelineError(
             CliErrorCode.SCHEMA_VALIDATION_FAILED,

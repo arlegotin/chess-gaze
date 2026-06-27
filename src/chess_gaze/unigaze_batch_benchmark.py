@@ -135,6 +135,7 @@ class _ForwardBenchmarkFailure:
     preflight_seconds: float | None
     error_code: str
     error_message: str
+    phase: Literal["preflight", "forward"] = "forward"
 
 
 def selected_mps_batch_size(report: UniGazeBatchBenchmarkReport) -> int | None:
@@ -249,6 +250,20 @@ def _run_benchmark(
                 batch_size=batch_size,
                 normalized_crops=forward_crops,
             )
+        if _is_preflight_failure(forward_failure):
+            assert forward_failure is not None
+            candidate_results.append(
+                _candidate_result(
+                    device=device,
+                    batch_size=batch_size,
+                    status="preflight_failed",
+                    analysis_wall_seconds=None,
+                    forward_failure=forward_failure,
+                    error_code=forward_failure.error_code,
+                    error_message=forward_failure.error_message,
+                )
+            )
+            continue
         run_dirs_before = _existing_run_dirs(benchmark_run_root)
         result = _run_candidate(
             video_path=video_path,
@@ -566,15 +581,16 @@ def _candidate_result(
     forward_repetitions = (
         [] if forward_timing is None else list(forward_timing.repetitions_seconds)
     )
+    active_preflight_seconds = preflight_seconds
+    if forward_timing is not None:
+        active_preflight_seconds = forward_timing.preflight_seconds
+    elif forward_failure is not None:
+        active_preflight_seconds = forward_failure.preflight_seconds
     return BenchmarkCandidateResult(
         device=device,
         batch_size=batch_size,
         status=status,
-        preflight_seconds=(
-            preflight_seconds
-            if forward_timing is None
-            else forward_timing.preflight_seconds
-        ),
+        preflight_seconds=active_preflight_seconds,
         analysis_wall_seconds=analysis_wall_seconds,
         frames_per_second=frames_per_second,
         unigaze_forward_status=_forward_status(
@@ -646,6 +662,12 @@ def _apply_forward_failure(
     )
 
 
+def _is_preflight_failure(
+    failure: _ForwardBenchmarkFailure | None,
+) -> bool:
+    return failure is not None and failure.phase == "preflight"
+
+
 def _forward_status(
     *,
     timing: _ForwardBenchmarkTiming | None,
@@ -680,8 +702,12 @@ def _benchmark_unigaze_forward(
             )
         except Exception as exc:
             preflight_seconds = time.perf_counter() - preflight_start
-            _status, error_code = _status_for_preflight_or_forward_failure(str(exc))
+            _status, error_code = _status_for_preflight_or_forward_failure(
+                str(exc),
+                phase="preflight",
+            )
             return None, _ForwardBenchmarkFailure(
+                phase="preflight",
                 preflight_seconds=preflight_seconds,
                 error_code=error_code,
                 error_message=str(exc),
@@ -710,8 +736,12 @@ def _benchmark_unigaze_forward(
                 synchronize_if_needed(device)
                 repetitions.append(time.perf_counter() - repetition_start)
         except Exception as exc:
-            _status, error_code = _status_for_preflight_or_forward_failure(str(exc))
+            _status, error_code = _status_for_preflight_or_forward_failure(
+                str(exc),
+                phase="forward",
+            )
             return None, _ForwardBenchmarkFailure(
+                phase="forward",
                 preflight_seconds=preflight_seconds,
                 error_code=error_code,
                 error_message=str(exc),
@@ -826,12 +856,16 @@ def _mps_peak_memory_bytes(device: Literal["cpu", "mps"]) -> int | None:
 
 def _status_for_preflight_or_forward_failure(
     output: str,
+    *,
+    phase: Literal["preflight", "forward"],
 ) -> tuple[
     Literal["preflight_failed", "oom", "unsupported_op"],
     str,
 ]:
     status, error_code = _status_for_failed_process(output)
     if status == "analyze_failed":
+        if phase == "preflight":
+            return "preflight_failed", "UNIGAZE_PREFLIGHT_FAILED"
         return "preflight_failed", "UNIGAZE_FORWARD_FAILED"
     return status, error_code
 

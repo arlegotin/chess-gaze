@@ -16,7 +16,7 @@ from chess_gaze.face_observation import (
     FaceObservation,
     FaceSelection,
 )
-from chess_gaze.frame_observation import ModelBackedFrameObserver
+from chess_gaze.frame_observation import ModelBackedFrameObserver, ModelInferenceError
 from chess_gaze.frame_records import ErrorRecord
 from chess_gaze.gaze_observation import (
     CropTransformRecord,
@@ -733,5 +733,5 @@ def test_model_backed_frame_observer_batch_propagates_model_contract_errors(
         face_crop_normalizer=_normalize_face_crop,
     )
 
-    with pytest.raises(ValueError, match="pred_gaze must have shape"):
+    with pytest.raises(ModelInferenceError, match="pred_gaze must have shape"):
         observer.observe_batch([_observer_frame()])

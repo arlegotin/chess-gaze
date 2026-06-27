@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
+from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.model_assets import ResolvedModelAsset
@@ -447,6 +448,79 @@ def test_batch_observer_record_count_mismatch_fails_schema_validation(
         )
 
     assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+
+
+def test_default_model_batch_inference_failure_returns_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    models_root = tmp_path / "models"
+    registry_path = tmp_path / "model_registry.json"
+    make_tiny_video(video_path, frame_count=2)
+    _write_model_registry_with_assets(models_root, registry_path)
+
+    from chess_gaze import pipeline
+    from chess_gaze.frame_records import InferenceRuntimeRecord
+
+    def fake_prepare_unigaze_runtime(
+        asset: object, *, device: str, batch_size: int, input_size_px: int
+    ) -> object:
+        del asset, input_size_px
+        return SimpleNamespace(
+            model=object(),
+            inference=InferenceRuntimeRecord(
+                observer_source="default_model_observer",
+                unigaze_model_id="unigaze-h14-joint",
+                unigaze_device=cast(Any, device),
+                unigaze_batch_size=batch_size,
+                torch_version="test-torch",
+                torch_mps_available=True,
+                mps_fallback_env="unset",
+                mps_fast_math_env="unset",
+                mps_prefer_metal_env="unset",
+                mps_preflight_passed=None,
+            ),
+        )
+
+    def fake_default_observer_bundle_factory(
+        resolved_assets: list[Any],
+        calibration: object,
+        run_layout: object,
+        gaze_model: object,
+    ) -> ObserverBundle:
+        del resolved_assets, calibration, run_layout, gaze_model
+
+        def fail_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+            del frames
+            raise ModelInferenceError("UniGaze batch inference failed: simulated")
+
+        return ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=fail_batch,
+        )
+
+    monkeypatch.setattr(
+        pipeline, "prepare_unigaze_runtime", fake_prepare_unigaze_runtime
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "default_observer_bundle_factory",
+        fake_default_observer_bundle_factory,
+    )
+
+    with pytest.raises(PipelineError, match="simulated") as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                models_root=models_root,
+                model_registry_path=registry_path,
+                unigaze_batch_size=2,
+            )
+        )
+
+    assert exc_info.value.code is CliErrorCode.USAGE
 
 
 def test_analyze_video_writes_scene_artifacts_and_viewer_files(

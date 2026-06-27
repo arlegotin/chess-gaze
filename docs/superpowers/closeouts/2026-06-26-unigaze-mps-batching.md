@@ -45,6 +45,13 @@ directory containing `run_manifest.json` and `records/`.
 - Added `unigaze_batch_benchmark.py` to benchmark CPU/MPS batch sizes
   `1, 2, 4, 7, 8, 16, 32, 64`, record failures as rows, retain only necessary
   full run directories, and select the fastest passing MPS batch above 1.
+- After final code review, added a narrow `ModelInferenceError` boundary so
+  post-preflight UniGaze batch inference contract failures become
+  `PipelineError(USAGE)` in the analysis pipeline, while per-row non-finite
+  outputs still mark only the originating frame invalid.
+- After final code review, made benchmark preflight failures first-class
+  candidate failures: rows are marked `preflight_failed` and the full analysis
+  subprocess is skipped for that candidate.
 - Updated README and source-layout documentation.
 
 ## Benchmark Matrix
@@ -89,6 +96,10 @@ failure. CPU batch sizes 4 and above were rejected only by the strict CPU
 tolerances; MPS batch 7 was selected because it had the lowest full-analysis
 wall time, even though some larger batches had slightly lower isolated UniGaze
 forward medians.
+
+The benchmark report stores every isolated UniGaze forward repetition and the
+median. Forward min/max values are derivable from the repetition arrays; they
+are not duplicated as explicit fields in the v1 report schema.
 
 ## Selected Optimized Profile
 
@@ -182,23 +193,26 @@ Commands that used real MediaPipe/MPS/macOS native paths were run unsandboxed.
 
 - Focused implementation suite:
   `.venv/bin/pytest tests/chess_gaze/test_configuration.py tests/chess_gaze/test_cli.py tests/chess_gaze/test_gaze_observation.py tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_frame_records.py tests/chess_gaze/test_qa_summary.py tests/chess_gaze/test_run_equivalence.py tests/chess_gaze/test_unigaze_runtime.py tests/chess_gaze/test_unigaze_batch_benchmark.py -q`
-  - result: `140 passed, 18 warnings in 4.00s`
+  - result after final review fixes and benchmark wording cleanup:
+    `143 passed, 18 warnings in 3.80s`
 - Scene focused suite:
   `.venv/bin/pytest tests/chess_gaze/test_scene_geometry.py tests/chess_gaze/test_scene_artifacts.py -q`
   - result: `49 passed in 1.96s`
 - Required real-video smoke:
   `.venv/bin/pytest tests/chess_gaze/test_face_observation_real_video.py::test_mediapipe_observer_rejects_nakamura_overexpanded_faces -q`
-  - result: `1 passed in 3.45s`
+  - result after final review fixes: `1 passed in 2.61s`
 - Full suite:
   `.venv/bin/pytest`
-  - result: `7 failed, 328 passed, 7 skipped, 18 warnings in 460.45s`
+  - result after final review fixes:
+    `7 failed, 330 passed, 7 skipped, 18 warnings in 455.69s`
   - failure reason: all seven failures asserted missing ignored legacy media
     `artifacts/input/test_1.mp4` or `artifacts/input/test_2.mp4`; those files
     are not present locally. No failure referenced `nakamura_1.mp4`, MPS,
     batching, manifest metadata, equivalence, or benchmark behavior.
 - Broadest available subset excluding only absent-media tests:
   `.venv/bin/pytest --ignore=tests/chess_gaze/test_pipeline_real_video_contract.py --ignore=tests/chess_gaze/test_qa_summary_real_video_contract.py --ignore=tests/chess_gaze/test_video_decode_real_video.py --ignore=tests/chess_gaze/test_visualization_real_video.py`
-  - result: `328 passed, 7 skipped, 18 warnings in 456.57s`
+  - result after final review fixes:
+    `330 passed, 7 skipped, 18 warnings in 454.42s`
 - Ruff lint:
   `.venv/bin/ruff check .`
   - result: `All checks passed!`
@@ -212,6 +226,27 @@ Commands that used real MediaPipe/MPS/macOS native paths were run unsandboxed.
   `env -u PYTORCH_ENABLE_MPS_FALLBACK -u PYTORCH_MPS_FAST_MATH -u PYTORCH_MPS_PREFER_METAL .venv/bin/python -m chess_gaze.unigaze_batch_benchmark --report artifacts/output/benchmarks/2026-06-26-unigaze-mps-batching.json --print-selected-batch-size`
   - result: printed `7` and exited `0`; emitted the known duplicate FFmpeg
     Objective-C class warning from importing cv2/PyAV.
+- Post-review focused regressions:
+  `.venv/bin/pytest tests/chess_gaze/test_pipeline_contract.py::test_default_model_batch_inference_failure_returns_usage_error tests/chess_gaze/test_frame_observation.py::test_model_backed_frame_observer_batch_propagates_model_contract_errors -q`
+  - result: `2 passed in 1.26s`
+- Post-review benchmark regressions:
+  `.venv/bin/pytest tests/chess_gaze/test_unigaze_batch_benchmark.py::test_preflight_failure_skips_full_candidate_run tests/chess_gaze/test_unigaze_batch_benchmark.py::test_forward_timing_failure_does_not_skip_full_candidate_run -q`
+  - result: `2 passed in 1.15s`
+- Post-review benchmark suite after phase-specific error-code cleanup:
+  `.venv/bin/pytest tests/chess_gaze/test_unigaze_batch_benchmark.py -q`
+  - result: `12 passed in 2.10s`
+- Post-review affected suite:
+  `.venv/bin/pytest tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_unigaze_batch_benchmark.py -q`
+  - result: `46 passed in 1.80s`
+- Post-review Ruff lint:
+  `.venv/bin/ruff check .`
+  - result: `All checks passed!`
+- Post-review Ruff format:
+  `.venv/bin/ruff format --check .`
+  - result: `65 files already formatted`
+- Post-review mypy:
+  `.venv/bin/mypy`
+  - result: `Success: no issues found in 65 source files`
 
 ## Residual Risk
 
@@ -224,5 +259,9 @@ Commands that used real MediaPipe/MPS/macOS native paths were run unsandboxed.
 - PyTorch MPS and CPU are not bitwise identical. The accepted contract is
   artifact equivalence under the approved tolerances, plus exact frame identity,
   validity/status/error, and artifact-count matching.
+- `unigaze_batch_benchmark.py` is intentionally deep for this finite CLI-only
+  benchmark harness. `docs/development/architecture/source-layout.md` records
+  the source-layout review and the split trigger if it grows or becomes a
+  reusable benchmark framework.
 - The native runtime still emits the known duplicate FFmpeg Objective-C class
   warning when cv2 and PyAV are imported in the same process.

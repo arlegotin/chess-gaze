@@ -63,6 +63,10 @@ class FaceGazeModel(Protocol):
     def predict_batch(self, normalized_batch: Any) -> tuple[FaceModelGaze, ...]: ...
 
 
+class ModelInferenceError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class _FrameEvidence:
     frame: Any
@@ -110,11 +114,16 @@ class ModelBackedFrameObserver:
         appearance_by_index: dict[int, FaceModelGaze] = {}
         if crop_items:
             batch = torch.cat([tensor for _index, tensor in crop_items], dim=0)
-            gazes = self.gaze_model.predict_batch(batch)
-            if len(gazes) != len(crop_items):
-                raise ValueError(
-                    "Appearance gaze model returned a different number of rows"
-                )
+            try:
+                gazes = self.gaze_model.predict_batch(batch)
+                if len(gazes) != len(crop_items):
+                    raise ValueError(
+                        "Appearance gaze model returned a different number of rows"
+                    )
+            except Exception as exc:
+                raise ModelInferenceError(
+                    f"UniGaze batch inference failed: {exc}"
+                ) from exc
             for (index, _tensor), gaze in zip(crop_items, gazes, strict=True):
                 appearance_by_index[index] = gaze
 
