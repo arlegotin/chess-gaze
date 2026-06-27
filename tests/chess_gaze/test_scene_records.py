@@ -210,7 +210,7 @@ def _frame_camera_payload() -> dict[str, Any]:
 def _manifest_payload() -> dict[str, Any]:
     return {
         "run_id": "run-123",
-        "source_video_path": "artifacts/input/nakamura_1.mp4",
+        "source_video_path": "artifacts/input/nakamura_short.mp4",
         "source_video_sha256": "abc123",
         "source_artifacts": {
             "frame_records": "records/frames.jsonl",
@@ -425,7 +425,7 @@ def test_scene_records_enforce_semantic_coordinate_frames() -> None:
         ViewerSceneData.model_validate(
             {
                 "run_id": "run-123",
-                "source_video_stem": "nakamura_1",
+                "source_video_stem": "nakamura_short",
                 "frame_count": 1,
                 "frames": [_scene_frame_payload()],
                 "valid_hit_points": [
@@ -970,7 +970,7 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
     viewer_data = ViewerSceneData.model_validate(
         {
             "run_id": "run-123",
-            "source_video_stem": "nakamura_1",
+            "source_video_stem": "nakamura_short",
             "frame_count": 1,
             "frames": [_scene_frame_payload()],
             "valid_hit_points": [

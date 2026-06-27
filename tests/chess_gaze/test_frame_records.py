@@ -316,13 +316,13 @@ def test_run_manifest_requires_inference_runtime_record() -> None:
     manifest = RunManifest(
         run_id="run-1",
         created_at_utc="2026-06-26T00:00:00Z",
-        input_path="artifacts/input/nakamura_1.mp4",
+        input_path="artifacts/input/nakamura_short.mp4",
         video=VideoManifest(
-            source_path="artifacts/input/nakamura_1.mp4",
+            source_path="artifacts/input/nakamura_short.mp4",
             source_sha256="0" * 64,
             frame_width=1920,
             frame_height=1080,
-            frame_count_decoded=1973,
+            frame_count_decoded=180,
         ),
         inference=InferenceRuntimeRecord(**_external_observer_inference_payload()),
     )
@@ -336,13 +336,13 @@ def test_run_manifest_direct_validation_rejects_missing_inference() -> None:
             {
                 "run_id": "run-1",
                 "created_at_utc": "2026-06-26T00:00:00Z",
-                "input_path": "artifacts/input/nakamura_1.mp4",
+                "input_path": "artifacts/input/nakamura_short.mp4",
                 "video": {
-                    "source_path": "artifacts/input/nakamura_1.mp4",
+                    "source_path": "artifacts/input/nakamura_short.mp4",
                     "source_sha256": "0" * 64,
                     "frame_width": 1920,
                     "frame_height": 1080,
-                    "frame_count_decoded": 1973,
+                    "frame_count_decoded": 180,
                 },
             }
         )
@@ -354,13 +354,13 @@ def test_legacy_manifest_json_gets_compatibility_inference() -> None:
         {
           "run_id": "run-1",
           "created_at_utc": "2026-06-26T00:00:00Z",
-          "input_path": "artifacts/input/nakamura_1.mp4",
+          "input_path": "artifacts/input/nakamura_short.mp4",
           "video": {
-            "source_path": "artifacts/input/nakamura_1.mp4",
+            "source_path": "artifacts/input/nakamura_short.mp4",
             "source_sha256": "%s",
             "frame_width": 1920,
             "frame_height": 1080,
-            "frame_count_decoded": 1973
+            "frame_count_decoded": 180
           }
         }
         """
