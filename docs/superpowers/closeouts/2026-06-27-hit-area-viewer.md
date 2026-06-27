@@ -152,6 +152,22 @@ Results:
 - `node --check`: exit `0`
 - `1 passed in 1.08s`
 
+Accumulated follow-up review:
+
+- Reviewer found no Critical issues.
+- Reviewer found one Important test gap: the source-contract test did not pin
+  that `renderAccumulatedHitAreas()` is guarded by `Hit Area` and independent
+  from `Hit Points`.
+- Fixed in commit `fc1a2fe` by asserting the accumulated hit-area function body
+  contains `elements.toggles.hitArea.checked` and does not reference
+  `hitPoints` or `valid_hit_points`.
+- Focused regression after the review fix:
+  `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q`
+  -> `1 passed in 48.19s`.
+- Viewer suite after the review fix:
+  `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q`
+  -> `24 passed in 1.65s`.
+
 ## Verification Commands
 
 Focused suite in sandbox:
