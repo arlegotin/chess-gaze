@@ -145,6 +145,19 @@ def test_print_selected_batch_size_cli(
     assert captured.err == ""
 
 
+def test_parse_run_dir_ignores_model_load_stdout(tmp_path: Path) -> None:
+    run_dir = tmp_path / "source" / "runs" / "mps64"
+    _write_qa_summary(run_dir, decoded_frames=20)
+    stdout = (
+        "Loaded UniGaze pretrained weights from "
+        "models/unigaze/unigaze_h14_joint.safetensors\n"
+        f"{run_dir}\n"
+        f"viewer: {run_dir / 'viewer' / 'index.html'}\n"
+    )
+
+    assert benchmark._parse_run_dir(stdout) == str(run_dir)
+
+
 def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

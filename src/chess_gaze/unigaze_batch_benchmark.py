@@ -1024,9 +1024,17 @@ def _load_qa_summary(run_dir: Path) -> tuple[dict[str, Any], str | None]:
 def _parse_run_dir(stdout: str) -> str | None:
     for line in stdout.splitlines():
         stripped = line.strip()
-        if stripped:
+        if _looks_like_analyze_run_dir(Path(stripped)):
             return stripped
     return None
+
+
+def _looks_like_analyze_run_dir(path: Path) -> bool:
+    return (
+        path.is_dir()
+        and (path / "run_manifest.json").is_file()
+        and (path / "records").is_dir()
+    )
 
 
 def _status_for_failed_process(
