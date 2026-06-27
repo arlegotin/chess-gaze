@@ -90,10 +90,11 @@ uncertainty.
 
 ### C. Accumulate translucent patches for all frames
 
-Rejected for this step. Many overlapping patches would read like a statistical
-heatmap even though the patch radius is a global assumption. Accumulated mode
-should continue to accumulate point estimates only. The hit area is shown for
-the current frame in both Instant and Accumulated modes.
+Selected in the 2026-06-28 follow-up. Accumulated mode should make hit-area
+patches accumulated like hit points because users compare gaze history in that
+mode. The display must still avoid implying calibrated probability: every patch
+uses the same user-selected angular-error radius and remains a visualization of
+the assumed cone footprint for that frame.
 
 ## Viewer Behavior
 
@@ -105,13 +106,18 @@ Add controls under `Scene Layers`:
 
 Rendering rules:
 
-- Draw a translucent flat patch only when `Hit Area` is enabled and the current
-  frame has a valid `main_monitor_hit` and usable ray direction.
+- In `Instant` mode, draw a translucent flat patch only when `Hit Area` is
+  enabled and the current frame has a valid `main_monitor_hit` and usable ray
+  direction.
 - Draw the hit-area patch independently from `Hit Points`. Turning hit points
   off must not force hit area off.
 - Continue drawing the point estimate whenever `Hit Points` is enabled.
-- In `Accumulated` mode, accumulated points still depend on `Hit Points`; the
-  hit-area patch remains current-frame only.
+- In `Accumulated` mode, accumulated points still depend on `Hit Points`, and
+  accumulated hit-area patches depend on `Hit Area`. Turning either layer off
+  must not force the other layer off.
+- Accumulated hit-area patches must be derived from `frames[]` with
+  `frame_index <= current slider index`, not from `valid_hit_points[]`, because
+  the summary points do not carry ray direction or `ray_t_m`.
 - If the ray is invalid, the hit is invalid, `ray_t_m` is missing, or the
   direction/normal math is non-finite, draw no patch and keep the existing
   invalid reason status behavior.
@@ -190,8 +196,8 @@ Required focused tests:
 - Generated viewer HTML includes `toggle-hit-area`, `hit-area-error-degrees`,
   and `hit-area-error-label`.
 - Generated viewer JavaScript includes the default/range constants, hit-area
-  toggle wiring, current-frame patch rendering, and the proposal's radius
-  formula.
+  toggle wiring, current-frame and accumulated patch rendering, and the
+  proposal's radius formula.
 - Generated CSS includes a semantic hit-area color and slider row styling.
 - The Nakamura short real-video model-free contract confirms `frames[]` contain
   the fields the viewer needs: valid hit point, `ray_t_m`, gaze directions, and
@@ -205,9 +211,9 @@ Required real verification:
   if local models and native runtime allow it; otherwise record the exact
   blocker.
 - Serve or open the generated viewer and verify through browser automation:
-  canvas nonblank, no console errors, `Hit Area` toggle changes rendered pixels,
-  angular-error slider changes rendered pixels, and hit points remain controlled
-  separately.
+  canvas nonblank, no console errors, `Hit Area` toggle changes rendered pixels
+  in accumulated mode, angular-error slider changes rendered pixels, and hit
+  points remain controlled separately.
 
 Required gates:
 
@@ -233,8 +239,10 @@ the broadest meaningful subset.
 6. Invalid or incomplete frames draw no patch and retain existing status text.
 7. No schema change is introduced.
 8. No new external dependency is introduced.
-9. `artifacts/input/nakamura_short.mp4` is used for real verification.
-10. Closeout records commands, browser evidence, and residual uncertainty.
+9. In `Accumulated` mode, `Hit Area` renders all valid per-frame patches through
+   the current slider frame independently from `Hit Points`.
+10. `artifacts/input/nakamura_short.mp4` is used for real verification.
+11. Closeout records commands, browser evidence, and residual uncertainty.
 
 ## Residual Uncertainty
 

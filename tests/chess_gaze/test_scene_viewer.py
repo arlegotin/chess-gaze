@@ -421,6 +421,9 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "frame?.unigaze_ray?.valid" in js
     assert "projectedDirection" in js
     assert "renderCurrentHitArea" in js
+    assert "renderAccumulatedHitAreas" in js
+    assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" in js
+    assert "addHitArea(groups.accumulated, geometry)" in js
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
 

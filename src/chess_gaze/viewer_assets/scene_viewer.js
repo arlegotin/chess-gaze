@@ -545,26 +545,39 @@ function renderCurrentHitArea(frame) {
   }
 }
 
-function renderAccumulatedHits() {
-  clearGroup(groups.accumulated);
-  if (
-    state.mode !== "accumulated" ||
-    !elements.toggles.hitPoints.checked ||
-    !state.sceneData
-  ) {
+function renderAccumulatedHitAreas() {
+  if (!elements.toggles.hitArea.checked || !state.sceneData) {
     return;
   }
 
-  for (const hit of state.sceneData.valid_hit_points) {
-    if (hit.frame_index <= state.frameIndex) {
-      addSphere(
-        groups.accumulated,
-        vector(hit.point_scene_m),
-        0.008,
-        materials.accumulatedHit,
-      );
+  for (const frame of state.sceneData.frames.slice(0, state.frameIndex + 1)) {
+    const geometry = hitAreaGeometry(frame, angularErrorDegrees());
+    if (geometry) {
+      addHitArea(groups.accumulated, geometry);
     }
   }
+}
+
+function renderAccumulatedHits() {
+  clearGroup(groups.accumulated);
+  if (state.mode !== "accumulated" || !state.sceneData) {
+    return;
+  }
+
+  if (elements.toggles.hitPoints.checked) {
+    for (const hit of state.sceneData.valid_hit_points) {
+      if (hit.frame_index <= state.frameIndex) {
+        addSphere(
+          groups.accumulated,
+          vector(hit.point_scene_m),
+          0.008,
+          materials.accumulatedHit,
+        );
+      }
+    }
+  }
+
+  renderAccumulatedHitAreas();
 }
 
 function updateStatusPanel() {
@@ -667,6 +680,7 @@ function bindControls() {
   elements.hitAreaErrorDegrees.addEventListener("input", () => {
     updateHitAreaErrorLabel();
     renderCurrentFrame();
+    renderAccumulatedHits();
   });
   for (const toggle of Object.values(elements.toggles)) {
     toggle.addEventListener("change", () => {

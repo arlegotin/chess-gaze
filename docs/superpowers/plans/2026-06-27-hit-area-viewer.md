@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a viewer-side angular-error hit-area layer that preserves existing hit points and verifies against `artifacts/input/nakamura_short.mp4`.
+**Goal:** Add a viewer-side angular-error hit-area layer that preserves existing hit points, accumulates hit-area patches in accumulated mode, and verifies against `artifacts/input/nakamura_short.mp4`.
 
-**Architecture:** Keep scene artifacts unchanged. Compute the current-frame hit-area ellipse inside `scene_viewer.js` from existing `viewer.frames[]` fields and expose it through a separate checkbox plus live angular-error slider.
+**Architecture:** Keep scene artifacts unchanged. Compute hit-area ellipses inside `scene_viewer.js` from existing `viewer.frames[]` fields and expose them through a separate checkbox plus live angular-error slider. Instant mode renders the current-frame patch; accumulated mode renders patches for all valid frames through the current slider frame.
 
 **Tech Stack:** Python 3.12, pytest, generated static HTML/CSS/JS viewer assets, Three.js `0.185.0` loaded by the existing ADR-0003 import map.
 
@@ -16,6 +16,7 @@
 - Default angular error is `8` degrees.
 - Slider range is `[5, 12]` degrees with redraw-on-input.
 - The hit point and hit area are separate visual layers.
+- In accumulated mode, `Hit Area` renders patches for all valid frames through the current slider frame independently from `Hit Points`.
 - `artifacts/input/nakamura_short.mp4` must be used for real verification.
 - Treat the patch as a typical angular-error visualization, not measured per-frame confidence.
 - Use test-first development.
@@ -268,10 +269,11 @@ Add a short viewer note:
 
 ```markdown
 The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
-estimate and overlays a translucent current-frame angular-error patch on the
-monitor plane. The default typical angular error is 8 degrees and can be adjusted
-from 5 to 12 degrees in the viewer. This is a display assumption, not per-frame
-UniGaze confidence.
+estimate and overlays translucent angular-error patches on the monitor plane.
+In `Accumulated` mode, hit-area patches accumulate like hit points but remain
+controlled by the separate `Hit Area` toggle. The default typical angular error
+is 8 degrees and can be adjusted from 5 to 12 degrees in the viewer. This is a
+display assumption, not per-frame UniGaze confidence.
 ```
 
 - [ ] **Step 2: Run focused gates**
@@ -342,6 +344,110 @@ Create `docs/superpowers/closeouts/2026-06-27-hit-area-viewer.md` with:
 ```sh
 git add README.md docs/superpowers/closeouts/2026-06-27-hit-area-viewer.md
 git commit -m "docs: close out viewer hit area"
+```
+
+---
+
+### Task 4: Accumulated Hit Area Follow-Up
+
+**Files:**
+- Modify: `tests/chess_gaze/test_scene_viewer.py`
+- Modify: `src/chess_gaze/viewer_assets/scene_viewer.js`
+- Modify: `README.md`
+- Modify: `docs/superpowers/specs/2026-06-27-hit-area-viewer-design.md`
+- Modify: `docs/superpowers/plans/2026-06-27-hit-area-viewer.md`
+- Modify: `docs/superpowers/closeouts/2026-06-27-hit-area-viewer.md`
+
+**Interfaces:**
+- Consumes: current `ViewerSceneData.frames[]` records, especially
+  `frame_index`, `unigaze_ray`, `main_monitor_hit.ray_t_m`, and
+  `main_monitor_hit.point_scene_m`.
+- Produces: accumulated-mode hit-area patches controlled by `Hit Area`, while
+  accumulated point spheres remain controlled by `Hit Points`.
+
+- [ ] **Step 1: Write the failing source-contract test**
+
+Add assertions to
+`tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math`:
+
+```python
+assert "renderAccumulatedHitAreas" in js
+assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" in js
+assert "addHitArea(groups.accumulated, geometry)" in js
+assert "elements.toggles.hitArea.checked" in js
+```
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q
+```
+
+Expected: FAIL because the current viewer has no `renderAccumulatedHitAreas`
+implementation.
+
+- [ ] **Step 3: Extend the accumulated renderer**
+
+In `src/chess_gaze/viewer_assets/scene_viewer.js`, add:
+
+```js
+function renderAccumulatedHitAreas() {
+  if (!elements.toggles.hitArea.checked || !state.sceneData) {
+    return;
+  }
+  for (const frame of state.sceneData.frames.slice(0, state.frameIndex + 1)) {
+    const geometry = hitAreaGeometry(frame, angularErrorDegrees());
+    if (geometry) {
+      addHitArea(groups.accumulated, geometry);
+    }
+  }
+}
+```
+
+Then remove `!elements.toggles.hitPoints.checked` from the accumulated renderer
+early return, wrap the point loop in `if (elements.toggles.hitPoints.checked)`,
+and call `renderAccumulatedHitAreas()` after the point loop. Update the angular
+error slider handler to call `renderAccumulatedHits()` after
+`renderCurrentFrame()`.
+
+- [ ] **Step 4: Run focused tests and syntax check**
+
+Run:
+
+```sh
+node --check src/chess_gaze/viewer_assets/scene_viewer.js
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Update user-facing docs**
+
+Change the README hit-area note to:
+
+```markdown
+The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
+estimate and overlays translucent angular-error patches on the monitor plane.
+In `Accumulated` mode, hit-area patches accumulate like hit points but remain
+controlled by the separate `Hit Area` toggle. The default typical angular error
+is 8 degrees and can be adjusted from 5 to 12 degrees in the viewer. This is a
+display assumption, not per-frame UniGaze confidence.
+```
+
+- [ ] **Step 6: Verify with Nakamura short**
+
+Generate or regenerate a run from `artifacts/input/nakamura_short.mp4`, serve
+the viewer, switch to accumulated mode, and verify through browser automation
+that the canvas pixels change when `Hit Area` is toggled, when the angular-error
+slider changes, and when `Hit Points` is toggled separately.
+
+- [ ] **Step 7: Commit**
+
+```sh
+git add README.md docs/superpowers/specs/2026-06-27-hit-area-viewer-design.md docs/superpowers/plans/2026-06-27-hit-area-viewer.md docs/superpowers/closeouts/2026-06-27-hit-area-viewer.md tests/chess_gaze/test_scene_viewer.py src/chess_gaze/viewer_assets/scene_viewer.js
+git commit -m "feat: accumulate viewer hit areas"
 ```
 
 ## Final Review

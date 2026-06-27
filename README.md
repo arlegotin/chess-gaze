@@ -127,10 +127,11 @@ in the same page as embedded scene data and must be trusted. Offline viewing
 requires those pinned modules to already be present in the browser cache.
 
 The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
-estimate and overlays a translucent current-frame angular-error patch on the
-monitor plane. The default typical angular error is 8 degrees and can be adjusted
-from 5 to 12 degrees in the viewer. This is a display assumption, not per-frame
-UniGaze confidence.
+estimate and overlays translucent angular-error patches on the monitor plane.
+In `Accumulated` mode, hit-area patches accumulate like hit points but remain
+controlled by the separate `Hit Area` toggle. The default typical angular error
+is 8 degrees and can be adjusted from 5 to 12 degrees in the viewer. This is a
+display assumption, not per-frame UniGaze confidence.
 
 ## Scene Artifacts
 

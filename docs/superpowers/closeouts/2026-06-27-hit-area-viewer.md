@@ -1,13 +1,15 @@
 # Hit Area Viewer Closeout
 
-Date: 2026-06-27
+Date: 2026-06-27, updated 2026-06-28
 
 ## Summary
 
 Added a viewer-side `Hit Area` layer for the 3D scene viewer.
 
-The existing monitor hit point remains the point estimate. The new layer draws a
-separate translucent current-frame angular-error patch on the monitor plane. The
+The existing monitor hit point remains the point estimate. The new layer draws
+separate translucent angular-error patches on the monitor plane. Instant mode
+draws the current-frame patch; accumulated mode now accumulates hit-area patches
+like hit points while keeping `Hit Area` independent from `Hit Points`. The
 viewer defaults to an 8 degree typical angular error and allows live adjustment
 from 5 to 12 degrees.
 
@@ -16,8 +18,9 @@ No scene artifact schema changed, and no new dependency was added.
 ## Proposal Decisions
 
 - Selected viewer-side derived rendering instead of persisting hit-area geometry.
-- Kept accumulated mode as accumulated point estimates only; the hit-area patch
-  remains current-frame.
+- Updated accumulated mode in the 2026-06-28 follow-up so hit-area patches
+  accumulate like hit points while remaining controlled by the separate
+  `Hit Area` toggle.
 - Used the requested small-angle approximation:
   `minor = ray_t_m * tan(alpha)` and
   `major = minor / abs(dot(monitor_normal, gaze_direction))`.
@@ -70,7 +73,7 @@ The new viewer controls are:
 - `hit-area-error-degrees`
 - `hit-area-error-label`
 
-`scene_viewer.js` is 718 lines after this change, below the 800-line
+`scene_viewer.js` is 739 lines after the accumulated follow-up, below the 800-line
 source-layout review trigger.
 
 ## TDD And Review Evidence
@@ -128,6 +131,27 @@ Results:
 - `node --check`: exit `0`
 - `1 passed in 1.23s`
 
+Accumulated follow-up RED command:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q
+```
+
+Result: `1 failed in 1.33s`. The failure was the intended missing
+`renderAccumulatedHitAreas` implementation.
+
+Accumulated follow-up focused checks after implementation:
+
+```sh
+node --check src/chess_gaze/viewer_assets/scene_viewer.js
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q
+```
+
+Results:
+
+- `node --check`: exit `0`
+- `1 passed in 1.08s`
+
 ## Verification Commands
 
 Focused suite in sandbox:
@@ -150,6 +174,22 @@ Result before final-review fix: `25 passed in 41.44s`.
 
 Result after final-review fix: `25 passed in 43.74s`.
 
+Accumulated follow-up viewer suite with loopback permission:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q
+```
+
+Result: `24 passed in 1.48s`.
+
+Accumulated follow-up real-video contract:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_artifacts_real_video_contract.py -q
+```
+
+Result: `1 passed in 39.44s`.
+
 Static gates:
 
 ```sh
@@ -167,6 +207,12 @@ Results:
 These static gates were rerun after the final-review fix with the same passing
 results.
 
+They were rerun after the accumulated follow-up with the same passing results:
+
+- `All checks passed!`
+- `65 files already formatted`
+- `Success: no issues found in 65 source files`
+
 Full suite with loopback permission:
 
 ```sh
@@ -175,6 +221,10 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q
 
 Result: `348 passed, 18 warnings in 147.61s`. The warnings were existing
 PyTorch `torch.jit.script` deprecation warnings from gaze-observation tests.
+
+Accumulated follow-up full-suite result:
+`348 passed, 18 warnings in 144.56s`. The warnings were the same existing
+PyTorch `torch.jit.script` deprecation warnings.
 
 ## Nakamura Short Real Run
 
@@ -212,6 +262,25 @@ Artifact audit:
     `y=-0.232774178266643`, `z=-0.9593865393135202`
   - `hit.point_scene_m`: `x=0.17687001767775795`,
     `y=-0.16475496415599195`, `z=-0.5692533823694435`
+
+Accumulated follow-up regenerated run:
+
+```text
+artifacts/output/nakamura_short/runs/20260627T224815Z-d873457e
+viewer: artifacts/output/nakamura_short/runs/20260627T224815Z-d873457e/viewer/index.html
+```
+
+Artifact audit:
+
+- `qa_summary.final_status`: `complete`
+- viewer frame count: `180`
+- valid monitor hit frames: `180`
+- valid hit points: `180`
+- first valid `ray_t_m`: `0.7138479244522792`
+- last frame index: `179`
+- generated viewer asset includes `renderAccumulatedHitAreas`,
+  `state.sceneData.frames.slice(0, state.frameIndex + 1)`, and
+  `addHitArea(groups.accumulated, geometry)`.
 
 ## Browser Smoke
 
@@ -259,6 +328,43 @@ These checks prove:
 Screenshot captured at:
 
 `/private/tmp/chess-gaze-hit-area-viewer.png`
+
+Accumulated follow-up browser smoke used the regenerated run:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run chess-gaze view artifacts/output/nakamura_short/runs/20260627T224815Z-d873457e
+```
+
+URL: `http://127.0.0.1:64866/`
+
+Chrome DevTools verification:
+
+- status: `Accumulated mode. Frame 180 of 180: monitor hit is valid.`
+- accumulated count: `180 of 180`
+- no console messages
+- network requests limited to local viewer files plus pinned Three.js `0.185.0`
+  module URLs
+
+Accumulated canvas pixel evidence:
+
+| State | PNG data URL length | Sample hash |
+| --- | ---: | ---: |
+| accumulated, frame 180, 8 deg, hit area on, hit points on | `741122` | `536949490` |
+| accumulated, hit area off | `493274` | `488543973` |
+| accumulated, hit area on, 12 deg | `753306` | `768258110` |
+| accumulated, hit area on, 12 deg, hit points off | `504494` | `2717483482` |
+| accumulated, hit area off, hit points off | `230882` | `1325951166` |
+
+These checks prove:
+
+- accumulated-mode `Hit Area` changed rendered pixels;
+- the angular-error slider changed accumulated patch pixels;
+- turning `Hit Points` off changed pixels separately;
+- hit-area patches remained visible when `Hit Points` was off.
+
+Screenshot captured at:
+
+`/private/tmp/chess-gaze-accumulated-hit-area.png`
 
 ## Residual Uncertainty
 
