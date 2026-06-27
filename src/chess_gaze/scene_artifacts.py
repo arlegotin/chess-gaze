@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import cast
 
 from chess_gaze.artifact_runs import RunLayout
-from chess_gaze.frame_records import FrameRecord, RunManifest, VideoManifest
+from chess_gaze.frame_records import (
+    FrameRecord,
+    RunManifest,
+    VideoManifest,
+    read_run_manifest_artifact_json,
+)
 from chess_gaze.image_io import atomic_write_bytes
 from chess_gaze.scene_calibration import SceneAssumptions, default_scene_assumptions
 from chess_gaze.scene_geometry import (
@@ -98,10 +103,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         scene_frames_jsonl_path=run_layout.records_dir / "scene_frames.jsonl",
     )
     source_frames_path = run_layout.records_dir / "frames.jsonl"
-    run_manifest = _load_json_model(
-        run_layout.run_dir / "run_manifest.json",
-        RunManifest,
-    )
+    run_manifest = _load_run_manifest(run_layout.run_dir / "run_manifest.json")
     video_manifest = _load_json_model(
         run_layout.run_dir / "video_manifest.json",
         VideoManifest,
@@ -711,6 +713,10 @@ def _load_json_model[T](path: Path, model_type: type[T]) -> T:
         T,
         model_type.model_validate_json(path.read_text(encoding="utf-8")),  # type: ignore[attr-defined]
     )
+
+
+def _load_run_manifest(path: Path) -> RunManifest:
+    return read_run_manifest_artifact_json(path.read_text(encoding="utf-8"))
 
 
 def _load_source_frames(path: Path) -> list[FrameRecord]:

@@ -209,6 +209,21 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
     return layout
 
 
+def test_build_scene_artifacts_reads_legacy_run_manifest_without_inference(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+    run_manifest_path = layout.run_dir / "run_manifest.json"
+    legacy_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    legacy_manifest.pop("inference")
+    run_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
+
+    result = build_scene_artifacts(layout)
+
+    assert result.manifest.run_id == "20260626T120000Z-scene"
+    assert result.scene_frame_count == 7
+
+
 def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     tmp_path: Path,
 ) -> None:

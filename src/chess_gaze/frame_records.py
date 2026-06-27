@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from typing import Literal
 
@@ -281,6 +282,33 @@ class RunManifest(StrictSchemaModel):
     input_path: str
     video: VideoManifest
     inference: InferenceRuntimeRecord
+
+
+def _legacy_artifact_inference_record() -> InferenceRuntimeRecord:
+    # Legacy run manifests predate inference metadata. Use the least-claiming valid
+    # record so artifact readers stay strict without inventing model-runtime facts.
+    return InferenceRuntimeRecord(
+        observer_source="external_observer",
+        unigaze_model_id=None,
+        unigaze_device="not_applicable",
+        unigaze_batch_size=None,
+        torch_version=None,
+        torch_mps_available=None,
+        mps_fallback_env="not_applicable",
+        mps_fast_math_env="not_applicable",
+        mps_prefer_metal_env="not_applicable",
+        mps_preflight_passed=None,
+    )
+
+
+def read_run_manifest_artifact_json(payload: str) -> RunManifest:
+    raw_manifest = json.loads(payload)
+    if not isinstance(raw_manifest, dict) or "inference" in raw_manifest:
+        return RunManifest.model_validate(raw_manifest)
+
+    legacy_manifest = dict(raw_manifest)
+    legacy_manifest["inference"] = _legacy_artifact_inference_record().model_dump()
+    return RunManifest.model_validate(legacy_manifest)
 
 
 class CalibrationRecord(StrictSchemaModel):

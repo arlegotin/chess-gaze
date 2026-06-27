@@ -242,6 +242,22 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
     return layout
 
 
+def test_build_qa_summary_reads_legacy_run_manifest_without_inference(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path)
+    run_manifest_path = layout.run_dir / "run_manifest.json"
+    legacy_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    legacy_manifest.pop("inference")
+    run_manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
+
+    summary = build_qa_summary(layout)
+
+    assert summary.run_id == layout.run_dir.name
+    assert summary.source_video_path == str(tmp_path / "source.mp4")
+    assert summary.artifact_validation.schema_validation_passed is True
+
+
 def _make_layout(tmp_path: Path) -> RunLayout:
     run_dir = tmp_path / "runs" / "20260625T120000Z-test"
     raw_frames_dir = run_dir / "raw_frames"

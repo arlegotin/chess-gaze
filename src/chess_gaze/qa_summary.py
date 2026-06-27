@@ -18,6 +18,7 @@ from chess_gaze.frame_records import (
     FrameRecord,
     RunManifest,
     VideoManifest,
+    read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import StrictSchemaModel
 from chess_gaze.scene_records import (
@@ -183,8 +184,8 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
 
 
 def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
-    run_manifest = _read_json_model(
-        run_layout.run_dir / "run_manifest.json", RunManifest
+    run_manifest = _read_run_manifest(
+        run_layout.run_dir / "run_manifest.json"
     )
     _read_json_model(run_layout.run_dir / "calibration.json", CalibrationRecord)
     video_manifest = _read_json_model(
@@ -243,6 +244,16 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
             + viewer_index_errors
         ),
     )
+
+
+def _read_run_manifest(path: Path) -> RunManifest:
+    try:
+        return read_run_manifest_artifact_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ArtifactValidationError(
+            CliErrorCode.SCHEMA_VALIDATION_FAILED,
+            f"Invalid JSON artifact at {path}: {exc}",
+        ) from exc
 
 
 def _validate_loaded_run_artifacts(
