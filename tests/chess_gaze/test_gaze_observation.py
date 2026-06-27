@@ -41,8 +41,14 @@ class FakeUniGazeBackend:
         return self
 
     def __call__(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
-        assert batch.shape == (1, 3, 224, 224)
-        return {"pred_gaze": torch.tensor([[0.125, -0.25]], dtype=torch.float32)}
+        assert batch.ndim == 4
+        assert batch.shape[1:] == (3, 224, 224)
+        rows = []
+        for index in range(batch.shape[0]):
+            rows.append([0.125 + index, -0.25 - index])
+        return {
+            "pred_gaze": torch.tensor(rows, dtype=torch.float32, device=batch.device)
+        }
 
 
 def _asset(path: Path) -> ResolvedModelAsset:
@@ -119,6 +125,109 @@ def test_unigaze_prediction_requires_documented_output_shape(
 
     with pytest.raises(ValueError, match="pred_gaze"):
         model.predict(torch.zeros((1, 3, 224, 224), dtype=torch.float32))
+
+
+def test_unigaze_predict_batch_maps_each_output_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    fake_backend = FakeUniGazeBackend()
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: fake_backend
+    )
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+
+    gazes = model.predict_batch(torch.zeros((3, 3, 224, 224), dtype=torch.float32))
+
+    assert [gaze.pitch_radians for gaze in gazes] == pytest.approx([0.125, 1.125, 2.125])
+    assert [gaze.yaw_radians for gaze in gazes] == pytest.approx([0.25, 1.25, 2.25])
+    assert all(gaze.valid for gaze in gazes)
+
+
+def test_unigaze_predict_batch_rejects_empty_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: FakeUniGazeBackend()
+    )
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+
+    with pytest.raises(ValueError, match="non-empty"):
+        model.predict_batch(torch.zeros((0, 3, 224, 224), dtype=torch.float32))
+
+
+def test_unigaze_predict_batch_rejects_output_row_count_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class BadBackend(FakeUniGazeBackend):
+        def __call__(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+            del batch
+            return {"pred_gaze": torch.zeros((1, 2), dtype=torch.float32)}
+
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(unigaze_loader, "build_unigaze_model", lambda _key: BadBackend())
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+
+    with pytest.raises(ValueError, match="shape"):
+        model.predict_batch(torch.zeros((2, 3, 224, 224), dtype=torch.float32))
+
+
+def test_unigaze_predict_batch_marks_non_finite_row_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class NonFiniteBackend(FakeUniGazeBackend):
+        def __call__(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+            del batch
+            return {
+                "pred_gaze": torch.tensor(
+                    [[0.1, -0.2], [float("nan"), -0.3]], dtype=torch.float32
+                )
+            }
+
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: NonFiniteBackend()
+    )
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+
+    valid_gaze, invalid_gaze = model.predict_batch(
+        torch.zeros((2, 3, 224, 224), dtype=torch.float32)
+    )
+
+    assert valid_gaze.valid is True
+    assert invalid_gaze.valid is False
+    assert invalid_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
+
+
+def test_unigaze_predict_batch_moves_input_to_model_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DeviceSpyBackend(FakeUniGazeBackend):
+        observed_device: torch.device | None = None
+
+        def __call__(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+            self.observed_device = batch.device
+            return {"pred_gaze": torch.tensor([[0.1, -0.2]], dtype=torch.float32)}
+
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    backend = DeviceSpyBackend()
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(unigaze_loader, "build_unigaze_model", lambda _key: backend)
+
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+    model.predict_batch(torch.zeros((1, 3, 224, 224), dtype=torch.float32))
+
+    assert backend.observed_device == torch.device("cpu")
 
 
 def test_normalize_face_crop_records_transform_and_returns_chw_tensor() -> None:
