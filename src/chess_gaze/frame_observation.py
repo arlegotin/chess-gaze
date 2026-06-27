@@ -110,25 +110,13 @@ class ModelBackedFrameObserver:
         appearance_by_index: dict[int, FaceModelGaze] = {}
         if crop_items:
             batch = torch.cat([tensor for _index, tensor in crop_items], dim=0)
-            try:
-                gazes = self.gaze_model.predict_batch(batch)
-            except Exception as exc:
-                for index, _tensor in crop_items:
-                    _append_error_once(
-                        evidence_items[index].errors,
-                        ErrorRecord(
-                            code=ErrorCode.GAZE_MODEL_FAILED,
-                            message=f"Appearance gaze model failed: {exc}",
-                        ),
-                    )
-                    appearance_by_index[index] = _invalid_face_model_gaze()
-            else:
-                if len(gazes) != len(crop_items):
-                    raise ValueError(
-                        "Appearance gaze model returned a different number of rows"
-                    )
-                for (index, _tensor), gaze in zip(crop_items, gazes, strict=True):
-                    appearance_by_index[index] = gaze
+            gazes = self.gaze_model.predict_batch(batch)
+            if len(gazes) != len(crop_items):
+                raise ValueError(
+                    "Appearance gaze model returned a different number of rows"
+                )
+            for (index, _tensor), gaze in zip(crop_items, gazes, strict=True):
+                appearance_by_index[index] = gaze
 
         records: list[FrameRecord] = []
         for index, evidence in enumerate(evidence_items):

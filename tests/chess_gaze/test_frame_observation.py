@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from chess_gaze.artifact_runs import RunLayout
@@ -172,6 +173,17 @@ class _OneInvalidRowGazeModel:
                 confidence_source="not_provided_by_unigaze",
                 reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
             ),
+        )
+
+
+class _RaisingBatchGazeModel:
+    def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
+        return self.predict_batch(normalized_batch)[0]
+
+    def predict_batch(self, normalized_batch: torch.Tensor) -> tuple[FaceModelGaze, ...]:
+        del normalized_batch
+        raise ValueError(
+            "UniGaze pred_gaze must have shape (batch, 2) matching input batch"
         )
 
 
@@ -698,3 +710,21 @@ def test_model_backed_frame_observer_batch_marks_only_invalid_model_row(
     assert second.appearance_gaze.valid is False
     assert second.status is FrameStatus.ERROR
     assert ErrorCode.GAZE_MODEL_FAILED in {error.code for error in second.errors}
+
+
+def test_model_backed_frame_observer_batch_propagates_model_contract_errors(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=_RaisingBatchGazeModel(),
+        calibration=default_calibration(),
+        run_layout=_run_layout(tmp_path),
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_face_crop,
+    )
+
+    with pytest.raises(ValueError, match="pred_gaze must have shape"):
+        observer.observe_batch([_observer_frame()])
