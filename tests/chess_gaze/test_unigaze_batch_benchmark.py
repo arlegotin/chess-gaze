@@ -363,6 +363,89 @@ def test_benchmark_cli_does_not_select_mps_when_cpu1_baseline_fails(
     assert exit_code == 1
 
 
+def test_benchmark_cli_does_not_select_mps_without_current_flow_baseline(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "source.mp4"
+    video_path.write_bytes(b"not a real video")
+    models_root = tmp_path / "models"
+    unigaze_model = models_root / "unigaze" / "unigaze_h14_joint.safetensors"
+    unigaze_model.parent.mkdir(parents=True)
+    unigaze_model.write_bytes(b"model")
+    output_path = tmp_path / "benchmark.json"
+    compared_runs: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(benchmark, "CANDIDATE_DEVICES", ("cpu", "mps"))
+    monkeypatch.setattr(benchmark, "BATCH_SIZES", (1, 2))
+    monkeypatch.setattr(
+        benchmark,
+        "CURRENT_FLOW_BASELINE_PATH",
+        tmp_path / "missing-baseline.json",
+    )
+    monkeypatch.setattr(benchmark, "_git_revision", lambda: "abc123")
+    monkeypatch.setattr(benchmark, "_torch_version", lambda: "2.12.1")
+    monkeypatch.setattr(benchmark, "_unigaze_version", lambda: "0.1.3")
+    monkeypatch.setattr(benchmark, "_mps_available", lambda: True)
+
+    perf_times = iter([0.0, 10.0, 10.0, 11.0, 11.0, 15.0, 15.0, 18.0])
+    monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(perf_times))
+
+    def fake_run(
+        command: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        env: dict[str, str],
+    ) -> object:
+        del capture_output, text, env
+        device = command[command.index("--unigaze-device") + 1]
+        batch_size = command[command.index("--unigaze-batch-size") + 1]
+        run_dir = tmp_path / f"{device}{batch_size}"
+        _write_qa_summary(run_dir, decoded_frames=20)
+        return SimpleNamespace(returncode=0, stdout=f"{run_dir}\n", stderr="")
+
+    def fake_compare_runs(baseline: str | Path, candidate: str | Path) -> object:
+        compared_runs.append((str(baseline), str(candidate)))
+        return EquivalenceReport(
+            baseline_run_dir=str(baseline),
+            candidate_run_dir=str(candidate),
+            passed=True,
+            exact_mismatch_count=0,
+            numeric_mismatch_count=0,
+            validation_errors=[],
+            mismatches=[],
+            max_appearance_pitch_yaw_delta_radians=0.0,
+            max_scene_ray_component_delta=0.0,
+            max_monitor_uv_delta_m=0.0,
+        )
+
+    monkeypatch.setattr(benchmark.subprocess, "run", fake_run)
+    monkeypatch.setattr(benchmark, "compare_runs", fake_compare_runs)
+
+    exit_code = benchmark.main(
+        [
+            "--video",
+            str(video_path),
+            "--models-root",
+            str(models_root),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    report = UniGazeBatchBenchmarkReport.model_validate_json(
+        output_path.read_text(encoding="utf-8")
+    )
+    assert report.candidate_results[0].status == "equivalence_failed"
+    assert report.candidate_results[0].error_code == "CURRENT_FLOW_BASELINE_MISSING"
+    assert report.candidate_results[2].status == "equivalence_failed"
+    assert report.candidate_results[3].status == "equivalence_failed"
+    assert compared_runs == []
+    assert report.selected_batch_size is None
+    assert selected_mps_batch_size(report) is None
+
+
 def _report(
     candidate_results: list[BenchmarkCandidateResult],
     *,

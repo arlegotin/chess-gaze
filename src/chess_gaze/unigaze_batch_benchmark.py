@@ -314,7 +314,15 @@ def _run_candidate(
 
     if equivalence_baseline is None:
         if device == "cpu" and batch_size == 1:
-            equivalence_baseline = run_dir
+            return base_result.model_copy(
+                update={
+                    "status": "equivalence_failed",
+                    "error_code": "CURRENT_FLOW_BASELINE_MISSING",
+                    "error_message": (
+                        "current-flow CPU/1 baseline run_dir was not available"
+                    ),
+                }
+            )
         else:
             return base_result.model_copy(
                 update={
