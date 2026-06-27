@@ -390,9 +390,37 @@ def test_generated_html_includes_required_selectors(
         'data-testid="toggle-extended-plane"',
         'data-testid="toggle-axes"',
         'data-testid="toggle-hit-points"',
+        'data-testid="toggle-hit-area"',
+        'data-testid="hit-area-error-degrees"',
+        'data-testid="hit-area-error-label"',
         'data-testid="status-panel"',
     ):
         assert selector in html
+
+
+def test_generated_viewer_exposes_hit_area_controls_and_math(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    css = (layout.viewer_dir / "styles.css").read_text(encoding="utf-8")
+
+    assert "Hit Area" in html
+    assert "Angular Error" in html
+    assert 'min="5"' in html
+    assert 'max="12"' in html
+    assert 'step="0.5"' in html
+    assert 'value="8"' in html
+    assert "DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8" in js
+    assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 5" in js
+    assert "HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12" in js
+    assert "rayT * Math.tan(alphaRadians)" in js
+    assert "minorRadius / normalDirectionDot" in js
+    assert "direction.clone().sub(" in js
+    assert "renderCurrentHitArea" in js
+    assert "--color-hit-area:" in css
+    assert ".hit-area-error-row" in css
 
 
 def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
