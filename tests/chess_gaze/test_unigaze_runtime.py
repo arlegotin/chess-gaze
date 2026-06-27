@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import torch
@@ -50,13 +51,14 @@ def test_prepare_unigaze_runtime_cpu_loads_model_without_dummy_preflight(
         loaded_devices.append(device)
         return fake_model
 
+    runtime_module = cast(Any, unigaze_runtime)
     monkeypatch.setattr(
-        unigaze_runtime.torch.backends,
+        runtime_module.torch.backends,
         "mps",
         SimpleNamespace(is_available=lambda: True),
     )
     monkeypatch.setattr(
-        unigaze_runtime.UniGazeModel,
+        runtime_module.UniGazeModel,
         "from_local_asset",
         staticmethod(fake_from_local_asset),
     )
@@ -69,7 +71,7 @@ def test_prepare_unigaze_runtime_cpu_loads_model_without_dummy_preflight(
     )
 
     assert loaded_devices == ["cpu"]
-    assert prepared.model is fake_model
+    assert cast(object, prepared.model) is fake_model
     assert fake_model.predict_batch_input_shapes == []
     assert prepared.inference.unigaze_device == "cpu"
     assert prepared.inference.unigaze_batch_size == 5
@@ -99,18 +101,19 @@ def test_prepare_unigaze_runtime_mps_preflights_requested_batch_and_syncs(
     monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
     monkeypatch.delenv("PYTORCH_MPS_FAST_MATH", raising=False)
     monkeypatch.delenv("PYTORCH_MPS_PREFER_METAL", raising=False)
+    runtime_module = cast(Any, unigaze_runtime)
     monkeypatch.setattr(
-        unigaze_runtime.torch.backends,
+        runtime_module.torch.backends,
         "mps",
         SimpleNamespace(is_available=lambda: True),
     )
     monkeypatch.setattr(
-        unigaze_runtime.torch,
+        runtime_module.torch,
         "mps",
         SimpleNamespace(synchronize=fake_synchronize),
     )
     monkeypatch.setattr(
-        unigaze_runtime.UniGazeModel,
+        runtime_module.UniGazeModel,
         "from_local_asset",
         staticmethod(fake_from_local_asset),
     )
@@ -123,7 +126,7 @@ def test_prepare_unigaze_runtime_mps_preflights_requested_batch_and_syncs(
     )
 
     assert loaded_devices == ["mps"]
-    assert prepared.model is fake_model
+    assert cast(object, prepared.model) is fake_model
     assert fake_model.predict_batch_input_shapes == [(7, 3, 96, 96)]
     assert fake_model.predict_batch_input_dtypes == [torch.float32]
     assert sync_calls == [None]

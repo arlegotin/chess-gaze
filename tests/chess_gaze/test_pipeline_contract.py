@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, TextIO, cast
@@ -332,7 +333,7 @@ def test_analyze_video_uses_batch_observer_without_reordering_frames(
     make_tiny_video(video_path, frame_count=5)
     observed_batches: list[list[str]] = []
 
-    def fake_batch_record(frames: list[ObserverFrame]) -> list[FrameRecord]:
+    def fake_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
         observed_batches.append([frame.frame_id for frame in frames])
         return [_fake_record(frame) for frame in frames]
 
@@ -372,7 +373,7 @@ def test_batch_observer_identity_mismatch_fails_schema_validation(
     video_path = tmp_path / "tiny.mp4"
     make_tiny_video(video_path, frame_count=2)
 
-    def wrong_batch_record(frames: list[ObserverFrame]) -> list[FrameRecord]:
+    def wrong_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
         records = [_fake_record(frame) for frame in frames]
         payload = records[0].model_dump(mode="python")
         payload["frame_index"] = 99
@@ -429,7 +430,7 @@ def test_batch_observer_record_count_mismatch_fails_schema_validation(
     video_path = tmp_path / "tiny.mp4"
     make_tiny_video(video_path, frame_count=2)
 
-    def short_batch_record(frames: list[ObserverFrame]) -> list[FrameRecord]:
+    def short_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
         return [_fake_record(frames[0])]
 
     with pytest.raises(PipelineError) as exc_info:
@@ -565,8 +566,9 @@ def test_explicit_mps_unavailable_fails_before_run_layout(
 
     from chess_gaze import unigaze_runtime
 
+    runtime_module = cast(Any, unigaze_runtime)
     monkeypatch.setattr(
-        unigaze_runtime.torch.backends.mps, "is_available", lambda: False
+        runtime_module.torch.backends.mps, "is_available", lambda: False
     )
 
     with pytest.raises(PipelineError) as exc_info:
@@ -603,9 +605,8 @@ def test_explicit_mps_rejects_unsafe_env_before_run_layout(
 
     from chess_gaze import unigaze_runtime
 
-    monkeypatch.setattr(
-        unigaze_runtime.torch.backends.mps, "is_available", lambda: True
-    )
+    runtime_module = cast(Any, unigaze_runtime)
+    monkeypatch.setattr(runtime_module.torch.backends.mps, "is_available", lambda: True)
 
     with pytest.raises(PipelineError) as exc_info:
         analyze_video(
@@ -644,12 +645,13 @@ def test_default_model_observer_manifest_records_unigaze_runtime(
         asset: object, *, device: str, batch_size: int, input_size_px: int
     ) -> object:
         del asset, input_size_px
+        unigaze_device = cast(Any, device)
         return SimpleNamespace(
             model=prepared_model,
             inference=InferenceRuntimeRecord(
                 observer_source="default_model_observer",
                 unigaze_model_id="unigaze-h14-joint",
-                unigaze_device=device,
+                unigaze_device=unigaze_device,
                 unigaze_batch_size=batch_size,
                 torch_version="test-torch",
                 torch_mps_available=True,
@@ -759,7 +761,7 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
         frame_observation, "ModelBackedFrameObserver", FakeModelBackedFrameObserver
     )
     calibration = default_calibration()
-    run_layout = object()
+    run_layout = cast(Any, object())
     resolved_assets = [
         ResolvedModelAsset(
             model_id="mediapipe-face-landmarker",
@@ -887,12 +889,13 @@ def test_config_models_root_controls_default_model_observer_factory(
         asset: object, *, device: str, batch_size: int, input_size_px: int
     ) -> object:
         del asset, input_size_px
+        unigaze_device = cast(Any, device)
         return SimpleNamespace(
             model=object(),
             inference=InferenceRuntimeRecord(
                 observer_source="default_model_observer",
                 unigaze_model_id="unigaze-h14-joint",
-                unigaze_device=device,
+                unigaze_device=unigaze_device,
                 unigaze_batch_size=batch_size,
                 torch_version="test-torch",
                 torch_mps_available=False,
@@ -937,7 +940,7 @@ def test_config_models_root_controls_default_model_observer_factory(
 )
 def test_invalid_runtime_request_overrides_fail_with_usage_before_io(
     tmp_path: Path,
-    request_overrides: dict[str, object],
+    request_overrides: dict[str, Any],
     expected_field: str,
 ) -> None:
     output_root = tmp_path / "output"

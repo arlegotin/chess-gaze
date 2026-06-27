@@ -141,7 +141,9 @@ def test_unigaze_predict_batch_maps_each_output_row(
 
     gazes = model.predict_batch(torch.zeros((3, 3, 224, 224), dtype=torch.float32))
 
-    assert [gaze.pitch_radians for gaze in gazes] == pytest.approx([0.125, 1.125, 2.125])
+    assert [gaze.pitch_radians for gaze in gazes] == pytest.approx(
+        [0.125, 1.125, 2.125]
+    )
     assert [gaze.yaw_radians for gaze in gazes] == pytest.approx([0.25, 1.25, 2.25])
     assert all(gaze.valid for gaze in gazes)
 
@@ -172,7 +174,9 @@ def test_unigaze_predict_batch_rejects_output_row_count_mismatch(
     asset_path = tmp_path / "unigaze_h14_joint.safetensors"
     asset_path.write_bytes(b"weights")
     unigaze_loader = importlib.import_module("unigaze.loader")
-    monkeypatch.setattr(unigaze_loader, "build_unigaze_model", lambda _key: BadBackend())
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: BadBackend()
+    )
     model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
 
     with pytest.raises(ValueError, match="shape"):

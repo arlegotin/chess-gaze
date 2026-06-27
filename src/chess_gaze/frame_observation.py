@@ -149,8 +149,7 @@ class ModelBackedFrameObserver:
                     ErrorRecord(
                         code=appearance_gaze.reason_invalid,
                         message=(
-                            "Appearance gaze model failed: "
-                            "non-finite UniGaze output."
+                            "Appearance gaze model failed: non-finite UniGaze output."
                         ),
                     ),
                 )

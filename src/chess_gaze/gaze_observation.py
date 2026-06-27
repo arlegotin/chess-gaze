@@ -96,7 +96,9 @@ class UniGazeModel:
             raise ValueError("UniGaze predict() requires exactly one batch row")
         return gazes[0]
 
-    def predict_batch(self, normalized_batch: torch.Tensor) -> tuple[FaceModelGaze, ...]:
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
         if normalized_batch.ndim != 4 or normalized_batch.shape[1] != 3:
             raise ValueError("normalized_batch must have shape (batch, 3, H, W)")
         if normalized_batch.shape[0] < 1:

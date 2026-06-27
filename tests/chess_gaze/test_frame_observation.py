@@ -99,7 +99,9 @@ class _FakeGazeModel:
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
         return self.predict_batch(normalized_batch)[0]
 
-    def predict_batch(self, normalized_batch: torch.Tensor) -> tuple[FaceModelGaze, ...]:
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
         assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
         return tuple(
             FaceModelGaze(
@@ -123,7 +125,9 @@ class _DisagreeingGazeModel:
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
         return self.predict_batch(normalized_batch)[0]
 
-    def predict_batch(self, normalized_batch: torch.Tensor) -> tuple[FaceModelGaze, ...]:
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
         assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
         return tuple(
             FaceModelGaze(
@@ -147,7 +151,9 @@ class _OneInvalidRowGazeModel:
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
         return self.predict_batch(normalized_batch)[0]
 
-    def predict_batch(self, normalized_batch: torch.Tensor) -> tuple[FaceModelGaze, ...]:
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
         assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
         return (
             FaceModelGaze(
@@ -180,7 +186,9 @@ class _RaisingBatchGazeModel:
     def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
         return self.predict_batch(normalized_batch)[0]
 
-    def predict_batch(self, normalized_batch: torch.Tensor) -> tuple[FaceModelGaze, ...]:
+    def predict_batch(
+        self, normalized_batch: torch.Tensor
+    ) -> tuple[FaceModelGaze, ...]:
         del normalized_batch
         raise ValueError(
             "UniGaze pred_gaze must have shape (batch, 2) matching input batch"
@@ -652,8 +660,7 @@ def test_model_backed_frame_observer_batch_maps_model_rows_to_frames(
     assert records[0].recommended_gaze.valid is True
     assert records[1].recommended_gaze.valid is False
     assert (
-        records[1].recommended_gaze.reason_invalid
-        is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+        records[1].recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
     )
 
 

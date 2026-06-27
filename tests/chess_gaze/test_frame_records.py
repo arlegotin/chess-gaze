@@ -176,7 +176,7 @@ def test_error_code_names_are_stable() -> None:
     assert ErrorCode.GAZE_ESTIMATORS_DISAGREE.value == "GAZE_ESTIMATORS_DISAGREE"
 
 
-def _default_model_inference_payload() -> dict[str, object]:
+def _default_model_inference_payload() -> dict[str, Any]:
     return {
         "observer_source": "default_model_observer",
         "unigaze_model_id": "unigaze-h14-joint",
@@ -191,7 +191,7 @@ def _default_model_inference_payload() -> dict[str, object]:
     }
 
 
-def _external_observer_inference_payload() -> dict[str, object]:
+def _external_observer_inference_payload() -> dict[str, Any]:
     return {
         "observer_source": "external_observer",
         "unigaze_model_id": None,
@@ -254,7 +254,7 @@ def test_inference_runtime_record_accepts_external_observer() -> None:
     ],
 )
 def test_inference_runtime_record_rejects_default_model_observer_contradictions(
-    overrides: dict[str, object],
+    overrides: dict[str, Any],
 ) -> None:
     payload = _default_model_inference_payload()
     payload.update(overrides)
@@ -281,7 +281,7 @@ def test_inference_runtime_record_rejects_default_model_observer_contradictions(
     ],
 )
 def test_inference_runtime_record_rejects_default_model_runtime_device_contradictions(
-    overrides: dict[str, object],
+    overrides: dict[str, Any],
 ) -> None:
     payload = _default_model_inference_payload()
     payload.update(overrides)
@@ -303,7 +303,7 @@ def test_inference_runtime_record_rejects_default_model_runtime_device_contradic
     ],
 )
 def test_inference_runtime_record_rejects_external_observer_contradictions(
-    overrides: dict[str, object],
+    overrides: dict[str, Any],
 ) -> None:
     payload = _external_observer_inference_payload()
     payload.update(overrides)
@@ -348,8 +348,7 @@ def test_run_manifest_direct_validation_rejects_missing_inference() -> None:
         )
 
 
-def test_read_run_manifest_artifact_json_marks_legacy_manifest_compatibility_source(
-) -> None:
+def test_legacy_manifest_json_gets_compatibility_inference() -> None:
     manifest = read_run_manifest_artifact_json(
         """
         {

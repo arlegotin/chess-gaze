@@ -184,9 +184,7 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
 
 
 def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
-    run_manifest = _read_run_manifest(
-        run_layout.run_dir / "run_manifest.json"
-    )
+    run_manifest = _read_run_manifest(run_layout.run_dir / "run_manifest.json")
     _read_json_model(run_layout.run_dir / "calibration.json", CalibrationRecord)
     video_manifest = _read_json_model(
         run_layout.run_dir / "video_manifest.json", VideoManifest

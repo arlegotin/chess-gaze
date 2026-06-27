@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ConfigDict, model_validator
 
@@ -234,13 +233,11 @@ class InferenceRuntimeRecord(StrictSchemaModel):
                 )
             if self.mps_fallback_env != "not_applicable":
                 issues.append(
-                    f"{self.observer_source} must use "
-                    "mps_fallback_env=not_applicable"
+                    f"{self.observer_source} must use mps_fallback_env=not_applicable"
                 )
             if self.mps_fast_math_env != "not_applicable":
                 issues.append(
-                    f"{self.observer_source} must use "
-                    "mps_fast_math_env=not_applicable"
+                    f"{self.observer_source} must use mps_fast_math_env=not_applicable"
                 )
             if self.mps_prefer_metal_env != "not_applicable":
                 issues.append(
@@ -264,9 +261,7 @@ class InferenceRuntimeRecord(StrictSchemaModel):
             if self.unigaze_batch_size is None:
                 issues.append("default_model_observer requires unigaze_batch_size")
             elif self.unigaze_batch_size <= 0:
-                issues.append(
-                    "default_model_observer requires unigaze_batch_size >= 1"
-                )
+                issues.append("default_model_observer requires unigaze_batch_size >= 1")
             if self.torch_version is None or not self.torch_version.strip():
                 issues.append("default_model_observer requires torch_version")
             if self.torch_mps_available is None:
