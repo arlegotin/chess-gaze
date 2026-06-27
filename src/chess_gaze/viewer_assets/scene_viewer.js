@@ -6,6 +6,13 @@ const MODE_NAMES = {
   accumulated: "Accumulated",
 };
 
+const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8;
+const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 5;
+const HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12;
+const HIT_AREA_SEGMENTS = 72;
+const HIT_AREA_PLANE_OFFSET_M = 0.001;
+const HIT_AREA_VECTOR_EPSILON = 1e-8;
+
 const COLORS = {
   background: 0xf3f6fa,
   grid: 0xc8d2df,
@@ -15,6 +22,7 @@ const COLORS = {
   unigazeRay: 0x006d6f,
   currentHit: 0x4c1d95,
   accumulatedHit: 0xb7791f,
+  hitArea: 0xc43d7a,
   monitorPlane: 0xd8dde5,
   monitorRectangle: 0x7c8795,
   warning: 0xb5532f,
@@ -29,6 +37,10 @@ const elements = {
   frameStatus: document.querySelector('[data-testid="frame-status"]'),
   frameIdentity: document.querySelector('[data-testid="frame-identity"]'),
   hitCount: document.querySelector('[data-testid="hit-count"]'),
+  hitAreaErrorDegrees: document.querySelector(
+    '[data-testid="hit-area-error-degrees"]',
+  ),
+  hitAreaErrorLabel: document.querySelector('[data-testid="hit-area-error-label"]'),
   rayStatus: document.querySelector('[data-testid="ray-status"]'),
   hitStatus: document.querySelector('[data-testid="hit-status"]'),
   accumulatedStatus: document.querySelector('[data-testid="accumulated-status"]'),
@@ -48,6 +60,7 @@ const elements = {
     extendedPlane: document.querySelector('[data-testid="toggle-extended-plane"]'),
     axes: document.querySelector('[data-testid="toggle-axes"]'),
     hitPoints: document.querySelector('[data-testid="toggle-hit-points"]'),
+    hitArea: document.querySelector('[data-testid="toggle-hit-area"]'),
   },
 };
 
@@ -117,14 +130,23 @@ const materials = {
     transparent: true,
     opacity: 0.38,
     side: THREE.DoubleSide,
+    depthWrite: false,
   }),
   extendedPlane: new THREE.MeshBasicMaterial({
     color: COLORS.monitorPlane,
     transparent: true,
     opacity: 0.18,
     side: THREE.DoubleSide,
+    depthWrite: false,
   }),
   monitorRectangle: new THREE.LineBasicMaterial({ color: COLORS.monitorRectangle }),
+  hitArea: new THREE.MeshBasicMaterial({
+    color: COLORS.hitArea,
+    transparent: true,
+    opacity: 0.24,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  }),
 };
 
 function setStatus(message, isError = false) {
@@ -142,6 +164,7 @@ function setControlState(disabled) {
     elements.playPause,
     elements.stepPrev,
     elements.stepNext,
+    elements.hitAreaErrorDegrees,
     ...Object.values(elements.toggles),
   ];
   for (const control of controlsToToggle) {
@@ -154,6 +177,97 @@ function vector(record) {
     return null;
   }
   return new THREE.Vector3(record.x, record.y, record.z);
+}
+
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function finiteVector(record) {
+  const candidate = vector(record);
+  if (
+    !candidate ||
+    !Number.isFinite(candidate.x) ||
+    !Number.isFinite(candidate.y) ||
+    !Number.isFinite(candidate.z)
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
+function normalizedVector(record) {
+  const candidate = finiteVector(record);
+  if (!candidate || candidate.lengthSq() <= HIT_AREA_VECTOR_EPSILON ** 2) {
+    return null;
+  }
+  return candidate.normalize();
+}
+
+function sceneBasisVectors() {
+  const basis = state.sceneData?.axis_basis;
+  const right = normalizedVector(basis?.right_camera);
+  const up = normalizedVector(basis?.up_camera);
+  const back = normalizedVector(basis?.back_camera);
+  if (!right || !up || !back) {
+    return null;
+  }
+  return { right, up, back };
+}
+
+function cameraDirectionToScene(cameraDirection) {
+  const basis = sceneBasisVectors();
+  if (!basis || !cameraDirection) {
+    return null;
+  }
+  const sceneDirection = new THREE.Vector3(
+    cameraDirection.dot(basis.right),
+    cameraDirection.dot(basis.up),
+    cameraDirection.dot(basis.back),
+  );
+  if (sceneDirection.lengthSq() <= HIT_AREA_VECTOR_EPSILON ** 2) {
+    return null;
+  }
+  return sceneDirection.normalize();
+}
+
+function monitorNormalScene() {
+  return (
+    cameraDirectionToScene(normalizedVector(state.sceneData?.monitor_plane?.normal_camera)) ||
+    new THREE.Vector3(0, 0, 1)
+  );
+}
+
+function monitorRightScene() {
+  return (
+    cameraDirectionToScene(normalizedVector(state.sceneData?.monitor_plane?.right_camera)) ||
+    new THREE.Vector3(1, 0, 0)
+  );
+}
+
+function rayDirectionScene(frame) {
+  return (
+    normalizedVector(frame?.unigaze_ray?.direction_scene) ||
+    cameraDirectionToScene(normalizedVector(frame?.unigaze_ray?.direction_camera))
+  );
+}
+
+function angularErrorDegrees() {
+  const rawValue = Number(elements.hitAreaErrorDegrees.value);
+  const value = Number.isFinite(rawValue)
+    ? rawValue
+    : DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES;
+  return Math.min(
+    HIT_AREA_MAX_ANGULAR_ERROR_DEGREES,
+    Math.max(HIT_AREA_MIN_ANGULAR_ERROR_DEGREES, value),
+  );
+}
+
+function updateHitAreaErrorLabel() {
+  const degrees = angularErrorDegrees();
+  elements.hitAreaErrorDegrees.value = String(degrees);
+  const labelValue = Number.isInteger(degrees) ? String(degrees) : degrees.toFixed(1);
+  elements.hitAreaErrorLabel.textContent = `${labelValue} deg`;
 }
 
 function scaledRayEnd(origin, direction, length) {
@@ -181,6 +295,99 @@ function addSphere(group, position, radius, material) {
   sphere.position.copy(position);
   group.add(sphere);
   return sphere;
+}
+
+function addHitArea(group, geometry) {
+  const mesh = new THREE.Mesh(geometry, materials.hitArea);
+  group.add(mesh);
+  return mesh;
+}
+
+function axisInMonitorPlane(preferredAxis, normal) {
+  const axis = preferredAxis
+    .clone()
+    .sub(normal.clone().multiplyScalar(preferredAxis.dot(normal)));
+  if (axis.lengthSq() > HIT_AREA_VECTOR_EPSILON ** 2) {
+    return axis.normalize();
+  }
+  const fallback = Math.abs(normal.z) < 0.9
+    ? new THREE.Vector3(0, 0, 1)
+    : new THREE.Vector3(1, 0, 0);
+  return fallback
+    .sub(normal.clone().multiplyScalar(fallback.dot(normal)))
+    .normalize();
+}
+
+function hitAreaGeometry(frame, angularErrorDegreesValue) {
+  const hit = frame?.main_monitor_hit;
+  if (!hit?.valid || !hit.point_scene_m) {
+    return null;
+  }
+
+  const center = finiteVector(hit.point_scene_m);
+  const rayT = hit.ray_t_m ?? hit.t;
+  const direction = rayDirectionScene(frame);
+  const normal = monitorNormalScene();
+  if (!center || !finiteNumber(rayT) || rayT < 0 || !direction || !normal) {
+    return null;
+  }
+
+  const normalDirectionDot = Math.abs(normal.dot(direction));
+  if (
+    !Number.isFinite(normalDirectionDot) ||
+    normalDirectionDot <= HIT_AREA_VECTOR_EPSILON
+  ) {
+    return null;
+  }
+
+  const alphaRadians = (angularErrorDegreesValue * Math.PI) / 180;
+  const minorRadius = rayT * Math.tan(alphaRadians);
+  const majorRadius = minorRadius / normalDirectionDot;
+  if (
+    !Number.isFinite(minorRadius) ||
+    !Number.isFinite(majorRadius) ||
+    minorRadius <= 0 ||
+    majorRadius <= 0
+  ) {
+    return null;
+  }
+
+  const majorAxis = axisInMonitorPlane(
+    direction.clone().sub(normal.clone().multiplyScalar(direction.dot(normal))),
+    normal,
+  );
+  const rightAxis = axisInMonitorPlane(monitorRightScene(), normal);
+  const orientedMajorAxis =
+    majorAxis.lengthSq() > HIT_AREA_VECTOR_EPSILON ** 2 ? majorAxis : rightAxis;
+  const minorAxis = new THREE.Vector3()
+    .crossVectors(normal, orientedMajorAxis)
+    .normalize();
+  const patchCenter = center.add(normal.clone().multiplyScalar(HIT_AREA_PLANE_OFFSET_M));
+  const vertices = [patchCenter.x, patchCenter.y, patchCenter.z];
+  const indices = [];
+
+  for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
+    const theta = (index / HIT_AREA_SEGMENTS) * Math.PI * 2;
+    const point = patchCenter
+      .clone()
+      .add(
+        orientedMajorAxis
+          .clone()
+          .multiplyScalar(Math.cos(theta) * majorRadius),
+      )
+      .add(minorAxis.clone().multiplyScalar(Math.sin(theta) * minorRadius));
+    vertices.push(point.x, point.y, point.z);
+    indices.push(0, index + 1, ((index + 1) % HIT_AREA_SEGMENTS) + 1);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(vertices, 3),
+  );
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function addMonitorPlane(width, height, opacityMaterial, center, visible) {
@@ -314,8 +521,20 @@ function renderCurrentFrame() {
     }
   }
 
+  renderCurrentHitArea(frame);
+
   if (elements.toggles.hitPoints.checked && hit?.valid && hit.point_scene_m) {
     addSphere(groups.current, vector(hit.point_scene_m), 0.014, materials.currentHit);
+  }
+}
+
+function renderCurrentHitArea(frame) {
+  if (!elements.toggles.hitArea.checked) {
+    return;
+  }
+  const geometry = hitAreaGeometry(frame, angularErrorDegrees());
+  if (geometry) {
+    addHitArea(groups.current, geometry);
   }
 }
 
@@ -438,6 +657,10 @@ function bindControls() {
   elements.modeAccumulated.addEventListener("change", () => {
     setMode("accumulated");
   });
+  elements.hitAreaErrorDegrees.addEventListener("input", () => {
+    updateHitAreaErrorLabel();
+    renderCurrentFrame();
+  });
   for (const toggle of Object.values(elements.toggles)) {
     toggle.addEventListener("change", () => {
       applyStaticVisibility();
@@ -456,6 +679,7 @@ function applySceneData(sceneData) {
   elements.hitCount.textContent = String(sceneData.valid_hit_points?.length || 0);
   setControlState(frames.length === 0);
   buildStaticScene();
+  updateHitAreaErrorLabel();
   setFrameIndex(0);
 }
 

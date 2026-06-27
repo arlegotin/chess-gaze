@@ -106,6 +106,20 @@
           <label><input data-testid="toggle-extended-plane" type="checkbox" checked> Extended Plane</label>
           <label><input data-testid="toggle-axes" type="checkbox" checked> Axes</label>
           <label><input data-testid="toggle-hit-points" type="checkbox" checked> Hit Points</label>
+          <label><input data-testid="toggle-hit-area" type="checkbox" checked> Hit Area</label>
+          <div class="hit-area-error-row">
+            <label for="hit-area-error-degrees">Angular Error</label>
+            <input
+              id="hit-area-error-degrees"
+              data-testid="hit-area-error-degrees"
+              type="range"
+              min="5"
+              max="12"
+              value="8"
+              step="0.5"
+            >
+            <output data-testid="hit-area-error-label" for="hit-area-error-degrees">8 deg</output>
+          </div>
         </fieldset>
 
         <section
