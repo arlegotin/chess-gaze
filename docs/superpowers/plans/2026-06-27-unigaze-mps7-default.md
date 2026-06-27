@@ -16,7 +16,9 @@
 - Canonical no-override defaults are `unigaze_device="mps"` and `unigaze_batch_size=7`.
 - CLI parser defaults for `--unigaze-device` and `--unigaze-batch-size` remain `None`; the resolved config owns defaults.
 - Explicit CPU/1 compatibility must remain available through config files and CLI overrides.
-- Default model-backed MPS runs must fail before run directory creation when MPS is unavailable or unsafe MPS env vars are enabled.
+- Default model-backed MPS runs must fail before run directory creation when
+  MPS is unavailable or when `PYTORCH_ENABLE_MPS_FALLBACK`,
+  `PYTORCH_MPS_FAST_MATH`, or `PYTORCH_MPS_PREFER_METAL` is enabled.
 - External-observer manifests continue to record `external_observer` and `not_applicable` UniGaze fields.
 - Do not change model checkpoint, inference math, frame batching semantics, benchmark candidate grid, benchmark CPU/1 baseline semantics, or equivalence tolerances.
 
@@ -45,7 +47,7 @@
 - Consumes: `AnalysisConfig`, `load_config(None)`, `apply_analysis_overrides()`, `AnalyzeRequest`, `prepare_unigaze_runtime()`.
 - Produces: no-override resolved runtime `("mps", 7)`; explicit CPU/1 override remains valid.
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 Update `tests/chess_gaze/test_configuration.py` so the runtime default test expects MPS/7 and add explicit CPU/1 override preservation:
 
@@ -72,7 +74,7 @@ def test_load_config_accepts_explicit_cpu_batch_one_runtime(
     assert config.unigaze_batch_size == 1
 ```
 
-- [ ] **Step 2: Run configuration tests and verify RED**
+- [x] **Step 2: Run configuration tests and verify RED**
 
 Run:
 
@@ -83,7 +85,7 @@ uv run pytest tests/chess_gaze/test_configuration.py -q
 Expected before production change: failure showing `config.unigaze_device` is
 still `"cpu"` and/or `config.unigaze_batch_size` is still `1`.
 
-- [ ] **Step 3: Write failing pipeline default tests**
+- [x] **Step 3: Write failing pipeline default tests**
 
 In `tests/chess_gaze/test_pipeline_contract.py`:
 
@@ -125,7 +127,7 @@ def fake_prepare_unigaze_runtime(
     )
 ```
 
-- [ ] **Step 4: Run pipeline default tests and verify RED**
+- [x] **Step 4: Run pipeline default tests and verify RED**
 
 Run:
 
@@ -141,7 +143,7 @@ uv run pytest \
 Expected before production change: at least the default MPS failure tests fail
 because the default runtime is still CPU/1.
 
-- [ ] **Step 5: Change canonical defaults**
+- [x] **Step 5: Change canonical defaults**
 
 In `src/chess_gaze/configuration.py`, change only these fields:
 
@@ -152,7 +154,7 @@ unigaze_batch_size: int = 7
 
 Do not change CLI parser defaults or pipeline override precedence.
 
-- [ ] **Step 6: Update current docs**
+- [x] **Step 6: Update current docs**
 
 In `README.md`, replace the old default paragraph with:
 
@@ -184,7 +186,7 @@ In `docs/superpowers/closeouts/2026-06-26-unigaze-mps-batching.md`, add a short
 note after the summary that the CPU/1 default statement was superseded on
 2026-06-27 by the approved MPS/7 default spec.
 
-- [ ] **Step 7: Verify GREEN**
+- [x] **Step 7: Verify GREEN**
 
 Run:
 
@@ -194,7 +196,7 @@ uv run pytest tests/chess_gaze/test_configuration.py tests/chess_gaze/test_pipel
 
 Expected: all selected tests pass.
 
-- [ ] **Step 8: Run broader gates**
+- [x] **Step 8: Run broader gates**
 
 Run:
 

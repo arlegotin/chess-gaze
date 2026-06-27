@@ -6,10 +6,16 @@ Date: 2026-06-27
 
 UniGaze inference now supports explicit `unigaze_device="mps"` and
 `unigaze_batch_size > 1` without changing the frame-level evidence semantics.
-The compatibility default remains CPU batch size 1. Batching is limited to the
-UniGaze tensor inference boundary; decoded frames, raw/processed frame writes,
-frame records, scene records, QA, and viewer artifacts remain one-to-one with
-decoder frame order.
+At the time of this historical closeout, the compatibility default remained CPU
+batch size 1. Batching is limited to the UniGaze tensor inference boundary;
+decoded frames, raw/processed frame writes, frame records, scene records, QA,
+and viewer artifacts remain one-to-one with decoder frame order.
+
+Supersession note, 2026-06-27: the CPU/1 default statements in this historical
+closeout were superseded by
+`docs/superpowers/specs/2026-06-27-unigaze-mps7-default-design.md`. The current
+no-override default is MPS batch size 7; CPU/1 remains an explicit compatibility
+profile and benchmark baseline.
 
 The corrected full Nakamura benchmark selected `mps` batch size `7` on the
 Apple M3 Max: `667.389 s` wall time for 1973 frames (`2.956 fps`), versus the
@@ -32,7 +38,8 @@ directory containing `run_manifest.json` and `records/`.
 ## Implementation
 
 - Added strict config and CLI overrides for `unigaze_device` and
-  `unigaze_batch_size`; defaults remain `cpu` and `1`.
+  `unigaze_batch_size`; at implementation time, defaults remained `cpu` and
+  `1`. This default was later superseded by the 2026-06-27 MPS/7 default spec.
 - Added `unigaze_runtime.py` for MPS availability/env validation, checkpoint
   construction, requested-batch dummy preflight, synchronization, and persisted
   inference metadata.
@@ -116,8 +123,10 @@ env -u PYTORCH_ENABLE_MPS_FALLBACK \
   --unigaze-batch-size 7
 ```
 
-The default CLI behavior remains CPU/1; MPS is intentionally opt-in because CPU
-and MPS floating-point outputs are not bitwise identical.
+At the time of this historical closeout, default CLI behavior remained CPU/1 and
+MPS was intentionally opt-in because CPU and MPS floating-point outputs are not
+bitwise identical. This default was later superseded by the 2026-06-27 MPS/7
+default spec.
 
 ## Equivalence Evidence
 

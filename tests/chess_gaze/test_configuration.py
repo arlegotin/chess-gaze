@@ -20,6 +20,21 @@ def test_load_config_uses_task_4_defaults(tmp_path: Path) -> None:
 def test_load_config_uses_unigaze_runtime_defaults() -> None:
     config = load_config(None)
 
+    assert config.unigaze_device == "mps"
+    assert config.unigaze_batch_size == 7
+
+
+def test_load_config_accepts_explicit_cpu_batch_one_runtime(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_device": "cpu", "unigaze_batch_size": 1}',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
     assert config.unigaze_device == "cpu"
     assert config.unigaze_batch_size == 1
 

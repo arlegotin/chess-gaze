@@ -26,8 +26,9 @@ Max development target.
 - Bare CLI analysis must inherit MPS batch 7 through config resolution.
 - CLI and config overrides must continue to support explicit CPU/1 runs.
 - Default model-backed runs must still preflight MPS before run directory
-  creation and fail with `USAGE` if MPS is unavailable or unsafe MPS env knobs
-  are enabled.
+  creation and fail with `USAGE` if MPS is unavailable or if
+  `PYTORCH_ENABLE_MPS_FALLBACK`, `PYTORCH_MPS_FAST_MATH`, or
+  `PYTORCH_MPS_PREFER_METAL` is enabled.
 - External-observer runs must keep `external_observer` inference metadata with
   `not_applicable` UniGaze fields, even when the resolved config default is
   MPS/7.

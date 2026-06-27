@@ -4,7 +4,13 @@
 
 **Goal:** Make UniGaze inference work on Apple Silicon MPS with `unigaze_batch_size > 1`, benchmark the approved CPU/MPS grid on `artifacts/input/nakamura_1.mp4`, and preserve all existing per-frame calculations and artifact contracts.
 
-**Architecture:** Keep the current frame evidence model intact and add batching only at the UniGaze tensor-inference boundary. Add strict runtime config, explicit MPS preflight before run creation, batch-aware observer and pipeline surfaces, a first-class run-equivalence harness, and a benchmark module that selects the fastest passing MPS batch size. Default behavior remains `unigaze_device="cpu"` and `unigaze_batch_size=1`.
+**Architecture:** Keep the current frame evidence model intact and add batching only at the UniGaze tensor-inference boundary. Add strict runtime config, explicit MPS preflight before run creation, batch-aware observer and pipeline surfaces, a first-class run-equivalence harness, and a benchmark module that selects the fastest passing MPS batch size. The original historical plan kept default behavior as `unigaze_device="cpu"` and `unigaze_batch_size=1`.
+
+> Supersession note, 2026-06-27: the default-runtime decision in this historical
+> plan was superseded by
+> `docs/superpowers/specs/2026-06-27-unigaze-mps7-default-design.md`. The
+> current no-override default is MPS batch size 7; CPU/1 remains an explicit
+> compatibility and benchmark-baseline profile.
 
 **Tech Stack:** Python 3.12, uv, pytest, Ruff, mypy, PyTorch 2.12.1 MPS, UniGaze 0.1.3, MediaPipe Face Landmarker IMAGE mode, NumPy, Pydantic v2, existing PyAV/OpenCV/Pillow pipeline.
 
@@ -14,7 +20,8 @@
 - Use installed Superpowers skills for implementation flow; this plan is written for subagent-driven development.
 - Approved spec: `docs/superpowers/specs/2026-06-26-unigaze-mps-batching-design.md`.
 - Capture the cold current `cpu/1` Nakamura baseline before the first implementation edit.
-- Defaults stay `unigaze_device="cpu"` and `unigaze_batch_size=1`.
+- Historical default constraint, superseded on 2026-06-27: defaults stayed
+  `unigaze_device="cpu"` and `unigaze_batch_size=1`.
 - Optimized MPS behavior must be explicit through config or CLI.
 - Do not change the selected model checkpoint, model family, crop geometry, resize interpolation, channel order, normalization, yaw sign convention, scene-ray convention, or recommendation logic.
 - Do not introduce temporal MediaPipe tracking, frame reuse, prefetch downloads, remote model loading, mixed precision, `torch.compile`, MPS fast math, or CPU fallback as part of the accepted path.

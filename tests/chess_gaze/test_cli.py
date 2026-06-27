@@ -97,8 +97,10 @@ def test_analyze_prints_run_dir_and_viewer_path(
     run_dir = tmp_path / "runs" / "run-1"
     viewer_index_path = run_dir / "viewer" / "index.html"
     make_tiny_video(video_path)
+    captured_requests: list[AnalyzeRequest] = []
 
     def fake_analyze_video(request: AnalyzeRequest) -> object:
+        captured_requests.append(request)
         return SimpleNamespace(
             layout=SimpleNamespace(run_dir=run_dir),
             viewer_index_path=viewer_index_path,
@@ -114,6 +116,9 @@ def test_analyze_prints_run_dir_and_viewer_path(
         str(run_dir),
         f"viewer: {viewer_index_path}",
     ]
+    [request] = captured_requests
+    assert request.unigaze_device is None
+    assert request.unigaze_batch_size is None
 
 
 def test_analyze_passes_unigaze_cli_overrides(

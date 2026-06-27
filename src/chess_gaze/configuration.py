@@ -21,8 +21,8 @@ class AnalysisConfig(BaseModel):
     raw_frame_image_format: str = "png"
     processed_frame_image_format: str = "jpg"
     processed_frame_jpeg_quality: int = 95
-    unigaze_device: Literal["cpu", "mps"] = "cpu"
-    unigaze_batch_size: int = 1
+    unigaze_device: Literal["cpu", "mps"] = "mps"
+    unigaze_batch_size: int = 7
 
     @field_validator("unigaze_batch_size")
     @classmethod

@@ -104,7 +104,11 @@ def _validate_mps_request(torch_mps_available: bool) -> None:
             "UniGaze device=mps requested, but MPS is unavailable"
         )
 
-    for env_name in ("PYTORCH_ENABLE_MPS_FALLBACK", "PYTORCH_MPS_FAST_MATH"):
+    for env_name in (
+        "PYTORCH_ENABLE_MPS_FALLBACK",
+        "PYTORCH_MPS_FAST_MATH",
+        "PYTORCH_MPS_PREFER_METAL",
+    ):
         if _env_enabled(env_name):
             raise UniGazeRuntimeError(
                 f"UniGaze device=mps rejects enabled {env_name}={_env_state(env_name)}"

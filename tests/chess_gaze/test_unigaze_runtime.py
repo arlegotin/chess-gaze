@@ -136,3 +136,53 @@ def test_prepare_unigaze_runtime_mps_preflights_requested_batch_and_syncs(
     assert prepared.inference.mps_fallback_env == "unset"
     assert prepared.inference.mps_fast_math_env == "unset"
     assert prepared.inference.mps_preflight_passed is True
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "PYTORCH_ENABLE_MPS_FALLBACK",
+        "PYTORCH_MPS_FAST_MATH",
+        "PYTORCH_MPS_PREFER_METAL",
+    ],
+)
+def test_prepare_unigaze_runtime_mps_rejects_unsafe_env_before_model_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env_name: str
+) -> None:
+    from chess_gaze import unigaze_runtime
+    from chess_gaze.unigaze_runtime import UniGazeRuntimeError
+
+    loaded_devices: list[str] = []
+
+    def fail_if_model_loads(
+        asset: ResolvedModelAsset, *, device: str
+    ) -> RecordingUniGazeModel:
+        del asset
+        loaded_devices.append(device)
+        raise AssertionError("unsafe MPS env must fail before model load")
+
+    monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
+    monkeypatch.delenv("PYTORCH_MPS_FAST_MATH", raising=False)
+    monkeypatch.delenv("PYTORCH_MPS_PREFER_METAL", raising=False)
+    monkeypatch.setenv(env_name, "1")
+    runtime_module = cast(Any, unigaze_runtime)
+    monkeypatch.setattr(
+        runtime_module.torch.backends,
+        "mps",
+        SimpleNamespace(is_available=lambda: True),
+    )
+    monkeypatch.setattr(
+        runtime_module.UniGazeModel,
+        "from_local_asset",
+        staticmethod(fail_if_model_loads),
+    )
+
+    with pytest.raises(UniGazeRuntimeError, match=env_name):
+        prepare_unigaze_runtime(
+            _asset(tmp_path),
+            device="mps",
+            batch_size=7,
+            input_size_px=96,
+        )
+
+    assert loaded_devices == []

@@ -10,6 +10,11 @@ Approved by the user on 2026-06-26. The executable implementation plan is
 This spec depends on the active frame-level pipeline design:
 `docs/superpowers/specs/2026-06-24-frame-gaze-analysis-pipeline-design.md`.
 
+Supersession note, 2026-06-27: the default-runtime decision in this spec was
+superseded by `2026-06-27-unigaze-mps7-default-design.md`. The current
+no-override default is MPS batch size 7. CPU/1 remains the explicit
+compatibility and benchmark-baseline profile.
+
 ## Goal
 
 Make the existing UniGaze inference path run correctly on Apple Silicon MPS and
@@ -82,8 +87,9 @@ MPS plus `batch_size > 1` for the existing UniGaze pipeline.
 
 Use a batch-aware analysis path that batches only UniGaze tensor inference.
 
-The default compatibility behavior remains `unigaze_device="cpu"` and
-`unigaze_batch_size=1`. The optimized behavior is explicit:
+Historical decision, superseded on 2026-06-27: the default compatibility
+behavior remained `unigaze_device="cpu"` and `unigaze_batch_size=1`, and the
+optimized behavior was explicit:
 
 ```sh
 uv run chess-gaze analyze artifacts/input/nakamura_1.mp4 \
