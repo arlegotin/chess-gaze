@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,6 +63,10 @@ class FrameRecordObserver(Protocol):
     def __call__(self, frame: ObserverFrame) -> FrameRecord: ...
 
 
+class FrameBatchRecordObserver(Protocol):
+    def __call__(self, frames: Sequence[ObserverFrame]) -> Sequence[FrameRecord]: ...
+
+
 Clock = Callable[[], datetime]
 
 
@@ -84,6 +88,7 @@ class ObserverFrame:
 @dataclass(frozen=True)
 class ObserverBundle:
     frame_observer: FrameRecordObserver
+    frame_batch_observer: FrameBatchRecordObserver | None = None
     close: Callable[[], None] | None = None
 
 
@@ -138,6 +143,13 @@ class _ResolvedRequest:
     processed_frame_jpeg_quality: int
     unigaze_device: str
     unigaze_batch_size: int
+
+
+@dataclass(frozen=True)
+class _PreparedDecodedFrame:
+    decoded_frame: DecodedFrame
+    observer_frame: ObserverFrame
+    raw_frame_errors: list[ErrorRecord]
 
 
 def _external_observer_inference_record() -> InferenceRuntimeRecord:
@@ -245,17 +257,33 @@ def analyze_video(
             frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
             errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
         ):
+            pending_batch: list[DecodedFrame] = []
             for decoded_frame in iter_decoded_frames(resolved.video_path):
                 decoded_frame_count += 1
-                record, frame_errors = _process_frame(
-                    decoded_frame,
+                pending_batch.append(decoded_frame)
+                if len(pending_batch) < resolved.unigaze_batch_size:
+                    continue
+                for record, frame_errors in _process_frame_batch(
+                    pending_batch,
                     observers,
                     resolved,
                     layout,
                     errors_handle=errors_handle,
-                )
-                frame_error_count += len(frame_errors)
-                frames_handle.write(record.model_dump_json() + "\n")
+                ):
+                    frame_error_count += len(frame_errors)
+                    frames_handle.write(record.model_dump_json() + "\n")
+                pending_batch = []
+
+            if pending_batch:
+                for record, frame_errors in _process_frame_batch(
+                    pending_batch,
+                    observers,
+                    resolved,
+                    layout,
+                    errors_handle=errors_handle,
+                ):
+                    frame_error_count += len(frame_errors)
+                    frames_handle.write(record.model_dump_json() + "\n")
     finally:
         if observers.close is not None:
             observers.close()
@@ -438,10 +466,23 @@ def _process_frame(
     *,
     errors_handle: TextIO,
 ) -> tuple[FrameRecord, list[ErrorRecord]]:
+    [processed] = _process_frame_batch(
+        [decoded_frame],
+        observers,
+        resolved,
+        layout,
+        errors_handle=errors_handle,
+    )
+    return processed
+
+
+def _prepare_decoded_frame(
+    decoded_frame: DecodedFrame,
+    resolved: _ResolvedRequest,
+    layout: RunLayout,
+) -> _PreparedDecodedFrame:
     frame_errors: list[ErrorRecord] = []
     raw_path = layout.raw_frames_dir / f"{decoded_frame.frame_id}.png"
-    processed_path = layout.processed_frames_dir / f"{decoded_frame.frame_id}.jpg"
-
     try:
         _validate_image_format(resolved.raw_frame_image_format, "png")
         raw_frame_writer(raw_path, decoded_frame.rgb)
@@ -452,7 +493,6 @@ def _process_frame(
                 message=f"Raw frame write failed: {exc}",
             )
         )
-
     observer_frame = ObserverFrame(
         frame_id=decoded_frame.frame_id,
         frame_index=decoded_frame.frame_index,
@@ -462,10 +502,21 @@ def _process_frame(
         pts_seconds=decoded_frame.pts_seconds,
         duration_seconds=decoded_frame.duration_seconds,
     )
-    record = observers.frame_observer(observer_frame)
-    _validate_observer_record_identity(record, decoded_frame)
-    record = _record_with_errors(record, frame_errors)
+    return _PreparedDecodedFrame(
+        decoded_frame=decoded_frame,
+        observer_frame=observer_frame,
+        raw_frame_errors=frame_errors,
+    )
 
+
+def _render_processed_frame_and_collect_errors(
+    decoded_frame: DecodedFrame,
+    record: FrameRecord,
+    resolved: _ResolvedRequest,
+    layout: RunLayout,
+) -> tuple[FrameRecord, list[ErrorRecord]]:
+    frame_errors: list[ErrorRecord] = []
+    processed_path = layout.processed_frames_dir / f"{decoded_frame.frame_id}.jpg"
     try:
         _validate_image_format(resolved.processed_frame_image_format, "jpg")
         render_processed_frame(
@@ -482,9 +533,52 @@ def _process_frame(
             )
         )
         record = _record_with_errors(record, frame_errors)
-
-    frame_error_writer(errors_handle, record)
     return record, frame_errors
+
+
+def _process_frame_batch(
+    decoded_frames: Sequence[DecodedFrame],
+    observers: ObserverBundle,
+    resolved: _ResolvedRequest,
+    layout: RunLayout,
+    *,
+    errors_handle: TextIO,
+) -> list[tuple[FrameRecord, list[ErrorRecord]]]:
+    prepared = [
+        _prepare_decoded_frame(decoded_frame, resolved, layout)
+        for decoded_frame in decoded_frames
+    ]
+    if observers.frame_batch_observer is None:
+        records = [observers.frame_observer(item.observer_frame) for item in prepared]
+    else:
+        records = list(
+            observers.frame_batch_observer(
+                [item.observer_frame for item in prepared]
+            )
+        )
+    if len(records) != len(prepared):
+        raise PipelineError(
+            CliErrorCode.SCHEMA_VALIDATION_FAILED,
+            (
+                "Batch observer returned a different record count: "
+                f"{len(records)} != {len(prepared)}"
+            ),
+        )
+
+    processed: list[tuple[FrameRecord, list[ErrorRecord]]] = []
+    for item, record in zip(prepared, records, strict=True):
+        _validate_observer_record_identity(record, item.decoded_frame)
+        record = _record_with_errors(record, item.raw_frame_errors)
+        record, processed_errors = _render_processed_frame_and_collect_errors(
+            item.decoded_frame,
+            record,
+            resolved,
+            layout,
+        )
+        frame_errors = item.raw_frame_errors + processed_errors
+        frame_error_writer(errors_handle, record)
+        processed.append((record, frame_errors))
+    return processed
 
 
 def _timestamp_seconds(decoded_frame: DecodedFrame) -> float:

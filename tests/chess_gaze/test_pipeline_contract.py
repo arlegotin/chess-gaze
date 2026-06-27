@@ -325,6 +325,75 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     )
 
 
+def test_analyze_video_uses_batch_observer_without_reordering_frames(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=5)
+    observed_batches: list[list[str]] = []
+
+    def fake_batch_record(frames: list[ObserverFrame]) -> list[FrameRecord]:
+        observed_batches.append([frame.frame_id for frame in frames])
+        return [_fake_record(frame) for frame in frames]
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            unigaze_batch_size=2,
+        ),
+        observers=ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=fake_batch_record,
+        ),
+    )
+
+    records = _records_from(result.frames_jsonl_path)
+    assert observed_batches == [
+        ["f000000000", "f000000001"],
+        ["f000000002", "f000000003"],
+        ["f000000004"],
+    ]
+    assert [record.frame_id for record in records] == [
+        "f000000000",
+        "f000000001",
+        "f000000002",
+        "f000000003",
+        "f000000004",
+    ]
+    assert len(list(result.layout.raw_frames_dir.glob("*.png"))) == 5
+    assert len(list(result.layout.processed_frames_dir.glob("*.jpg"))) == 5
+    assert result.decoded_frame_count == 5
+
+
+def test_batch_observer_identity_mismatch_fails_schema_validation(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    def wrong_batch_record(frames: list[ObserverFrame]) -> list[FrameRecord]:
+        records = [_fake_record(frame) for frame in frames]
+        payload = records[0].model_dump(mode="python")
+        payload["frame_index"] = 99
+        return [FrameRecord.model_validate(payload), records[1]]
+
+    with pytest.raises(PipelineError) as exc_info:
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=wrong_batch_record,
+            ),
+        )
+
+    assert exc_info.value.code is CliErrorCode.SCHEMA_VALIDATION_FAILED
+
+
 def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     tmp_path: Path,
 ) -> None:
