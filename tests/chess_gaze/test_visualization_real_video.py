@@ -11,9 +11,7 @@ from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.video_decode import iter_decoded_frames
 from chess_gaze.visualization import render_processed_frame
 
-MANDATORY_VIDEO_PATHS = (
-    Path("artifacts/input/nakamura_short.mp4"),
-)
+MANDATORY_VIDEO_PATHS = (Path("artifacts/input/nakamura_short.mp4"),)
 
 
 def _point(x: float, y: float) -> dict[str, Any]:

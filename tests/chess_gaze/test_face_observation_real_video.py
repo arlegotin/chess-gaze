@@ -183,7 +183,9 @@ def test_mediapipe_observer_keeps_nakamura_short_faces_bounded() -> None:
         for frame in sampled_frames:
             observation = observer.observe(frame.rgb, frame_id=frame.frame_id)
 
-            assert observation.selection.present, f"{frame.frame_id} should recover face"
+            assert observation.selection.present, (
+                f"{frame.frame_id} should recover face"
+            )
             assert observation.selection.primary_candidate_id is not None
             candidate = next(
                 item
