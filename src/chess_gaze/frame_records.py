@@ -246,6 +246,10 @@ class InferenceRuntimeRecord(StrictSchemaModel):
                 )
             if self.unigaze_batch_size is None:
                 issues.append("default_model_observer requires unigaze_batch_size")
+            elif self.unigaze_batch_size <= 0:
+                issues.append(
+                    "default_model_observer requires unigaze_batch_size >= 1"
+                )
             if self.torch_version is None or not self.torch_version.strip():
                 issues.append("default_model_observer requires torch_version")
             if self.torch_mps_available is None:

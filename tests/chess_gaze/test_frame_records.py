@@ -179,14 +179,14 @@ def _default_model_inference_payload() -> dict[str, object]:
     return {
         "observer_source": "default_model_observer",
         "unigaze_model_id": "unigaze-h14-joint",
-        "unigaze_device": "cpu",
-        "unigaze_batch_size": 1,
+        "unigaze_device": "mps",
+        "unigaze_batch_size": 16,
         "torch_version": "2.12.1",
-        "torch_mps_available": False,
+        "torch_mps_available": True,
         "mps_fallback_env": "unset",
         "mps_fast_math_env": "unset",
         "mps_prefer_metal_env": "unset",
-        "mps_preflight_passed": False,
+        "mps_preflight_passed": True,
     }
 
 
@@ -209,7 +209,8 @@ def test_inference_runtime_record_accepts_default_model_observer() -> None:
     record = InferenceRuntimeRecord(**_default_model_inference_payload())
 
     assert record.schema_version == "inference-runtime-v1"
-    assert record.unigaze_device == "cpu"
+    assert record.unigaze_device == "mps"
+    assert record.unigaze_batch_size == 16
 
 
 def test_inference_runtime_record_accepts_external_observer() -> None:
@@ -225,6 +226,8 @@ def test_inference_runtime_record_accepts_external_observer() -> None:
         {"unigaze_model_id": None},
         {"unigaze_device": "not_applicable"},
         {"unigaze_batch_size": None},
+        {"unigaze_batch_size": 0},
+        {"unigaze_batch_size": -1},
         {"torch_version": None},
         {"torch_mps_available": None},
         {"mps_fallback_env": "not_applicable"},
