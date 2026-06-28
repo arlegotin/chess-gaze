@@ -24,6 +24,9 @@ package instead of accidentally importing Python files from the repository root.
     preflight, synchronization, and inference metadata assembly.
   - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record
     and primitive geometry contracts.
+  - `analysis_resume.py` owns interrupted-run discovery, compatible-run
+    validation, committed frame-journal repair, checkpoint state, and cleanup of
+    uncommitted or derived artifacts before resumed analysis rebuilds them.
   - `scene_calibration.py` owns persisted adult-male, monitor, and robust
     estimator assumptions.
   - `scene_records.py` owns strict scene, viewer, and summary schemas.

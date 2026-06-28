@@ -84,11 +84,25 @@ Runs are written under:
 artifacts/output/<video-stem>/runs/<run-id>/
 ```
 
+By default, rerunning the same `chess-gaze analyze <video>` command resumes the
+newest compatible interrupted run for that video. Compatibility is checked
+against the input video path and hash, video manifest, calibration, and inference
+runtime metadata. Completed runs are never resumed; a completed rerun creates a
+new run directory.
+
+Use `--no-resume` to force a fresh run even when a compatible partial run
+exists:
+
+```sh
+uv run chess-gaze analyze artifacts/input/test_1.mp4 --no-resume
+```
+
 Each completed run contains:
 
 - `run_manifest.json`
 - `calibration.json`
 - `video_manifest.json`
+- `analysis_state.json`
 - `raw_frames/`
 - `processed_frames/`
 - `records/frames.jsonl`
