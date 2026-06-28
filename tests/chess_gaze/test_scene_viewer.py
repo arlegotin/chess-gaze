@@ -460,13 +460,16 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "applyHitAreaOpacity()" in opacity_handler_body
     assert "renderCurrentFrame()" not in opacity_handler_body
     assert "renderAccumulatedHits()" not in opacity_handler_body
-    assert "rayT * Math.tan(alphaRadians)" in js
-    assert "minorRadius / normalDirectionDot" in js
+    assert "Math.tan(alphaRadians)" in js
+    assert "const minorScale = rayT" in js
+    assert "const majorScale = rayT / normalDirectionDot" in js
+    assert "minorX: minorAxis.x * minorScale" in js
+    assert "majorX: orientedMajorAxis.x * majorScale" in js
     assert "direction.clone().sub(" in js
     assert "frame?.unigaze_ray?.valid" in js
     assert "projectedDirection" in js
     assert "renderCurrentHitArea" in js
-    assert "rebuildAccumulatedHitAreasForAngularError" in js
+    assert "updateAccumulatedHitAreasForAngularError" in js
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
     assert ".hit-area-opacity-row" in css
@@ -482,12 +485,37 @@ def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
     assert "new THREE.PointsMaterial(" in js
     assert "buildAccumulatedHitPoints" in js
     assert "buildAccumulatedHitAreaMesh" in js
+    assert "hitAreaPatchBases" in js
+    assert "hitAreaPositionAttribute" in js
+    assert "updateAccumulatedHitAreaPositions" in js
+    assert "new Float32Array(" in js
+    assert "new Uint32Array(" in js
     assert "setDrawRange(0, visibleHitAreaTriangleIndexCount" in js
     assert "hitPointFrameIndices" in js
     assert "hitAreaPatchFrameIndices" in js
     assert "upperBoundFrameIndex" in js
+    assert "computeVertexNormals()" not in js
     assert "for (const hit of state.sceneData.valid_hit_points)" not in js
     assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" not in js
+
+
+def test_generated_viewer_updates_accumulated_hit_area_without_rebuilds(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    error_handler_body = js.split(
+        'elements.hitAreaErrorDegrees.addEventListener("input", () => {', 1
+    )[1].split("  });", 1)[0]
+    update_body = js.split(
+        "function updateAccumulatedHitAreasForAngularError() {", 1
+    )[1].split("\nfunction ", 1)[0]
+
+    assert "updateAccumulatedHitAreasForAngularError()" in error_handler_body
+    assert "buildAccumulatedHitAreaMesh()" not in error_handler_body
+    assert "updateAccumulatedHitAreaPositions()" in update_body
+    assert "buildAccumulatedHitAreaMesh()" in update_body
 
 
 def test_generated_viewer_keeps_accumulated_layers_independent(

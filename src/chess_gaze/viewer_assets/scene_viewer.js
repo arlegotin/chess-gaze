@@ -13,8 +13,17 @@ const DEFAULT_HIT_AREA_OPACITY = 0.24;
 const HIT_AREA_MIN_OPACITY = 0;
 const HIT_AREA_MAX_OPACITY = 1;
 const HIT_AREA_SEGMENTS = 72;
+const HIT_AREA_VERTEX_COUNT = HIT_AREA_SEGMENTS + 1;
+const HIT_AREA_INDEX_COUNT = HIT_AREA_SEGMENTS * 3;
 const HIT_AREA_PLANE_OFFSET_M = 0.001;
 const HIT_AREA_VECTOR_EPSILON = 1e-8;
+const HIT_AREA_UNIT_CIRCLE = Array.from(
+  { length: HIT_AREA_SEGMENTS },
+  (_, index) => {
+    const theta = (index / HIT_AREA_SEGMENTS) * Math.PI * 2;
+    return { cos: Math.cos(theta), sin: Math.sin(theta) };
+  },
+);
 
 const COLORS = {
   background: 0xf3f6fa,
@@ -82,8 +91,9 @@ const state = {
     hitPointFrameIndices: [],
     hitAreas: null,
     hitAreaPatchFrameIndices: [],
-    hitAreaTriangleIndexCounts: [],
-    hitAreaAngularErrorDegrees: null,
+    hitAreaPatchBases: [],
+    hitAreaPositionAttribute: null,
+    hitAreaRadiusScale: null,
   },
   renderRequested: false,
   animationFrameRequested: false,
@@ -385,7 +395,16 @@ function fallbackAxisInMonitorPlane(normal) {
     .normalize();
 }
 
-function hitAreaPatchVertices(frame, angularErrorDegreesValue) {
+function hitAreaRadiusScale(angularErrorDegreesValue) {
+  const alphaRadians = (angularErrorDegreesValue * Math.PI) / 180;
+  const radiusScale = Math.tan(alphaRadians);
+  if (!Number.isFinite(radiusScale) || radiusScale <= 0) {
+    return null;
+  }
+  return radiusScale;
+}
+
+function hitAreaPatchBasis(frame) {
   const hit = frame?.main_monitor_hit;
   if (!hit?.valid || !frame?.unigaze_ray?.valid || !hit.point_scene_m) {
     return null;
@@ -407,15 +426,9 @@ function hitAreaPatchVertices(frame, angularErrorDegreesValue) {
     return null;
   }
 
-  const alphaRadians = (angularErrorDegreesValue * Math.PI) / 180;
-  const minorRadius = rayT * Math.tan(alphaRadians);
-  const majorRadius = minorRadius / normalDirectionDot;
-  if (
-    !Number.isFinite(minorRadius) ||
-    !Number.isFinite(majorRadius) ||
-    minorRadius <= 0 ||
-    majorRadius <= 0
-  ) {
+  const minorScale = rayT;
+  const majorScale = rayT / normalDirectionDot;
+  if (!Number.isFinite(minorScale) || !Number.isFinite(majorScale) || rayT <= 0) {
     return null;
   }
 
@@ -432,21 +445,48 @@ function hitAreaPatchVertices(frame, angularErrorDegreesValue) {
   const patchCenter = center
     .clone()
     .add(normal.clone().multiplyScalar(HIT_AREA_PLANE_OFFSET_M));
-  const vertices = [patchCenter.x, patchCenter.y, patchCenter.z];
+
+  return {
+    centerX: patchCenter.x,
+    centerY: patchCenter.y,
+    centerZ: patchCenter.z,
+    majorX: orientedMajorAxis.x * majorScale,
+    majorY: orientedMajorAxis.y * majorScale,
+    majorZ: orientedMajorAxis.z * majorScale,
+    minorX: minorAxis.x * minorScale,
+    minorY: minorAxis.y * minorScale,
+    minorZ: minorAxis.z * minorScale,
+  };
+}
+
+function writeHitAreaPatchPositions(positions, offset, basis, radiusScale) {
+  positions[offset] = basis.centerX;
+  positions[offset + 1] = basis.centerY;
+  positions[offset + 2] = basis.centerZ;
 
   for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
-    const theta = (index / HIT_AREA_SEGMENTS) * Math.PI * 2;
-    const point = patchCenter
-      .clone()
-      .add(
-        orientedMajorAxis
-          .clone()
-          .multiplyScalar(Math.cos(theta) * majorRadius),
-      )
-      .add(minorAxis.clone().multiplyScalar(Math.sin(theta) * minorRadius));
-    vertices.push(point.x, point.y, point.z);
+    const unit = HIT_AREA_UNIT_CIRCLE[index];
+    const majorScale = unit.cos * radiusScale;
+    const minorScale = unit.sin * radiusScale;
+    const writeOffset = offset + (index + 1) * 3;
+    positions[writeOffset] =
+      basis.centerX + basis.majorX * majorScale + basis.minorX * minorScale;
+    positions[writeOffset + 1] =
+      basis.centerY + basis.majorY * majorScale + basis.minorY * minorScale;
+    positions[writeOffset + 2] =
+      basis.centerZ + basis.majorZ * majorScale + basis.minorZ * minorScale;
+  }
+}
+
+function hitAreaPatchVertices(frame, angularErrorDegreesValue) {
+  const radiusScale = hitAreaRadiusScale(angularErrorDegreesValue);
+  const basis = hitAreaPatchBasis(frame);
+  if (!radiusScale || !basis) {
+    return null;
   }
 
+  const vertices = new Array(HIT_AREA_VERTEX_COUNT * 3);
+  writeHitAreaPatchPositions(vertices, 0, basis, radiusScale);
   return vertices;
 }
 
@@ -466,7 +506,6 @@ function hitAreaGeometry(frame, angularErrorDegreesValue) {
     new THREE.Float32BufferAttribute(vertices, 3),
   );
   geometry.setIndex(indices);
-  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -504,44 +543,44 @@ function buildAccumulatedHitAreaMesh() {
   removeAccumulatedObject(state.renderCache.hitAreas);
   state.renderCache.hitAreas = null;
   state.renderCache.hitAreaPatchFrameIndices = [];
-  state.renderCache.hitAreaTriangleIndexCounts = [];
-  state.renderCache.hitAreaAngularErrorDegrees = null;
+  state.renderCache.hitAreaPatchBases = [];
+  state.renderCache.hitAreaPositionAttribute = null;
+  state.renderCache.hitAreaRadiusScale = null;
 
-  const positions = [];
-  const indices = [];
+  const patchBases = [];
   const patchFrameIndices = [];
-  const triangleIndexCounts = [];
-  const angularErrorDegreesValue = angularErrorDegrees();
 
   for (const frame of state.sceneData?.frames || []) {
-    const patchVertices = hitAreaPatchVertices(frame, angularErrorDegreesValue);
-    if (!patchVertices || !Number.isInteger(frame.frame_index)) {
+    const patchBasis = hitAreaPatchBasis(frame);
+    if (!patchBasis || !Number.isInteger(frame.frame_index)) {
       continue;
     }
 
-    const vertexOffset = positions.length / 3;
-    positions.push(...patchVertices);
-    for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
-      indices.push(
-        vertexOffset,
-        vertexOffset + index + 1,
-        vertexOffset + ((index + 1) % HIT_AREA_SEGMENTS) + 1,
-      );
-    }
+    patchBases.push(patchBasis);
     patchFrameIndices.push(frame.frame_index);
-    triangleIndexCounts.push(HIT_AREA_SEGMENTS * 3);
+  }
+
+  const positions = new Float32Array(
+    patchBases.length * HIT_AREA_VERTEX_COUNT * 3,
+  );
+  const indices = new Uint32Array(patchBases.length * HIT_AREA_INDEX_COUNT);
+  for (let patchIndex = 0; patchIndex < patchBases.length; patchIndex += 1) {
+    const vertexOffset = patchIndex * HIT_AREA_VERTEX_COUNT;
+    const indexOffset = patchIndex * HIT_AREA_INDEX_COUNT;
+    for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
+      const writeOffset = indexOffset + index * 3;
+      indices[writeOffset] = vertexOffset;
+      indices[writeOffset + 1] = vertexOffset + index + 1;
+      indices[writeOffset + 2] =
+        vertexOffset + ((index + 1) % HIT_AREA_SEGMENTS) + 1;
+    }
   }
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(positions, 3),
-  );
-  geometry.setIndex(indices);
+  const positionAttribute = new THREE.BufferAttribute(positions, 3);
+  geometry.setAttribute("position", positionAttribute);
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.setDrawRange(0, 0);
-  if (indices.length > 0) {
-    geometry.computeVertexNormals();
-  }
 
   const mesh = new THREE.Mesh(geometry, materials.hitArea);
   mesh.userData.layer = "hitArea";
@@ -549,8 +588,9 @@ function buildAccumulatedHitAreaMesh() {
   groups.accumulated.add(mesh);
   state.renderCache.hitAreas = mesh;
   state.renderCache.hitAreaPatchFrameIndices = patchFrameIndices;
-  state.renderCache.hitAreaTriangleIndexCounts = triangleIndexCounts;
-  state.renderCache.hitAreaAngularErrorDegrees = angularErrorDegreesValue;
+  state.renderCache.hitAreaPatchBases = patchBases;
+  state.renderCache.hitAreaPositionAttribute = positionAttribute;
+  updateAccumulatedHitAreaPositions();
 }
 
 function visibleHitPointCount() {
@@ -561,15 +601,14 @@ function visibleHitPointCount() {
 }
 
 function visibleHitAreaTriangleIndexCount() {
+  if (!hitAreaRadiusScale(angularErrorDegrees())) {
+    return 0;
+  }
   const visiblePatchCount = upperBoundFrameIndex(
     state.renderCache.hitAreaPatchFrameIndices,
     state.frameIndex,
   );
-  let triangleIndexCount = 0;
-  for (let index = 0; index < visiblePatchCount; index += 1) {
-    triangleIndexCount += state.renderCache.hitAreaTriangleIndexCounts[index] || 0;
-  }
-  return triangleIndexCount;
+  return visiblePatchCount * HIT_AREA_INDEX_COUNT;
 }
 
 function updateAccumulatedVisibility() {
@@ -600,17 +639,41 @@ function updateAccumulatedVisibility() {
   }
 }
 
-function rebuildAccumulatedHitAreasForAngularError() {
+function updateAccumulatedHitAreaPositions() {
+  const attribute = state.renderCache.hitAreaPositionAttribute;
+  if (!attribute) {
+    return;
+  }
+  const radiusScale = hitAreaRadiusScale(angularErrorDegrees()) || 0;
+  if (state.renderCache.hitAreaRadiusScale === radiusScale) {
+    return;
+  }
+  const positions = attribute.array;
+  for (
+    let patchIndex = 0;
+    patchIndex < state.renderCache.hitAreaPatchBases.length;
+    patchIndex += 1
+  ) {
+    writeHitAreaPatchPositions(
+      positions,
+      patchIndex * HIT_AREA_VERTEX_COUNT * 3,
+      state.renderCache.hitAreaPatchBases[patchIndex],
+      radiusScale,
+    );
+  }
+  attribute.needsUpdate = true;
+  state.renderCache.hitAreaRadiusScale = radiusScale;
+}
+
+function updateAccumulatedHitAreasForAngularError() {
   if (!state.sceneData) {
     return;
   }
-  if (
-    state.renderCache.hitAreas &&
-    state.renderCache.hitAreaAngularErrorDegrees === angularErrorDegrees()
-  ) {
+  if (!state.renderCache.hitAreas) {
+    buildAccumulatedHitAreaMesh();
     return;
   }
-  buildAccumulatedHitAreaMesh();
+  updateAccumulatedHitAreaPositions();
 }
 
 function addMonitorPlane(width, height, opacityMaterial, center, visible) {
@@ -890,7 +953,7 @@ function bindControls() {
   elements.hitAreaErrorDegrees.addEventListener("input", () => {
     updateHitAreaErrorLabel();
     renderCurrentFrame();
-    rebuildAccumulatedHitAreasForAngularError();
+    updateAccumulatedHitAreasForAngularError();
     updateAccumulatedVisibility();
     requestRender();
   });
@@ -922,7 +985,7 @@ function applySceneData(sceneData) {
   updateHitAreaOpacityLabel();
   applyHitAreaOpacity();
   buildAccumulatedHitPoints();
-  rebuildAccumulatedHitAreasForAngularError();
+  updateAccumulatedHitAreasForAngularError();
   resizeRenderer();
   setFrameIndex(0);
   requestRender();
