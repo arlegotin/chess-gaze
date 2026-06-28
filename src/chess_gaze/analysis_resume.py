@@ -81,6 +81,7 @@ def prepare_resume_run(
     *,
     clock: Callable[[], datetime],
 ) -> ResumePreparation:
+    validate_resume_cleanup_paths(layout)
     committed_records = _committed_frame_records(
         layout.records_dir / "frames.jsonl",
         frame_count_decoded=video_manifest.frame_count_decoded,
@@ -104,6 +105,31 @@ def prepare_resume_run(
         next_frame_index=next_frame_index,
         analysis_state=analysis_state,
     )
+
+
+def validate_resume_cleanup_paths(layout: RunLayout) -> None:
+    _require_within_run_root(layout.run_dir, root=layout.run_dir)
+
+    for directory in (
+        layout.raw_frames_dir,
+        layout.processed_frames_dir,
+        layout.face_crops_dir,
+        layout.left_eye_crops_dir,
+        layout.right_eye_crops_dir,
+        layout.scene_dir,
+        layout.viewer_dir,
+    ):
+        _validate_directory_tree_within_run_root(directory, root=layout.run_dir)
+
+    for path in (
+        layout.records_dir,
+        layout.records_dir / "frames.jsonl",
+        layout.records_dir / "errors.jsonl",
+        layout.records_dir / "scene_frames.jsonl",
+        layout.run_dir / "qa_summary.json",
+        layout.run_dir / "analysis_state.json",
+    ):
+        _require_within_run_root(path, root=layout.run_dir)
 
 
 def write_analysis_state(layout: RunLayout, state: AnalysisState) -> Path:
@@ -247,7 +273,7 @@ def _delete_frame_indexed_files(
     next_frame_index: int,
     root: Path,
 ) -> None:
-    _require_within_run_root(directory, root=root)
+    _validate_directory_tree_within_run_root(directory, root=root)
     if not directory.exists():
         return
 
@@ -269,11 +295,10 @@ def _delete_derived_artifacts(layout: RunLayout) -> None:
         _unlink_if_file(path, root=layout.run_dir)
 
     for directory in (layout.scene_dir, layout.viewer_dir):
-        _require_within_run_root(directory, root=layout.run_dir)
+        _validate_directory_tree_within_run_root(directory, root=layout.run_dir)
         if not directory.exists():
             continue
         for path in directory.rglob("*"):
-            _require_within_run_root(path, root=layout.run_dir)
             if path.is_file():
                 _unlink_if_file(path, root=layout.run_dir)
 
@@ -295,6 +320,15 @@ def _require_within_run_root(path: Path, *, root: Path) -> None:
         resolved_path.relative_to(resolved_root)
     except ValueError as exc:
         raise ValueError(f"refusing to delete outside run root: {path}") from exc
+
+
+def _validate_directory_tree_within_run_root(directory: Path, *, root: Path) -> None:
+    _require_within_run_root(directory, root=root)
+    if not directory.exists():
+        return
+
+    for path in directory.rglob("*"):
+        _require_within_run_root(path, root=root)
 
 
 def _frame_index_from_path(path: Path) -> int | None:

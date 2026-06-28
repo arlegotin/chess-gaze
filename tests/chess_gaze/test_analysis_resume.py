@@ -192,6 +192,59 @@ def test_prepare_resume_run_refuses_nested_symlinked_derived_directories(
     assert outside_file.exists()
 
 
+def test_prepare_resume_run_does_not_mutate_before_cleanup_validation(
+    tmp_path: Path,
+) -> None:
+    layout = _make_resume_layout(tmp_path, frame_count=3)
+    first_record = _fake_frame_record(0)
+    invalid_tail = '{"frame_id":"f000000999","frame_index":999}\n'
+    original_frames_jsonl = first_record.model_dump_json() + "\n" + invalid_tail
+    original_errors_jsonl = (
+        '{"frame_id":"f000000002","frame_index":2,'
+        '"code":"FACE_NOT_FOUND","message":"stale"}\n'
+    )
+    stale_raw = layout.raw_frames_dir / "f000000002.png"
+    stale_processed = layout.processed_frames_dir / "f000000002.jpg"
+    stale_scene = layout.scene_dir / "scene_manifest.json"
+    (layout.records_dir / "frames.jsonl").write_text(
+        original_frames_jsonl,
+        encoding="utf-8",
+    )
+    (layout.records_dir / "errors.jsonl").write_text(
+        original_errors_jsonl,
+        encoding="utf-8",
+    )
+    stale_raw.write_bytes(b"raw")
+    stale_processed.write_bytes(b"processed")
+    stale_scene.write_text("stale", encoding="utf-8")
+    outside_viewer_dir = tmp_path / "outside-viewer-late"
+    outside_viewer_dir.mkdir()
+    outside_file = outside_viewer_dir / "scene-data.json"
+    outside_file.write_text('{"preserve": true}', encoding="utf-8")
+    (layout.viewer_dir / "nested").symlink_to(
+        outside_viewer_dir,
+        target_is_directory=True,
+    )
+
+    with pytest.raises(ValueError, match="outside run root"):
+        prepare_resume_run(
+            layout,
+            _video_manifest(frame_count=3),
+            clock=lambda: datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
+        )
+
+    assert (layout.records_dir / "frames.jsonl").read_text(
+        encoding="utf-8"
+    ) == original_frames_jsonl
+    assert (layout.records_dir / "errors.jsonl").read_text(
+        encoding="utf-8"
+    ) == original_errors_jsonl
+    assert stale_raw.read_bytes() == b"raw"
+    assert stale_processed.read_bytes() == b"processed"
+    assert stale_scene.read_text(encoding="utf-8") == "stale"
+    assert outside_file.exists()
+
+
 def test_prepare_resume_run_refuses_to_traverse_symlinked_run_subdirectories(
     tmp_path: Path,
 ) -> None:
