@@ -4,7 +4,7 @@
 
 **Goal:** Make generated scene viewers with large per-frame datasets smooth and responsive while preserving every frame record and every valid hit.
 
-**Architecture:** Keep the strict scene data contract intact. Change the viewer from per-frame object recreation to cached GPU-friendly collections: accumulated hit points become one `THREE.Points` object backed by `BufferGeometry`, and accumulated hit areas become one reusable indexed `BufferGeometry` whose draw range exposes a prefix of precomputed per-frame patch vertices. Keep direct `file://` compatibility for generated `index.html`, but stop embedding scene data when the viewer is served over localhost by adding a separate `standalone.html` for direct file opening.
+**Architecture:** Keep the strict scene data contract intact. Change the viewer from per-frame object recreation to cached GPU-friendly collections: accumulated hit points become one `THREE.Points` object backed by `BufferGeometry`, and accumulated hit areas become one reusable indexed `BufferGeometry` whose draw range exposes a prefix of precomputed per-frame patch vertices. Keep direct `file://` compatibility for generated `index.html` by leaving it embedded, and stop paying that duplicate parse cost over localhost by adding a lightweight `served.html` that fetches `scene-data.json`.
 
 **Tech Stack:** Python 3.12, pytest, generated static HTML/CSS/JS viewer assets, browser smoke tests, Three.js `0.185.0` from the existing ADR-0003 import map.
 
@@ -83,75 +83,76 @@ Decision:
 
 **Interfaces:**
 - Consumes: `build_scene_viewer()`, `write_viewer_scene_data()`, existing template `viewer_assets/index.html`.
-- Produces: generated `viewer/index.html`, `viewer/standalone.html`, `viewer/scene-data.json`.
+- Produces: generated embedded `viewer/index.html`, lightweight `viewer/served.html`, `viewer/scene-data.json`.
 
-- [ ] **Step 1: Write failing tests for served/standalone split**
+- [x] **Step 1: Write failing tests for served/file-compatible split**
 
 In `tests/chess_gaze/test_scene_viewer.py`, add or update tests so a built viewer must satisfy:
 
 ```python
-def test_build_scene_viewer_writes_server_and_standalone_indexes(
+def test_build_scene_viewer_writes_embedded_index_and_served_entrypoint(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
 
     assert (layout.viewer_dir / "index.html").is_file()
-    assert (layout.viewer_dir / "standalone.html").is_file()
+    assert (layout.viewer_dir / "served.html").is_file()
     assert (layout.viewer_dir / "scene-data.json").is_file()
 
 
-def test_generated_index_fetches_scene_data_without_embedding_payload(
+def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, viewer_data = built_viewer
     html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
-
-    assert 'type="module" src="./scene_viewer.js"' in html
-    assert 'id="scene-data-json"' not in html
-    assert 'id="scene-viewer-source"' not in html
-    assert "window.__CHESS_GAZE_SCENE_DATA__" not in html
-    assert viewer_data.run_id not in html
-
-
-def test_generated_standalone_embeds_file_url_bootstrap_and_scene_data(
-    built_viewer: tuple[RunLayout, ViewerSceneData],
-) -> None:
-    layout, viewer_data = built_viewer
-    html = (layout.viewer_dir / "standalone.html").read_text(encoding="utf-8")
 
     assert 'type="module" src="./scene_viewer.js"' not in html
     assert 'id="scene-data-json"' in html
     assert 'id="scene-viewer-source"' in html
     assert "window.__CHESS_GAZE_SCENE_DATA__" in html
     assert viewer_data.run_id in html
+
+
+def test_generated_served_html_fetches_scene_data_without_embedding_payload(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, viewer_data = built_viewer
+    html = (layout.viewer_dir / "served.html").read_text(encoding="utf-8")
+
+    assert 'type="module" src="./scene_viewer.js"' in html
+    assert 'id="scene-data-json"' not in html
+    assert 'id="scene-viewer-source"' not in html
+    assert "window.__CHESS_GAZE_SCENE_DATA__" not in html
+    assert viewer_data.run_id not in html
 ```
 
-Update existing import-map/external URL tests to check both `index.html` and `standalone.html` where appropriate.
+Update existing import-map/external URL tests to check both `index.html` and `served.html` where appropriate.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
 ```sh
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_build_scene_viewer_writes_server_and_standalone_indexes tests/chess_gaze/test_scene_viewer.py::test_generated_index_fetches_scene_data_without_embedding_payload tests/chess_gaze/test_scene_viewer.py::test_generated_standalone_embeds_file_url_bootstrap_and_scene_data -q
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_build_scene_viewer_writes_embedded_index_and_served_entrypoint tests/chess_gaze/test_scene_viewer.py::test_generated_index_embeds_file_url_bootstrap_and_scene_data tests/chess_gaze/test_scene_viewer.py::test_generated_served_html_fetches_scene_data_without_embedding_payload -q
 ```
 
-Expected before implementation: failures for missing `standalone.html` and embedded payload still present in `index.html`.
+Expected before implementation: failures for missing `served.html` and missing explicit served-entrypoint behavior.
 
-- [ ] **Step 3: Implement split output**
+- [x] **Step 3: Implement split output**
 
 Change `build_scene_viewer()` so it:
 
 1. copies packaged assets;
 2. writes `scene-data.json`;
-3. leaves `index.html` as the served/lightweight template with normal module script and no embedded scene data;
-4. writes `standalone.html` as the file-url-compatible embedded copy.
+3. leaves `index.html` as the file-url-compatible embedded copy;
+4. writes `served.html` as the served/lightweight template with normal module script and no embedded scene data;
+5. makes `serve_viewer()` serve `served.html` at `/` while keeping `/index.html` as the embedded file artifact.
 
-Rename `_write_file_url_compatible_index()` to `_write_file_url_compatible_standalone()` and write to `standalone.html`. Keep the existing embedded bootstrap behavior in `standalone.html`.
+Keep the existing embedded bootstrap behavior in `index.html`.
 
 Update `_file_url_bootstrap_script()` error text if needed, but do not change scene data semantics.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -161,13 +162,13 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q
 
 Expected after implementation: all viewer tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
 ```sh
 git add src/chess_gaze/scene_viewer.py src/chess_gaze/viewer_assets/index.html tests/chess_gaze/test_scene_viewer.py
-git commit -m "fix: split served and standalone viewer data loading"
+git commit -m "fix: split served and file-compatible viewer data loading"
 ```
 
 ### Task 2: Cached Accumulated Viewer Geometry
@@ -180,7 +181,7 @@ git commit -m "fix: split served and standalone viewer data loading"
 - Consumes: existing `ViewerSceneData.frames[]`, `valid_hit_points[]`, hit-area controls, hit-point toggle, hit-area toggle.
 - Produces: cached accumulated hit-point and hit-area render state with prefix visibility.
 
-- [ ] **Step 1: Write failing tests for source contract**
+- [x] **Step 1: Write failing tests for source contract**
 
 In `tests/chess_gaze/test_scene_viewer.py`, add source-contract assertions that require:
 
@@ -220,7 +221,7 @@ def test_generated_viewer_keeps_accumulated_layers_independent(
     assert "hitPoints.checked && hitArea.checked" not in visibility_body
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -230,7 +231,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test
 
 Expected before implementation: failures for missing cached geometry functions and old loop patterns.
 
-- [ ] **Step 3: Add render cache state**
+- [x] **Step 3: Add render cache state**
 
 In `scene_viewer.js`, add state fields:
 
@@ -255,7 +256,7 @@ Add shared reusable objects near helpers if needed:
 const scratchMatrix = new THREE.Matrix4();
 ```
 
-- [ ] **Step 4: Replace accumulated hit-point spheres with `THREE.Points`**
+- [x] **Step 4: Replace accumulated hit-point spheres with `THREE.Points`**
 
 Implement:
 
@@ -288,7 +289,7 @@ function buildAccumulatedHitPoints() {
 
 Use `THREE.PointsMaterial` for accumulated hit points. Keep current-frame hit point as a sphere.
 
-- [ ] **Step 5: Replace accumulated hit-area meshes with one cached geometry**
+- [x] **Step 5: Replace accumulated hit-area meshes with one cached geometry**
 
 Implement:
 
@@ -337,7 +338,7 @@ function buildAccumulatedHitAreaMesh() {
 
 Do not use `frames.slice()`. Do not create one mesh per accumulated patch.
 
-- [ ] **Step 6: Update prefix visibility only on frame changes**
+- [x] **Step 6: Update prefix visibility only on frame changes**
 
 Implement:
 
@@ -356,7 +357,7 @@ function rebuildAccumulatedHitAreasForAngularError() { ... }
 
 It must not rebuild all accumulated objects on normal slider movement.
 
-- [ ] **Step 7: Update hit-area controls and toggles**
+- [x] **Step 7: Update hit-area controls and toggles**
 
 Angular-error input should rebuild the hit-area cache once:
 
@@ -372,7 +373,7 @@ elements.hitAreaErrorDegrees.addEventListener("input", () => {
 
 Opacity input must only update material opacity and request render.
 
-- [ ] **Step 8: Verify GREEN**
+- [x] **Step 8: Verify GREEN**
 
 Run:
 
@@ -383,7 +384,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q
 
 Expected after implementation: JavaScript parses and viewer tests pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Run:
 
@@ -402,7 +403,7 @@ git commit -m "fix: cache accumulated viewer geometry"
 - Consumes: existing `setFrameIndex()`, playback controls, OrbitControls, resize behavior.
 - Produces: rendering that occurs when state changes, while playing, or while controls are damping.
 
-- [ ] **Step 1: Write failing tests for render scheduling**
+- [x] **Step 1: Write failing tests for render scheduling**
 
 Add source-contract assertions:
 
@@ -425,7 +426,7 @@ def test_generated_viewer_renders_on_demand_and_uses_prefix_counts(
     )[0]
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -435,7 +436,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test
 
 Expected before implementation: missing `requestRender()`, `ResizeObserver`, and prefix-count status behavior.
 
-- [ ] **Step 3: Add on-demand render scheduler**
+- [x] **Step 3: Add on-demand render scheduler**
 
 Replace the unconditional `animate()` loop with:
 
@@ -463,7 +464,7 @@ function renderFrame() {
 
 Every state-changing control handler must call `requestRender()` after changing scene objects.
 
-- [ ] **Step 4: Use `ResizeObserver` for canvas size**
+- [x] **Step 4: Use `ResizeObserver` for canvas size**
 
 Replace per-frame size reads with:
 
@@ -480,11 +481,11 @@ resizeObserver.observe(elements.canvas);
 
 Keep `window.addEventListener("resize", resizeRenderer)` as a fallback if desired.
 
-- [ ] **Step 5: Use prefix counts in status**
+- [x] **Step 5: Use prefix counts in status**
 
 `updateStatusPanel()` should use `visibleHitPointCount()` instead of filtering all hits on every frame.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
@@ -493,7 +494,7 @@ node --check src/chess_gaze/viewer_assets/scene_viewer.js
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -512,7 +513,7 @@ git commit -m "fix: render scene viewer on demand"
 - Consumes: implemented viewer changes, target carlsen artifact, fresh `nakamura_short.mp4` run.
 - Produces: measured verification evidence and closeout.
 
-- [ ] **Step 1: Run focused tests and static checks**
+- [x] **Step 1: Run focused tests and static checks**
 
 Run:
 
@@ -524,7 +525,7 @@ UV_CACHE_DIR=.uv-cache uv run ruff format --check .
 UV_CACHE_DIR=.uv-cache uv run mypy
 ```
 
-- [ ] **Step 2: Generate fresh Nakamura short run**
+- [x] **Step 2: Generate fresh Nakamura short run**
 
 Run:
 
@@ -541,7 +542,7 @@ env -u PYTORCH_ENABLE_MPS_FALLBACK \
 
 Record stdout run directory and viewer path.
 
-- [ ] **Step 3: Verify fresh run artifacts**
+- [x] **Step 3: Verify fresh run artifacts**
 
 Run the QA audit:
 
@@ -562,14 +563,23 @@ print(qa.artifact_validation.schema_validation_passed)
 print(qa.artifact_validation.counts_match)
 print(viewer.frame_count, len(viewer.frames), len(viewer.valid_hit_points))
 print((run / "viewer/index.html").stat().st_size)
-print((run / "viewer/standalone.html").stat().st_size)
+print((run / "viewer/served.html").stat().st_size)
 print((run / "viewer/scene-data.json").stat().st_size)
 PY
 ```
 
-Expected: complete status, schema/count validation true, 180 viewer frames for `nakamura_short.mp4`, lightweight `index.html`, embedded `standalone.html`.
+Expected: complete status, schema/count validation true, 180 viewer frames for `nakamura_short.mp4`, embedded file-compatible `index.html`, lightweight served `served.html`, and external `scene-data.json`.
 
-- [ ] **Step 4: Browser-measure target large artifact after rebuilding viewer**
+Implementation refinement added after initial browser benchmarking:
+
+- Preserve `viewer/index.html` as the explicit `file://` entrypoint because Chromium disallows `fetch("./scene-data.json")` from that page.
+- Add `viewer/served.html` as the HTTP-served entrypoint so `chess-gaze view` avoids parsing duplicated embedded JSON when loopback serving is available.
+- Cache accumulated hit points as one `THREE.Points` object.
+- Cache accumulated hit areas as one indexed `BufferGeometry`.
+- Precompute per-hit hit-area ellipse bases and mutate the position buffer in place for angular-error changes, instead of rebuilding all accumulated hit-area geometry on every slider input.
+- Use draw ranges and prefix counts for frame visibility so all records remain present in memory and no data is discarded.
+
+- [x] **Step 4: Browser-measure target large artifact after rebuilding viewer**
 
 Regenerate or patch the target run viewer with the new build code without changing source scene data. Use a helper command or Python snippet that loads the run's scene artifacts and calls `build_scene_viewer()` if an existing API supports it.
 
@@ -581,7 +591,7 @@ UV_CACHE_DIR=.uv-cache uv run chess-gaze view artifacts/output/carlsen_1/runs/20
 
 Using Chrome DevTools, measure slider changes at values `100`, `1000`, `4000`, `8000`, `12000`, and `16049` with both Hit Points and Hit Area enabled. Record synchronous and two-frame timings. The target is smooth human interaction: normal slider moves should complete in tens of milliseconds, not seconds, and must remain below `250 ms` for the measured values on the local machine.
 
-- [ ] **Step 5: Browser smoke fresh Nakamura short viewer**
+- [x] **Step 5: Browser smoke fresh Nakamura short viewer**
 
 Serve the fresh Nakamura short run and verify:
 
@@ -592,7 +602,7 @@ Serve the fresh Nakamura short run and verify:
 - angular-error slider changes rendered pixels;
 - `Hit Points` toggle remains independent from `Hit Area`.
 
-- [ ] **Step 6: Full suite if practical**
+- [x] **Step 6: Full suite if practical**
 
 Run:
 
@@ -602,7 +612,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q
 
 If blocked by local native/runtime constraints, record exact output and run the broadest meaningful subset.
 
-- [ ] **Step 7: Write closeout**
+- [x] **Step 7: Write closeout**
 
 Create `docs/superpowers/closeouts/2026-06-28-large-viewer-performance.md` with:
 
@@ -615,7 +625,7 @@ Create `docs/superpowers/closeouts/2026-06-28-large-viewer-performance.md` with:
 - gates run;
 - residual uncertainty.
 
-- [ ] **Step 8: Commit closeout**
+- [x] **Step 8: Commit closeout**
 
 Run:
 

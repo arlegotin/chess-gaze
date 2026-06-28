@@ -488,6 +488,7 @@ def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
     assert "hitAreaPatchBases" in js
     assert "hitAreaPositionAttribute" in js
     assert "updateAccumulatedHitAreaPositions" in js
+    assert "mesh.frustumCulled = false" in js
     assert "new Float32Array(" in js
     assert "new Uint32Array(" in js
     assert "setDrawRange(0, visibleHitAreaTriangleIndexCount" in js

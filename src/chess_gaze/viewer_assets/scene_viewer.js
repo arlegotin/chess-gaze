@@ -584,6 +584,7 @@ function buildAccumulatedHitAreaMesh() {
 
   const mesh = new THREE.Mesh(geometry, materials.hitArea);
   mesh.userData.layer = "hitArea";
+  mesh.frustumCulled = false;
   mesh.visible = false;
   groups.accumulated.add(mesh);
   state.renderCache.hitAreas = mesh;

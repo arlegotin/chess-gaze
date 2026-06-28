@@ -111,6 +111,7 @@ Each completed run contains:
 - `scene/scene_manifest.json`
 - `scene/scene_summary.json`
 - `viewer/index.html`
+- `viewer/served.html`
 - `viewer/scene-data.json`
 - `qa_summary.json`
 
@@ -122,15 +123,16 @@ artifacts/output/<video-stem>/runs/<run-id>
 viewer: artifacts/output/<video-stem>/runs/<run-id>/viewer/index.html
 ```
 
-Open `viewer/index.html` directly in a browser, or serve the same files through
-the localhost-only static server:
+Open `viewer/index.html` directly in a browser. For large runs, prefer the
+localhost-only static server:
 
 ```sh
 uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>
 ```
 
-The command prints a local URL and serves only files under that run's
-`viewer/` directory. It binds to loopback hosts only.
+The command prints a local URL, serves `viewer/served.html` at `/`, and keeps
+`viewer/index.html` available as the direct file-url artifact. It serves only
+files under that run's `viewer/` directory and binds to loopback hosts only.
 
 The viewer keeps run artifacts local, but it loads Three.js `0.185.0` from
 pinned jsDelivr module URLs when the page renders. Expected remote module
