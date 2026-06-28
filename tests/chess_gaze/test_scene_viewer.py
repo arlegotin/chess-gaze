@@ -213,7 +213,7 @@ def _read_viewer_app_assets(viewer_dir: Path) -> dict[str, str]:
         relative_path: (viewer_dir / relative_path).read_text(encoding="utf-8")
         for relative_path in (
             "index.html",
-            "standalone.html",
+            "served.html",
             "scene_viewer.js",
             "styles.css",
         )
@@ -279,13 +279,13 @@ def built_viewer(tmp_path: Path) -> tuple[RunLayout, ViewerSceneData]:
     )
 
 
-def test_build_scene_viewer_writes_server_and_standalone_indexes(
+def test_build_scene_viewer_writes_embedded_index_and_served_entrypoint(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, viewer_data = built_viewer
 
     assert (layout.viewer_dir / "index.html").is_file()
-    assert (layout.viewer_dir / "standalone.html").is_file()
+    assert (layout.viewer_dir / "served.html").is_file()
     assert (layout.viewer_dir / "scene-data.json").is_file()
     assert viewer_data.schema_version == "gaze-scene-viewer-data-v1"
 
@@ -303,7 +303,7 @@ def test_build_scene_viewer_writes_app_assets_without_local_vendor_modules(
 
     assert {
         "index.html",
-        "standalone.html",
+        "served.html",
         "scene-data.json",
         "scene_viewer.js",
         "styles.css",
@@ -502,13 +502,13 @@ def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
     assert unexpected_urls == set()
 
     index_html = app_assets["index.html"]
-    standalone_html = app_assets["standalone.html"]
+    served_html = app_assets["served.html"]
     js = app_assets["scene_viewer.js"]
     css = app_assets["styles.css"]
     assert _external_urls(js) == set()
     assert _external_urls(css) == set()
 
-    for html in (index_html, standalone_html):
+    for html in (index_html, served_html):
         import_map = _extract_import_map(html)
         assert import_map == EXPECTED_IMPORT_MAP
         assert THREE_MODULE_URL in _external_urls(html)
@@ -528,36 +528,36 @@ def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
             == ORBIT_CONTROLS_URL
         )
 
-    assert 'type="module" src="./scene_viewer.js"' in index_html
-    assert 'src="./scene_viewer.js"' not in standalone_html
+    assert 'type="module" src="./scene_viewer.js"' not in index_html
+    assert 'type="module" src="./scene_viewer.js"' in served_html
     assert 'from "three"' in js
     assert 'from "three/addons/controls/OrbitControls.js"' in js
 
 
-def test_generated_index_fetches_scene_data_without_embedding_payload(
+def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, viewer_data = built_viewer
     html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
-
-    assert 'type="module" src="./scene_viewer.js"' in html
-    assert 'id="scene-data-json"' not in html
-    assert 'id="scene-viewer-source"' not in html
-    assert "window.__CHESS_GAZE_SCENE_DATA__" not in html
-    assert viewer_data.run_id not in html
-
-
-def test_generated_standalone_embeds_file_url_bootstrap_and_scene_data(
-    built_viewer: tuple[RunLayout, ViewerSceneData],
-) -> None:
-    layout, viewer_data = built_viewer
-    html = (layout.viewer_dir / "standalone.html").read_text(encoding="utf-8")
 
     assert 'type="module" src="./scene_viewer.js"' not in html
     assert 'id="scene-data-json"' in html
     assert 'id="scene-viewer-source"' in html
     assert "window.__CHESS_GAZE_SCENE_DATA__" in html
     assert viewer_data.run_id in html
+
+
+def test_generated_served_html_fetches_scene_data_without_embedding_payload(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, viewer_data = built_viewer
+    html = (layout.viewer_dir / "served.html").read_text(encoding="utf-8")
+
+    assert 'type="module" src="./scene_viewer.js"' in html
+    assert 'id="scene-data-json"' not in html
+    assert 'id="scene-viewer-source"' not in html
+    assert "window.__CHESS_GAZE_SCENE_DATA__" not in html
+    assert viewer_data.run_id not in html
 
 
 def test_generated_js_prefers_embedded_scene_data_for_file_url_viewer(
@@ -622,7 +622,7 @@ def test_generated_index_import_map_resolves_pinned_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
-    for relative_path in ("index.html", "standalone.html"):
+    for relative_path in ("index.html", "served.html"):
         html = (layout.viewer_dir / relative_path).read_text(encoding="utf-8")
         import_map = _extract_import_map(html)
 
@@ -688,7 +688,8 @@ def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     viewer_dir = run_dir / "viewer"
     viewer_dir.mkdir(parents=True)
-    (viewer_dir / "index.html").write_text("<!doctype html>viewer", encoding="utf-8")
+    (viewer_dir / "index.html").write_text("<!doctype html>embedded", encoding="utf-8")
+    (viewer_dir / "served.html").write_text("<!doctype html>served", encoding="utf-8")
     (viewer_dir / "scene-data.json").write_text('{"ok": true}', encoding="utf-8")
 
     server = scene_viewer.serve_viewer(run_dir)
@@ -697,7 +698,11 @@ def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
 
         with urllib.request.urlopen(server.url, timeout=2) as response:
             assert response.status == 200
-            assert response.read().decode("utf-8") == "<!doctype html>viewer"
+            assert response.read().decode("utf-8") == "<!doctype html>served"
+
+        with urllib.request.urlopen(f"{server.url}index.html", timeout=2) as response:
+            assert response.status == 200
+            assert response.read().decode("utf-8") == "<!doctype html>embedded"
 
         scene_data_url = f"{server.url}scene-data.json"
         with urllib.request.urlopen(scene_data_url, timeout=2) as response:

@@ -86,8 +86,8 @@ def build_scene_viewer(
         viewer_dir,
         updated_scene_result.viewer_data,
     )
-    _write_served_index(viewer_dir)
-    _write_file_url_compatible_standalone(viewer_dir, updated_scene_result.viewer_data)
+    _write_served_entrypoint(viewer_dir)
+    _write_file_url_compatible_index(viewer_dir, updated_scene_result.viewer_data)
     return ViewerBuildResult(
         viewer_dir=viewer_dir,
         index_path=viewer_dir / "index.html",
@@ -107,22 +107,45 @@ def write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
     return path
 
 
-def _write_served_index(viewer_dir: Path) -> None:
+def _write_served_entrypoint(viewer_dir: Path) -> None:
+    served_path = viewer_dir / "served.html"
+    html = _render_viewer_html(
+        _viewer_html_template(viewer_dir),
+        viewer_dir=viewer_dir,
+    )
+    atomic_write_bytes(served_path, html.encode("utf-8"))
+
+
+def _write_file_url_compatible_index(
+    viewer_dir: Path,
+    data: ViewerSceneData,
+) -> None:
     index_path = viewer_dir / "index.html"
-    html = index_path.read_text(encoding="utf-8")
+    html = _render_viewer_html(
+        _viewer_html_template(viewer_dir),
+        viewer_dir=viewer_dir,
+        data=data,
+    )
+    atomic_write_bytes(index_path, html.encode("utf-8"))
+
+
+def _viewer_html_template(viewer_dir: Path) -> str:
+    return (viewer_dir / "index.html").read_text(encoding="utf-8")
+
+
+def _render_viewer_html(
+    html: str,
+    *,
+    viewer_dir: Path,
+    data: ViewerSceneData | None = None,
+) -> str:
     if _INDEX_IMPORT_MAP_MARKER not in html:
         raise ViewerServerError("viewer index template is missing import map marker")
 
     html = html.replace(_INDEX_IMPORT_MAP_MARKER, _import_map_script(three_import_map()))
-    atomic_write_bytes(index_path, html.encode("utf-8"))
+    if data is None:
+        return html
 
-
-def _write_file_url_compatible_standalone(
-    viewer_dir: Path,
-    data: ViewerSceneData,
-) -> None:
-    standalone_path = viewer_dir / "standalone.html"
-    html = (viewer_dir / "index.html").read_text(encoding="utf-8")
     if _INDEX_MODULE_TAG not in html:
         raise ViewerServerError("viewer index template is missing module script tag")
 
@@ -145,8 +168,7 @@ def _write_file_url_compatible_standalone(
             "    </script>",
         )
     )
-    html = html.replace(_INDEX_MODULE_TAG, embedded_bootstrap)
-    atomic_write_bytes(standalone_path, html.encode("utf-8"))
+    return html.replace(_INDEX_MODULE_TAG, embedded_bootstrap)
 
 
 def _module_source_script(script_id: str, source: str) -> str:
@@ -307,6 +329,10 @@ class _LockedViewerRequestHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(self._viewer_root), **kwargs)  # type: ignore[arg-type]
 
     def translate_path(self, path: str) -> str:
+        if path in ("", "/"):
+            served_path = self._viewer_root / "served.html"
+            if served_path.is_file():
+                return str(served_path)
         candidate = Path(super().translate_path(path)).resolve()
         if _is_relative_to(candidate, self._viewer_root):
             return str(candidate)
