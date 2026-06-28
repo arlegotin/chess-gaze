@@ -6,13 +6,20 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, TextIO, cast
+from typing import Any, Literal, Protocol, TextIO, cast
 
 import numpy as np
 import numpy.typing as npt
 from pydantic import ValidationError
 
 from chess_gaze.artifact_runs import RunLayout, create_run_layout
+from chess_gaze.analysis_resume import (
+    AnalysisState,
+    find_latest_resumable_run,
+    flush_jsonl_checkpoint,
+    prepare_resume_run,
+    write_analysis_state,
+)
 from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import (
     ConfigurationError,
@@ -108,6 +115,7 @@ class AnalyzeRequest:
     unigaze_batch_size: int | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
+    resume: bool = True
     clock: Clock = utc_now
 
 
@@ -117,6 +125,7 @@ class AnalyzeResult:
     run_manifest_path: Path
     calibration_path: Path
     video_manifest_path: Path
+    analysis_state_path: Path
     frames_jsonl_path: Path
     errors_jsonl_path: Path
     scene_manifest_path: Path
@@ -192,33 +201,62 @@ def analyze_video(
     _estimate_disk_space(resolved.output_root)
 
     created_at = request.clock()
-    layout = create_run_layout(
-        input_path=resolved.video_path,
-        output_root=resolved.output_root / resolved.video_path.stem / "runs",
-        clock=lambda: created_at,
-        run_suffix=request.run_suffix,
+    runs_root = resolved.output_root / resolved.video_path.stem / "runs"
+    layout = (
+        find_latest_resumable_run(
+            runs_root,
+            resolved.video_path,
+            inspection.video_manifest,
+            calibration,
+            inference,
+        )
+        if request.resume
+        else None
     )
+    resume_next_frame_index = 0
+    frame_error_count = 0
+
+    if layout is None:
+        layout = create_run_layout(
+            input_path=resolved.video_path,
+            output_root=runs_root,
+            clock=lambda: created_at,
+            run_suffix=request.run_suffix,
+        )
+        _write_initial_run_artifacts(
+            layout,
+            created_at=created_at,
+            input_path=resolved.video_path,
+            video_manifest=inspection.video_manifest,
+            calibration=calibration,
+            inference=inference,
+        )
+        analysis_state = _new_analysis_state(
+            layout,
+            video_manifest=inspection.video_manifest,
+            next_frame_index=0,
+            status="processing",
+            clock=request.clock,
+        )
+    else:
+        preparation = prepare_resume_run(
+            layout,
+            inspection.video_manifest,
+            clock=request.clock,
+        )
+        resume_next_frame_index = preparation.next_frame_index
+        frame_error_count = sum(
+            len(record.errors) for record in preparation.committed_records
+        )
+        analysis_state = preparation.analysis_state
+
     run_manifest_path = layout.run_dir / "run_manifest.json"
     calibration_path = layout.run_dir / "calibration.json"
     video_manifest_path = layout.run_dir / "video_manifest.json"
+    analysis_state_path = write_analysis_state(layout, analysis_state)
     frames_jsonl_path = layout.records_dir / "frames.jsonl"
     errors_jsonl_path = layout.records_dir / "errors.jsonl"
     qa_summary_path = layout.run_dir / "qa_summary.json"
-
-    _write_json(
-        run_manifest_path,
-        RunManifest(
-            run_id=layout.run_dir.name,
-            created_at_utc=_format_utc(created_at),
-            input_path=str(resolved.video_path),
-            video=inspection.video_manifest,
-            inference=inference,
-        ).model_dump(mode="json"),
-    )
-    _write_json(calibration_path, calibration.model_dump(mode="json"))
-    _write_json(video_manifest_path, inspection.video_manifest.model_dump(mode="json"))
-    frames_jsonl_path.touch()
-    errors_jsonl_path.touch()
 
     if observers is None:
         if resolved_model_assets is None:
@@ -232,65 +270,140 @@ def analyze_video(
             prepared_unigaze_runtime.model,
         )
 
-    decoded_frame_count = 0
-    frame_error_count = 0
     try:
-        with (
-            frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
-            errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
-        ):
-            use_batch_accumulator = (
-                observers.frame_batch_observer is not None
-                and resolved.unigaze_batch_size > 1
-            )
-            pending_batch: list[DecodedFrame] = []
-            for decoded_frame in iter_decoded_frames(resolved.video_path):
-                decoded_frame_count += 1
-                if not use_batch_accumulator:
-                    record, frame_errors = _process_frame(
-                        decoded_frame,
+        decoded_frame_count = 0
+        try:
+            with (
+                frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
+                errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
+            ):
+                use_batch_accumulator = (
+                    observers.frame_batch_observer is not None
+                    and resolved.unigaze_batch_size > 1
+                )
+                pending_batch: list[DecodedFrame] = []
+                for decoded_frame in iter_decoded_frames(resolved.video_path):
+                    decoded_frame_count += 1
+                    if decoded_frame.frame_index < resume_next_frame_index:
+                        continue
+                    if not use_batch_accumulator:
+                        processed = [
+                            _process_frame(
+                                decoded_frame,
+                                observers,
+                                resolved,
+                                layout,
+                                errors_handle=errors_handle,
+                            )
+                        ]
+                        committed_next_frame_index, committed_error_count = (
+                            _commit_processed_records(
+                                processed,
+                                frames_handle=frames_handle,
+                                errors_handle=errors_handle,
+                            )
+                        )
+                        frame_error_count += committed_error_count
+                        analysis_state = _update_analysis_state(
+                            analysis_state,
+                            next_frame_index=committed_next_frame_index,
+                            status="processing",
+                            clock=request.clock,
+                        )
+                        analysis_state_path = write_analysis_state(
+                            layout, analysis_state
+                        )
+                        continue
+                    pending_batch.append(decoded_frame)
+                    if len(pending_batch) < resolved.unigaze_batch_size:
+                        continue
+                    processed = _process_frame_batch(
+                        pending_batch,
                         observers,
                         resolved,
                         layout,
                         errors_handle=errors_handle,
                     )
-                    frame_error_count += len(frame_errors)
-                    frames_handle.write(record.model_dump_json() + "\n")
-                    continue
-                pending_batch.append(decoded_frame)
-                if len(pending_batch) < resolved.unigaze_batch_size:
-                    continue
-                for record, frame_errors in _process_frame_batch(
-                    pending_batch,
-                    observers,
-                    resolved,
-                    layout,
-                    errors_handle=errors_handle,
-                ):
-                    frame_error_count += len(frame_errors)
-                    frames_handle.write(record.model_dump_json() + "\n")
-                pending_batch = []
+                    committed_next_frame_index, committed_error_count = (
+                        _commit_processed_records(
+                            processed,
+                            frames_handle=frames_handle,
+                            errors_handle=errors_handle,
+                        )
+                    )
+                    frame_error_count += committed_error_count
+                    analysis_state = _update_analysis_state(
+                        analysis_state,
+                        next_frame_index=committed_next_frame_index,
+                        status="processing",
+                        clock=request.clock,
+                    )
+                    analysis_state_path = write_analysis_state(layout, analysis_state)
+                    pending_batch = []
 
-            if pending_batch:
-                for record, frame_errors in _process_frame_batch(
-                    pending_batch,
-                    observers,
-                    resolved,
-                    layout,
-                    errors_handle=errors_handle,
-                ):
-                    frame_error_count += len(frame_errors)
-                    frames_handle.write(record.model_dump_json() + "\n")
-    finally:
-        if observers.close is not None:
-            observers.close()
+                if pending_batch:
+                    processed = _process_frame_batch(
+                        pending_batch,
+                        observers,
+                        resolved,
+                        layout,
+                        errors_handle=errors_handle,
+                    )
+                    committed_next_frame_index, committed_error_count = (
+                        _commit_processed_records(
+                            processed,
+                            frames_handle=frames_handle,
+                            errors_handle=errors_handle,
+                        )
+                    )
+                    frame_error_count += committed_error_count
+                    analysis_state = _update_analysis_state(
+                        analysis_state,
+                        next_frame_index=committed_next_frame_index,
+                        status="processing",
+                        clock=request.clock,
+                    )
+                    analysis_state_path = write_analysis_state(layout, analysis_state)
+        finally:
+            if observers.close is not None:
+                observers.close()
 
-    try:
         scene_result = build_scene_artifacts(layout)
         viewer_result = build_scene_viewer(layout, scene_result)
     except (OSError, ValueError) as exc:
+        analysis_state = _update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
         raise PipelineError(CliErrorCode.SCHEMA_VALIDATION_FAILED, str(exc)) from exc
+    except Exception:
+        analysis_state = _update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
+        raise
 
+    try:
+        qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
+    except ArtifactValidationError as exc:
+        analysis_state = _update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
+        raise PipelineError(exc.code, str(exc)) from exc
+    analysis_state = _update_analysis_state(
+        analysis_state,
+        next_frame_index=qa_summary.counts.decoded_frames,
+        status=qa_summary.final_status,
+        clock=request.clock,
+    )
+    analysis_state_path = write_analysis_state(layout, analysis_state)
     try:
         qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
     except ArtifactValidationError as exc:
@@ -306,6 +419,7 @@ def analyze_video(
         run_manifest_path=run_manifest_path,
         calibration_path=calibration_path,
         video_manifest_path=video_manifest_path,
+        analysis_state_path=analysis_state_path,
         frames_jsonl_path=frames_jsonl_path,
         errors_jsonl_path=errors_jsonl_path,
         scene_manifest_path=scene_result.paths.scene_manifest_path,
@@ -340,6 +454,86 @@ def _build_and_write_qa_summary(
 
     _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
     return qa_summary
+
+
+def _write_initial_run_artifacts(
+    layout: RunLayout,
+    *,
+    created_at: datetime,
+    input_path: Path,
+    video_manifest: Any,
+    calibration: CalibrationRecord,
+    inference: Any,
+) -> None:
+    _write_json(
+        layout.run_dir / "run_manifest.json",
+        RunManifest(
+            run_id=layout.run_dir.name,
+            created_at_utc=_format_utc(created_at),
+            input_path=str(input_path),
+            video=video_manifest,
+            inference=inference,
+        ).model_dump(mode="json"),
+    )
+    _write_json(layout.run_dir / "calibration.json", calibration.model_dump(mode="json"))
+    _write_json(layout.run_dir / "video_manifest.json", video_manifest.model_dump(mode="json"))
+    (layout.records_dir / "frames.jsonl").touch()
+    (layout.records_dir / "errors.jsonl").touch()
+
+
+def _new_analysis_state(
+    layout: RunLayout,
+    *,
+    video_manifest: Any,
+    next_frame_index: int,
+    status: Literal["processing", "complete", "failed"],
+    clock: Clock,
+) -> AnalysisState:
+    return AnalysisState(
+        run_id=layout.run_dir.name,
+        input_path=video_manifest.source_path,
+        source_video_sha256=video_manifest.source_sha256,
+        frame_count_decoded=video_manifest.frame_count_decoded,
+        next_frame_index=next_frame_index,
+        status=status,
+        updated_at_utc=_format_utc(clock()),
+    )
+
+
+def _update_analysis_state(
+    state: AnalysisState,
+    *,
+    next_frame_index: int | None = None,
+    status: Literal["processing", "complete", "failed"] | None = None,
+    clock: Clock,
+) -> AnalysisState:
+    return AnalysisState(
+        run_id=state.run_id,
+        input_path=state.input_path,
+        source_video_sha256=state.source_video_sha256,
+        frame_count_decoded=state.frame_count_decoded,
+        next_frame_index=(
+            state.next_frame_index if next_frame_index is None else next_frame_index
+        ),
+        status=state.status if status is None else status,
+        updated_at_utc=_format_utc(clock()),
+    )
+
+
+def _commit_processed_records(
+    processed: Sequence[tuple[FrameRecord, list[ErrorRecord]]],
+    *,
+    frames_handle: TextIO,
+    errors_handle: TextIO,
+) -> tuple[int, int]:
+    next_frame_index = 0
+    frame_error_count = 0
+    for record, frame_errors in processed:
+        frames_handle.write(record.model_dump_json() + "\n")
+        next_frame_index = record.frame_index + 1
+        frame_error_count += len(frame_errors)
+    flush_jsonl_checkpoint(frames_handle, errors_handle)
+    return next_frame_index, frame_error_count
 
 
 def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:

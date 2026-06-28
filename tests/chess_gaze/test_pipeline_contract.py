@@ -327,6 +327,72 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     )
 
 
+def test_analyze_video_resumes_latest_compatible_partial_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=5)
+    observed_frames: list[int] = []
+
+    def interrupt_after_two(frame: ObserverFrame) -> FrameRecord:
+        observed_frames.append(frame.frame_index)
+        if frame.frame_index == 2:
+            raise RuntimeError("simulated interruption")
+        return _fake_record(frame)
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            observers=ObserverBundle(frame_observer=interrupt_after_two),
+        )
+
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    assert observed_frames == [0, 1, 2]
+    assert len(_records_from(run_dir / "records" / "frames.jsonl")) == 2
+
+    resumed_observed_frames: list[int] = []
+
+    def resumed_observer(frame: ObserverFrame) -> FrameRecord:
+        resumed_observed_frames.append(frame.frame_index)
+        return _fake_record(frame)
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=resumed_observer),
+    )
+
+    assert result.layout.run_dir == run_dir
+    assert resumed_observed_frames == [2, 3, 4]
+    assert [
+        record.frame_index for record in _records_from(result.frames_jsonl_path)
+    ] == [0, 1, 2, 3, 4]
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
+    assert summary.final_status == "complete"
+    assert summary.counts.frame_records == 5
+
+
+def test_analyze_video_does_not_resume_complete_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+
+    first = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+    second = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert second.layout.run_dir != first.layout.run_dir
+
+
 def test_analyze_video_uses_batch_observer_without_reordering_frames(
     tmp_path: Path,
 ) -> None:
