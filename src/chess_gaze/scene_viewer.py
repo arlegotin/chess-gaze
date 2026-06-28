@@ -142,7 +142,9 @@ def _render_viewer_html(
     if _INDEX_IMPORT_MAP_MARKER not in html:
         raise ViewerServerError("viewer index template is missing import map marker")
 
-    html = html.replace(_INDEX_IMPORT_MAP_MARKER, _import_map_script(three_import_map()))
+    html = html.replace(
+        _INDEX_IMPORT_MAP_MARKER, _import_map_script(three_import_map())
+    )
     if data is None:
         return html
 
