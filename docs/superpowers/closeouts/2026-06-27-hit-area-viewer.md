@@ -11,7 +11,8 @@ separate translucent angular-error patches on the monitor plane. Instant mode
 draws the current-frame patch; accumulated mode now accumulates hit-area patches
 like hit points while keeping `Hit Area` independent from `Hit Points`. The
 viewer defaults to an 8 degree typical angular error and allows live adjustment
-from 5 to 12 degrees.
+from 0 to 12 degrees. Hit-area opacity defaults to 24% and is adjustable from
+0% to 100%.
 
 No scene artifact schema changed, and no new dependency was added.
 
@@ -382,6 +383,77 @@ Screenshot captured at:
 
 `/private/tmp/chess-gaze-accumulated-hit-area.png`
 
+## UI Defaults Follow-Up
+
+Updated on 2026-06-28:
+
+- Added `Hit Area` opacity control with `data-testid="hit-area-opacity"`.
+- Kept the existing visual default by using opacity `0.24` (`24%`).
+- Changed angular-error slider minimum from `5` degrees to `0` degrees.
+- Made `Accumulated` the default hit-display mode.
+- Regenerated the viewer for
+  `artifacts/output/nakamura_1/runs/20260628T084216Z-0d256588`.
+
+TDD RED:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py::test_generated_html_includes_required_selectors tests/chess_gaze/test_scene_viewer.py::test_generated_viewer_exposes_hit_area_controls_and_math -q
+```
+
+Result: `2 failed in 1.77s`, as expected, because opacity controls were not
+present.
+
+Verification after implementation:
+
+```sh
+node --check src/chess_gaze/viewer_assets/scene_viewer.js
+UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_viewer.py -q
+UV_CACHE_DIR=.uv-cache uv run ruff check .
+UV_CACHE_DIR=.uv-cache uv run ruff format --check .
+UV_CACHE_DIR=.uv-cache uv run mypy
+```
+
+Results:
+
+- `node --check`: exit `0`
+- `24 passed in 1.38s`
+- `All checks passed!`
+- `65 files already formatted`
+- `Success: no issues found in 65 source files`
+
+Regeneration command used existing run records rather than rerunning model
+inference. Result:
+
+- viewer:
+  `artifacts/output/nakamura_1/runs/20260628T084216Z-0d256588/viewer/index.html`
+- frame count: `1973`
+- valid hit points: `1973`
+- QA final status: `complete`
+
+Browser smoke for the regenerated viewer:
+
+- URL: `http://127.0.0.1:54281/`
+- initial status: `Accumulated mode. Frame 1 of 1973: monitor hit is valid.`
+- `Accumulated` checked by default; `Instant` unchecked
+- angular slider min/max: `0` / `12`
+- opacity slider min/max: `0` / `1`, default label `24%`
+- no console messages
+- network requests limited to local viewer files plus pinned Three.js `0.185.0`
+  module URLs
+
+Canvas pixel evidence:
+
+| State | PNG data URL length | Sample hash |
+| --- | ---: | ---: |
+| accumulated frame 41, angular 8, opacity 24% | `343454` | `1949856123` |
+| opacity 0% | `274498` | `418470569` |
+| opacity 80% | `296766` | `1506378810` |
+| angular 0 deg, opacity 80% | `274498` | `418470569` |
+
+Screenshot captured at:
+
+`/private/tmp/chess-gaze-nakamura-1-hit-area-opacity.png`
+
 ## Residual Uncertainty
 
 The hit area is not a calibrated probability contour. It does not include
@@ -390,5 +462,7 @@ tracking, head pose, unknown mirror policy, or streamer-domain shift except
 through the user-selected angular radius.
 
 The projection is a small-angle ellipse approximation rather than a full conic
-section solve. The UI range is intentionally limited to 5 to 12 degrees to keep
-that approximation in its intended regime.
+section solve. The UI range is intentionally limited to 0 to 12 degrees to keep
+that approximation in its intended regime, but the viewer now permits `0`
+degrees so the hit-area patch can be visually collapsed without disabling the
+layer.

@@ -393,6 +393,8 @@ def test_generated_html_includes_required_selectors(
         'data-testid="toggle-hit-area"',
         'data-testid="hit-area-error-degrees"',
         'data-testid="hit-area-error-label"',
+        'data-testid="hit-area-opacity"',
+        'data-testid="hit-area-opacity-label"',
         'data-testid="status-panel"',
     ):
         assert selector in html
@@ -408,13 +410,43 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
 
     assert "Hit Area" in html
     assert "Angular Error" in html
-    assert 'min="5"' in html
+    assert "Opacity" in html
+    mode_instant = re.search(
+        r'<input[^>]*data-testid="mode-instant"[^>]*>', html, flags=re.DOTALL
+    )
+    assert mode_instant is not None
+    assert "checked" not in mode_instant.group(0)
+    mode_accumulated = re.search(
+        r'<input[^>]*data-testid="mode-accumulated"[^>]*>', html, flags=re.DOTALL
+    )
+    assert mode_accumulated is not None
+    assert "checked" in mode_accumulated.group(0)
+    assert re.search(
+        r'id="hit-area-error-degrees"[^>]*data-testid="hit-area-error-degrees"'
+        r'[^>]*type="range"[^>]*min="0"[^>]*max="12"[^>]*value="8"'
+        r'[^>]*step="0.5"',
+        html,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r'id="hit-area-opacity"[^>]*data-testid="hit-area-opacity"'
+        r'[^>]*type="range"[^>]*min="0"[^>]*max="1"[^>]*value="0.24"'
+        r'[^>]*step="0.01"',
+        html,
+        flags=re.DOTALL,
+    )
     assert 'max="12"' in html
     assert 'step="0.5"' in html
     assert 'value="8"' in html
     assert "DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8" in js
-    assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 5" in js
+    assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0" in js
     assert "HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12" in js
+    assert 'mode: "accumulated"' in js
+    assert "DEFAULT_HIT_AREA_OPACITY = 0.24" in js
+    assert "HIT_AREA_MIN_OPACITY = 0" in js
+    assert "HIT_AREA_MAX_OPACITY = 1" in js
+    assert "updateHitAreaOpacityLabel" in js
+    assert "materials.hitArea.opacity = hitAreaOpacity()" in js
     assert "rayT * Math.tan(alphaRadians)" in js
     assert "minorRadius / normalDirectionDot" in js
     assert "direction.clone().sub(" in js
@@ -424,14 +456,15 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "renderAccumulatedHitAreas" in js
     assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" in js
     assert "addHitArea(groups.accumulated, geometry)" in js
-    accumulated_hit_area_body = js.split(
-        "function renderAccumulatedHitAreas() {", 1
-    )[1].split("\nfunction renderAccumulatedHits()", 1)[0]
+    accumulated_hit_area_body = js.split("function renderAccumulatedHitAreas() {", 1)[
+        1
+    ].split("\nfunction renderAccumulatedHits()", 1)[0]
     assert "elements.toggles.hitArea.checked" in accumulated_hit_area_body
     assert "hitPoints" not in accumulated_hit_area_body
     assert "valid_hit_points" not in accumulated_hit_area_body
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
+    assert ".hit-area-opacity-row" in css
 
 
 def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(

@@ -7,8 +7,11 @@ const MODE_NAMES = {
 };
 
 const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8;
-const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 5;
+const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0;
 const HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12;
+const DEFAULT_HIT_AREA_OPACITY = 0.24;
+const HIT_AREA_MIN_OPACITY = 0;
+const HIT_AREA_MAX_OPACITY = 1;
 const HIT_AREA_SEGMENTS = 72;
 const HIT_AREA_PLANE_OFFSET_M = 0.001;
 const HIT_AREA_VECTOR_EPSILON = 1e-8;
@@ -41,6 +44,10 @@ const elements = {
     '[data-testid="hit-area-error-degrees"]',
   ),
   hitAreaErrorLabel: document.querySelector('[data-testid="hit-area-error-label"]'),
+  hitAreaOpacity: document.querySelector('[data-testid="hit-area-opacity"]'),
+  hitAreaOpacityLabel: document.querySelector(
+    '[data-testid="hit-area-opacity-label"]',
+  ),
   rayStatus: document.querySelector('[data-testid="ray-status"]'),
   hitStatus: document.querySelector('[data-testid="hit-status"]'),
   accumulatedStatus: document.querySelector('[data-testid="accumulated-status"]'),
@@ -67,7 +74,7 @@ const elements = {
 const state = {
   sceneData: null,
   frameIndex: 0,
-  mode: "instant",
+  mode: "accumulated",
   playing: false,
   playTimer: null,
 };
@@ -143,7 +150,7 @@ const materials = {
   hitArea: new THREE.MeshBasicMaterial({
     color: COLORS.hitArea,
     transparent: true,
-    opacity: 0.24,
+    opacity: DEFAULT_HIT_AREA_OPACITY,
     side: THREE.DoubleSide,
     depthWrite: false,
   }),
@@ -165,6 +172,7 @@ function setControlState(disabled) {
     elements.stepPrev,
     elements.stepNext,
     elements.hitAreaErrorDegrees,
+    elements.hitAreaOpacity,
     ...Object.values(elements.toggles),
   ];
   for (const control of controlsToToggle) {
@@ -268,6 +276,23 @@ function updateHitAreaErrorLabel() {
   elements.hitAreaErrorDegrees.value = String(degrees);
   const labelValue = Number.isInteger(degrees) ? String(degrees) : degrees.toFixed(1);
   elements.hitAreaErrorLabel.textContent = `${labelValue} deg`;
+}
+
+function hitAreaOpacity() {
+  const rawValue = Number(elements.hitAreaOpacity.value);
+  const value = Number.isFinite(rawValue) ? rawValue : DEFAULT_HIT_AREA_OPACITY;
+  return Math.min(HIT_AREA_MAX_OPACITY, Math.max(HIT_AREA_MIN_OPACITY, value));
+}
+
+function updateHitAreaOpacityLabel() {
+  const opacity = hitAreaOpacity();
+  elements.hitAreaOpacity.value = String(opacity);
+  elements.hitAreaOpacityLabel.textContent = `${Math.round(opacity * 100)}%`;
+}
+
+function applyHitAreaOpacity() {
+  materials.hitArea.opacity = hitAreaOpacity();
+  materials.hitArea.needsUpdate = true;
 }
 
 function scaledRayEnd(origin, direction, length) {
@@ -682,6 +707,12 @@ function bindControls() {
     renderCurrentFrame();
     renderAccumulatedHits();
   });
+  elements.hitAreaOpacity.addEventListener("input", () => {
+    updateHitAreaOpacityLabel();
+    applyHitAreaOpacity();
+    renderCurrentFrame();
+    renderAccumulatedHits();
+  });
   for (const toggle of Object.values(elements.toggles)) {
     toggle.addEventListener("change", () => {
       applyStaticVisibility();
@@ -701,6 +732,8 @@ function applySceneData(sceneData) {
   setControlState(frames.length === 0);
   buildStaticScene();
   updateHitAreaErrorLabel();
+  updateHitAreaOpacityLabel();
+  applyHitAreaOpacity();
   setFrameIndex(0);
 }
 

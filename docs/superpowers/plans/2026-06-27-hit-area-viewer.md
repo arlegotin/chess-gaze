@@ -14,7 +14,8 @@
 - Do not change scene artifact schemas for this feature.
 - Do not add new runtime or browser dependencies.
 - Default angular error is `8` degrees.
-- Slider range is `[5, 12]` degrees with redraw-on-input.
+- Angular-error slider range is `[0, 12]` degrees with redraw-on-input.
+- Hit-area opacity slider range is `[0, 1]`, default `0.24`, with redraw-on-input.
 - The hit point and hit area are separate visual layers.
 - In accumulated mode, `Hit Area` renders patches for all valid frames through the current slider frame independently from `Hit Points`.
 - `artifacts/input/nakamura_short.mp4` must be used for real verification.
@@ -56,7 +57,7 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
 
     assert "Hit Area" in html
     assert "Angular Error" in html
-    assert 'min="5"' in html
+    assert 'min="0"' in html
     assert 'max="12"' in html
     assert 'step="0.5"' in html
     assert 'value="8"' in html
@@ -129,7 +130,7 @@ Add `Hit Area` to the scene-layer fieldset and add a compact slider row:
     id="hit-area-error-degrees"
     data-testid="hit-area-error-degrees"
     type="range"
-    min="5"
+    min="0"
     max="12"
     value="8"
     step="0.5"
@@ -170,7 +171,7 @@ hitArea: 0xc43d7a,
 hitArea: new THREE.MeshBasicMaterial({
   color: COLORS.hitArea,
   transparent: true,
-  opacity: 0.24,
+  opacity: DEFAULT_HIT_AREA_OPACITY,
   side: THREE.DoubleSide,
   depthWrite: false,
 })
@@ -272,7 +273,8 @@ The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
 estimate and overlays translucent angular-error patches on the monitor plane.
 In `Accumulated` mode, hit-area patches accumulate like hit points but remain
 controlled by the separate `Hit Area` toggle. The default typical angular error
-is 8 degrees and can be adjusted from 5 to 12 degrees in the viewer. This is a
+is 8 degrees and can be adjusted from 0 to 12 degrees in the viewer. Hit-area
+opacity defaults to 24% and is adjustable in the same control group. This is a
 display assumption, not per-frame UniGaze confidence.
 ```
 
@@ -432,7 +434,8 @@ The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
 estimate and overlays translucent angular-error patches on the monitor plane.
 In `Accumulated` mode, hit-area patches accumulate like hit points but remain
 controlled by the separate `Hit Area` toggle. The default typical angular error
-is 8 degrees and can be adjusted from 5 to 12 degrees in the viewer. This is a
+is 8 degrees and can be adjusted from 0 to 12 degrees in the viewer. Hit-area
+opacity defaults to 24% and is adjustable in the same control group. This is a
 display assumption, not per-frame UniGaze confidence.
 ```
 

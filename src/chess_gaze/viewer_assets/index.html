@@ -81,7 +81,6 @@
               type="radio"
               name="hit-mode"
               value="instant"
-              checked
             >
             Instant
           </label>
@@ -91,6 +90,7 @@
               type="radio"
               name="hit-mode"
               value="accumulated"
+              checked
             >
             Accumulated
           </label>
@@ -113,12 +113,25 @@
               id="hit-area-error-degrees"
               data-testid="hit-area-error-degrees"
               type="range"
-              min="5"
+              min="0"
               max="12"
               value="8"
               step="0.5"
             >
             <output data-testid="hit-area-error-label" for="hit-area-error-degrees">8 deg</output>
+          </div>
+          <div class="hit-area-opacity-row">
+            <label for="hit-area-opacity">Opacity</label>
+            <input
+              id="hit-area-opacity"
+              data-testid="hit-area-opacity"
+              type="range"
+              min="0"
+              max="1"
+              value="0.24"
+              step="0.01"
+            >
+            <output data-testid="hit-area-opacity-label" for="hit-area-opacity">24%</output>
           </div>
         </fieldset>
 

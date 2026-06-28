@@ -34,7 +34,7 @@ major_radius = minor_radius / abs(dot(monitor_normal, gaze_direction))
 
 This is a first-order projection approximation for a circular angular cone
 around the gaze ray onto the monitor plane. It is most faithful for small angles;
-the selected 5 to 12 degree UI range keeps the approximation in that intended
+the selected 0 to 12 degree UI range keeps the approximation in that intended
 regime.
 
 The proposal's most important correctness constraint is also sound: the point
@@ -54,7 +54,7 @@ as the default typical angular error because:
   evaluation datasets.
 
 The 8 degree value is therefore an explicit viewer assumption. The UI must let
-users redraw at values from 5 to 12 degrees without regenerating artifacts.
+users redraw at values from 0 to 12 degrees without regenerating artifacts.
 
 ## Evidence
 
@@ -101,8 +101,10 @@ the assumed cone footprint for that frame.
 Add controls under `Scene Layers`:
 
 - `Hit Area` checkbox, default checked.
-- `Angular Error` range slider, min `5`, max `12`, step `0.5`, default `8`.
+- `Angular Error` range slider, min `0`, max `12`, step `0.5`, default `8`.
+- `Opacity` range slider, min `0`, max `1`, step `0.01`, default `0.24`.
 - A compact numeric readout such as `8 deg`.
+- A compact opacity readout such as `24%`.
 
 Rendering rules:
 
@@ -115,6 +117,9 @@ Rendering rules:
 - In `Accumulated` mode, accumulated points still depend on `Hit Points`, and
   accumulated hit-area patches depend on `Hit Area`. Turning either layer off
   must not force the other layer off.
+- The viewer defaults to `Accumulated` mode.
+- Opacity changes update the hit-area material live without changing hit-point
+  opacity.
 - Accumulated hit-area patches must be derived from `frames[]` with
   `frame_index <= current slider index`, not from `valid_hit_points[]`, because
   the summary points do not carry ray direction or `ray_t_m`.
@@ -232,7 +237,7 @@ the broadest meaningful subset.
 
 1. Existing hit points are unchanged and still render as point estimates.
 2. `Hit Area` is a separate layer toggle.
-3. Angular error defaults to `8` degrees and redraws live over `[5, 12]`.
+3. Angular error defaults to `8` degrees and redraws live over `[0, 12]`.
 4. Patch radii use `ray_t_m * tan(alpha)` and the oblique ellipse divisor
    `abs(dot(monitor_normal, gaze_direction))`.
 5. Patch orientation follows the gaze projection on the monitor plane.
@@ -241,8 +246,10 @@ the broadest meaningful subset.
 8. No new external dependency is introduced.
 9. In `Accumulated` mode, `Hit Area` renders all valid per-frame patches through
    the current slider frame independently from `Hit Points`.
-10. `artifacts/input/nakamura_short.mp4` is used for real verification.
-11. Closeout records commands, browser evidence, and residual uncertainty.
+10. Hit-area opacity defaults to `0.24` and redraws live over `[0, 1]`.
+11. `Accumulated` mode is the default hit display mode.
+12. `artifacts/input/nakamura_short.mp4` is used for real verification.
+13. Closeout records commands, browser evidence, and residual uncertainty.
 
 ## Residual Uncertainty
 
