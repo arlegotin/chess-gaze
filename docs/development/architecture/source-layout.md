@@ -55,6 +55,19 @@ runner, forward-timing, and retention helpers into separate concept modules.
   metadata. The app assets are copied into each run's `viewer/` directory; the
   generated page loads Three.js `0.185.0` from pinned jsDelivr npm module URLs
   at render time per ADR-0003. There is still no frontend build tree.
+
+Source-layout review, 2026-06-28: `viewer_assets/scene_viewer.js` is
+intentionally deep after the large-run performance repair despite crossing the
+800-line review trigger. It is a single generated browser app asset without a
+frontend build tree; splitting it now would either add new browser module
+loading constraints to direct `file://` artifacts or create pass-through helper
+files copied beside every viewer. Keep the file together while it owns one
+cohesive viewer surface: DOM bindings, current-frame rendering, accumulated
+geometry caches, and render scheduling. If it grows toward 1,500 lines, adds a
+second independently testable viewer mode, or the repo adds a frontend build
+pipeline, split geometry-cache construction, hit-area math, and render-loop
+scheduling into separate named viewer modules with explicit file-url packaging
+tests.
 - `tests/` contains behavior tests for code in `src/chess_gaze/`, with
   package-path-mirroring tests under `tests/chess_gaze/` and repository
   packaging checks at top level.
