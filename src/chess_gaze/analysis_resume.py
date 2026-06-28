@@ -71,7 +71,12 @@ def find_latest_resumable_run(
             continue
         if _run_is_complete(run_dir):
             continue
-        return run_layout_from_dir(run_dir)
+        layout = run_layout_from_dir(run_dir)
+        try:
+            validate_resume_cleanup_paths(layout)
+        except ValueError:
+            continue
+        return layout
     return None
 
 

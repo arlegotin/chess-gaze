@@ -155,6 +155,31 @@ def test_find_latest_resumable_run_skips_malformed_newest_run(
     assert result == compatible
 
 
+def test_find_latest_resumable_run_skips_cleanup_invalid_newest_run(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    compatible = _make_compatible_run(runs_root / "20260628T100000Z-good")
+    cleanup_invalid = _make_compatible_run(runs_root / "20260628T130000Z-bad-cleanup")
+    outside_viewer_dir = tmp_path / "outside-viewer-discovery"
+    outside_viewer_dir.mkdir()
+    cleanup_invalid.viewer_dir.rmdir()
+    cleanup_invalid.viewer_dir.symlink_to(
+        outside_viewer_dir,
+        target_is_directory=True,
+    )
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+    )
+
+    assert result == compatible
+
+
 def test_prepare_resume_run_refuses_to_delete_frame_artifacts_outside_run_root(
     tmp_path: Path,
 ) -> None:
