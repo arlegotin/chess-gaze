@@ -374,6 +374,102 @@ def test_analyze_video_resumes_latest_compatible_partial_run(
     assert summary.counts.frame_records == 5
 
 
+def test_analyze_video_resumes_partial_batched_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=5)
+    interrupted_batches: list[list[int]] = []
+
+    def interrupting_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        frame_indices = [frame.frame_index for frame in frames]
+        interrupted_batches.append(frame_indices)
+        if frame_indices == [2, 3]:
+            raise RuntimeError("simulated batch interruption")
+        return [_fake_record(frame) for frame in frames]
+
+    with pytest.raises(RuntimeError, match="simulated batch interruption"):
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=interrupting_batch,
+            ),
+        )
+
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    assert interrupted_batches == [[0, 1], [2, 3]]
+    assert len(_records_from(run_dir / "records" / "frames.jsonl")) == 2
+
+    resumed_batches: list[list[int]] = []
+
+    def resumed_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        resumed_batches.append([frame.frame_index for frame in frames])
+        return [_fake_record(frame) for frame in frames]
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            unigaze_batch_size=2,
+        ),
+        observers=ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=resumed_batch,
+        ),
+    )
+
+    assert result.layout.run_dir == run_dir
+    assert resumed_batches == [[2, 3], [4]]
+    assert [
+        record.frame_index for record in _records_from(result.frames_jsonl_path)
+    ] == [0, 1, 2, 3, 4]
+
+
+def test_analyze_video_no_resume_forces_fresh_run_for_partial_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=3)
+
+    def interrupt_after_first(frame: ObserverFrame) -> FrameRecord:
+        if frame.frame_index == 1:
+            raise RuntimeError("simulated interruption")
+        return _fake_record(frame)
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            observers=ObserverBundle(frame_observer=interrupt_after_first),
+        )
+
+    [partial_run_dir] = (output_root / "tiny" / "runs").iterdir()
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            resume=False,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert result.layout.run_dir != partial_run_dir
+    assert sorted(path.name for path in (output_root / "tiny" / "runs").iterdir()) == [
+        partial_run_dir.name,
+        result.layout.run_dir.name,
+    ]
+    assert [
+        record.frame_index for record in _records_from(result.frames_jsonl_path)
+    ] == [0, 1, 2]
+
+
 def test_analyze_video_does_not_resume_complete_run(
     tmp_path: Path,
 ) -> None:
@@ -1051,12 +1147,12 @@ def test_final_state_write_failure_does_not_leave_complete_qa_summary(
 
     from chess_gaze import pipeline
 
-    real_write_analysis_state = pipeline.write_analysis_state
+    real_write_analysis_state = cast(Any, pipeline).write_analysis_state
 
     def fail_complete_state_write(layout: object, state: Any) -> Path:
         if state.status == "complete":
             raise RuntimeError("simulated final state write failure")
-        return real_write_analysis_state(cast(Any, layout), cast(Any, state))
+        return cast(Path, real_write_analysis_state(cast(Any, layout), state))
 
     monkeypatch.setattr(
         pipeline,
