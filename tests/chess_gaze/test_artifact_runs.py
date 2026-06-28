@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from chess_gaze.artifact_runs import create_run_layout, frame_id
+from chess_gaze.artifact_runs import create_run_layout, frame_id, run_layout_from_dir
 
 
 def test_frame_id_is_zero_padded() -> None:
@@ -86,3 +86,18 @@ def test_relative_artifact_path_is_from_run_root(tmp_path: Path) -> None:
     assert layout.relative_artifact_path(artifact_path) == Path(
         "raw_frames/f000000042.png"
     )
+
+
+def test_run_layout_from_existing_run_dir(tmp_path: Path) -> None:
+    run_dir = tmp_path / "output" / "clip" / "runs" / "run-1"
+    layout = run_layout_from_dir(run_dir)
+
+    assert layout.run_dir == run_dir
+    assert layout.raw_frames_dir == run_dir / "raw_frames"
+    assert layout.processed_frames_dir == run_dir / "processed_frames"
+    assert layout.face_crops_dir == run_dir / "crops" / "face"
+    assert layout.left_eye_crops_dir == run_dir / "crops" / "eyes" / "left"
+    assert layout.right_eye_crops_dir == run_dir / "crops" / "eyes" / "right"
+    assert layout.records_dir == run_dir / "records"
+    assert layout.scene_dir == run_dir / "scene"
+    assert layout.viewer_dir == run_dir / "viewer"

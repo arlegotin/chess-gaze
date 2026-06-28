@@ -35,6 +35,22 @@ class RunLayout:
         return artifact_path.relative_to(self.run_dir)
 
 
+def run_layout_from_dir(run_dir: Path) -> RunLayout:
+    crops_dir = run_dir / "crops"
+    eyes_crops_dir = crops_dir / "eyes"
+    return RunLayout(
+        run_dir=run_dir,
+        raw_frames_dir=run_dir / "raw_frames",
+        processed_frames_dir=run_dir / "processed_frames",
+        crops_dir=crops_dir,
+        face_crops_dir=crops_dir / "face",
+        eyes_crops_dir=eyes_crops_dir,
+        left_eye_crops_dir=eyes_crops_dir / "left",
+        right_eye_crops_dir=eyes_crops_dir / "right",
+        records_dir=run_dir / "records",
+    )
+
+
 def _run_id(created_at: datetime, run_suffix: str) -> str:
     created_at_utc = created_at.astimezone(UTC)
     return f"{created_at_utc.strftime('%Y%m%dT%H%M%SZ')}-{run_suffix}"
