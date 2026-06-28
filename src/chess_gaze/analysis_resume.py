@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -12,9 +13,11 @@ from pydantic import ValidationError
 from chess_gaze.artifact_runs import RunLayout, frame_id, run_layout_from_dir
 from chess_gaze.frame_records import (
     CalibrationRecord,
+    ErrorRecord,
     FrameErrorRecord,
     FrameRecord,
     InferenceRuntimeRecord,
+    RunManifest,
     VideoManifest,
     read_run_manifest_artifact_json,
 )
@@ -112,6 +115,76 @@ def prepare_resume_run(
     )
 
 
+def write_initial_run_artifacts(
+    layout: RunLayout,
+    *,
+    created_at: datetime,
+    input_path: Path,
+    video_manifest: VideoManifest,
+    calibration: CalibrationRecord,
+    inference: InferenceRuntimeRecord,
+) -> None:
+    _write_json(
+        layout.run_dir / "run_manifest.json",
+        RunManifest(
+            run_id=layout.run_dir.name,
+            created_at_utc=_format_utc(created_at),
+            input_path=str(input_path),
+            video=video_manifest,
+            inference=inference,
+        ).model_dump(mode="json"),
+    )
+    _write_json(
+        layout.run_dir / "calibration.json",
+        calibration.model_dump(mode="json"),
+    )
+    _write_json(
+        layout.run_dir / "video_manifest.json",
+        video_manifest.model_dump(mode="json"),
+    )
+    (layout.records_dir / "frames.jsonl").touch()
+    (layout.records_dir / "errors.jsonl").touch()
+
+
+def new_analysis_state(
+    layout: RunLayout,
+    *,
+    video_manifest: VideoManifest,
+    next_frame_index: int,
+    status: Literal["processing", "complete", "failed"],
+    clock: Callable[[], datetime],
+) -> AnalysisState:
+    return AnalysisState(
+        run_id=layout.run_dir.name,
+        input_path=video_manifest.source_path,
+        source_video_sha256=video_manifest.source_sha256,
+        frame_count_decoded=video_manifest.frame_count_decoded,
+        next_frame_index=next_frame_index,
+        status=status,
+        updated_at_utc=_format_utc(clock()),
+    )
+
+
+def update_analysis_state(
+    state: AnalysisState,
+    *,
+    next_frame_index: int | None = None,
+    status: Literal["processing", "complete", "failed"] | None = None,
+    clock: Callable[[], datetime],
+) -> AnalysisState:
+    return AnalysisState(
+        run_id=state.run_id,
+        input_path=state.input_path,
+        source_video_sha256=state.source_video_sha256,
+        frame_count_decoded=state.frame_count_decoded,
+        next_frame_index=(
+            state.next_frame_index if next_frame_index is None else next_frame_index
+        ),
+        status=state.status if status is None else status,
+        updated_at_utc=_format_utc(clock()),
+    )
+
+
 def validate_resume_cleanup_paths(layout: RunLayout) -> None:
     _require_within_run_root(layout.run_dir, root=layout.run_dir)
 
@@ -141,6 +214,22 @@ def write_analysis_state(layout: RunLayout, state: AnalysisState) -> Path:
     path = layout.run_dir / "analysis_state.json"
     atomic_write_bytes(path, state.model_dump_json().encode("utf-8"))
     return path
+
+
+def commit_processed_records(
+    processed: Iterable[tuple[FrameRecord, list[ErrorRecord]]],
+    *,
+    frames_handle: TextIO,
+    errors_handle: TextIO,
+) -> tuple[int, int]:
+    next_frame_index = 0
+    frame_error_count = 0
+    for record, frame_errors in processed:
+        frames_handle.write(record.model_dump_json() + "\n")
+        next_frame_index = record.frame_index + 1
+        frame_error_count += len(frame_errors)
+    flush_jsonl_checkpoint(frames_handle, errors_handle)
+    return next_frame_index, frame_error_count
 
 
 def flush_jsonl_checkpoint(*handles: TextIO) -> None:
@@ -345,6 +434,14 @@ def _frame_index_from_path(path: Path) -> int | None:
 
 def _jsonl_bytes(lines: Iterable[str]) -> bytes:
     return "".join(f"{line}\n" for line in lines).encode("utf-8")
+
+
+def _write_json(path: Path, payload: object) -> None:
+    data = (
+        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True).encode("utf-8")
+        + b"\n"
+    )
+    atomic_write_bytes(path, data)
 
 
 def _format_utc(timestamp: datetime) -> str:

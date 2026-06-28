@@ -6,20 +6,22 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol, TextIO, cast
+from typing import Any, Protocol, TextIO, cast
 
 import numpy as np
 import numpy.typing as npt
 from pydantic import ValidationError
 
-from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.analysis_resume import (
-    AnalysisState,
+    commit_processed_records,
     find_latest_resumable_run,
-    flush_jsonl_checkpoint,
+    new_analysis_state,
     prepare_resume_run,
+    update_analysis_state,
     write_analysis_state,
+    write_initial_run_artifacts,
 )
+from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import (
     ConfigurationError,
@@ -33,7 +35,6 @@ from chess_gaze.frame_records import (
     ErrorRecord,
     FrameErrorRecord,
     FrameRecord,
-    RunManifest,
 )
 from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
 from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
@@ -223,7 +224,7 @@ def analyze_video(
             clock=lambda: created_at,
             run_suffix=request.run_suffix,
         )
-        _write_initial_run_artifacts(
+        write_initial_run_artifacts(
             layout,
             created_at=created_at,
             input_path=resolved.video_path,
@@ -231,7 +232,7 @@ def analyze_video(
             calibration=calibration,
             inference=inference,
         )
-        analysis_state = _new_analysis_state(
+        analysis_state = new_analysis_state(
             layout,
             video_manifest=inspection.video_manifest,
             next_frame_index=0,
@@ -297,14 +298,14 @@ def analyze_video(
                             )
                         ]
                         committed_next_frame_index, committed_error_count = (
-                            _commit_processed_records(
+                            commit_processed_records(
                                 processed,
                                 frames_handle=frames_handle,
                                 errors_handle=errors_handle,
                             )
                         )
                         frame_error_count += committed_error_count
-                        analysis_state = _update_analysis_state(
+                        analysis_state = update_analysis_state(
                             analysis_state,
                             next_frame_index=committed_next_frame_index,
                             status="processing",
@@ -325,14 +326,14 @@ def analyze_video(
                         errors_handle=errors_handle,
                     )
                     committed_next_frame_index, committed_error_count = (
-                        _commit_processed_records(
+                        commit_processed_records(
                             processed,
                             frames_handle=frames_handle,
                             errors_handle=errors_handle,
                         )
                     )
                     frame_error_count += committed_error_count
-                    analysis_state = _update_analysis_state(
+                    analysis_state = update_analysis_state(
                         analysis_state,
                         next_frame_index=committed_next_frame_index,
                         status="processing",
@@ -350,14 +351,14 @@ def analyze_video(
                         errors_handle=errors_handle,
                     )
                     committed_next_frame_index, committed_error_count = (
-                        _commit_processed_records(
+                        commit_processed_records(
                             processed,
                             frames_handle=frames_handle,
                             errors_handle=errors_handle,
                         )
                     )
                     frame_error_count += committed_error_count
-                    analysis_state = _update_analysis_state(
+                    analysis_state = update_analysis_state(
                         analysis_state,
                         next_frame_index=committed_next_frame_index,
                         status="processing",
@@ -371,7 +372,7 @@ def analyze_video(
         scene_result = build_scene_artifacts(layout)
         viewer_result = build_scene_viewer(layout, scene_result)
     except (OSError, ValueError) as exc:
-        analysis_state = _update_analysis_state(
+        analysis_state = update_analysis_state(
             analysis_state,
             status="failed",
             clock=request.clock,
@@ -379,7 +380,7 @@ def analyze_video(
         analysis_state_path = write_analysis_state(layout, analysis_state)
         raise PipelineError(CliErrorCode.SCHEMA_VALIDATION_FAILED, str(exc)) from exc
     except Exception:
-        analysis_state = _update_analysis_state(
+        analysis_state = update_analysis_state(
             analysis_state,
             status="failed",
             clock=request.clock,
@@ -390,14 +391,14 @@ def analyze_video(
     try:
         qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
     except ArtifactValidationError as exc:
-        analysis_state = _update_analysis_state(
+        analysis_state = update_analysis_state(
             analysis_state,
             status="failed",
             clock=request.clock,
         )
         analysis_state_path = write_analysis_state(layout, analysis_state)
         raise PipelineError(exc.code, str(exc)) from exc
-    analysis_state = _update_analysis_state(
+    analysis_state = update_analysis_state(
         analysis_state,
         next_frame_index=qa_summary.counts.decoded_frames,
         status=qa_summary.final_status,
@@ -454,86 +455,6 @@ def _build_and_write_qa_summary(
 
     _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
     return qa_summary
-
-
-def _write_initial_run_artifacts(
-    layout: RunLayout,
-    *,
-    created_at: datetime,
-    input_path: Path,
-    video_manifest: Any,
-    calibration: CalibrationRecord,
-    inference: Any,
-) -> None:
-    _write_json(
-        layout.run_dir / "run_manifest.json",
-        RunManifest(
-            run_id=layout.run_dir.name,
-            created_at_utc=_format_utc(created_at),
-            input_path=str(input_path),
-            video=video_manifest,
-            inference=inference,
-        ).model_dump(mode="json"),
-    )
-    _write_json(layout.run_dir / "calibration.json", calibration.model_dump(mode="json"))
-    _write_json(layout.run_dir / "video_manifest.json", video_manifest.model_dump(mode="json"))
-    (layout.records_dir / "frames.jsonl").touch()
-    (layout.records_dir / "errors.jsonl").touch()
-
-
-def _new_analysis_state(
-    layout: RunLayout,
-    *,
-    video_manifest: Any,
-    next_frame_index: int,
-    status: Literal["processing", "complete", "failed"],
-    clock: Clock,
-) -> AnalysisState:
-    return AnalysisState(
-        run_id=layout.run_dir.name,
-        input_path=video_manifest.source_path,
-        source_video_sha256=video_manifest.source_sha256,
-        frame_count_decoded=video_manifest.frame_count_decoded,
-        next_frame_index=next_frame_index,
-        status=status,
-        updated_at_utc=_format_utc(clock()),
-    )
-
-
-def _update_analysis_state(
-    state: AnalysisState,
-    *,
-    next_frame_index: int | None = None,
-    status: Literal["processing", "complete", "failed"] | None = None,
-    clock: Clock,
-) -> AnalysisState:
-    return AnalysisState(
-        run_id=state.run_id,
-        input_path=state.input_path,
-        source_video_sha256=state.source_video_sha256,
-        frame_count_decoded=state.frame_count_decoded,
-        next_frame_index=(
-            state.next_frame_index if next_frame_index is None else next_frame_index
-        ),
-        status=state.status if status is None else status,
-        updated_at_utc=_format_utc(clock()),
-    )
-
-
-def _commit_processed_records(
-    processed: Sequence[tuple[FrameRecord, list[ErrorRecord]]],
-    *,
-    frames_handle: TextIO,
-    errors_handle: TextIO,
-) -> tuple[int, int]:
-    next_frame_index = 0
-    frame_error_count = 0
-    for record, frame_errors in processed:
-        frames_handle.write(record.model_dump_json() + "\n")
-        next_frame_index = record.frame_index + 1
-        frame_error_count += len(frame_errors)
-    flush_jsonl_checkpoint(frames_handle, errors_handle)
-    return next_frame_index, frame_error_count
 
 
 def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
@@ -860,9 +781,3 @@ def _validate_image_format(actual: str, expected: str) -> None:
             CliErrorCode.USAGE,
             f"Unsupported image format {actual!r}; expected {expected!r}",
         )
-
-
-def _format_utc(value: datetime) -> str:
-    return (
-        value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    )
