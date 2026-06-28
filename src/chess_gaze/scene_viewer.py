@@ -21,6 +21,9 @@ from chess_gaze.scene_artifacts import (
 from chess_gaze.scene_records import SceneSummary, ViewerSceneData
 from chess_gaze.viewer_dependencies import three_import_map
 
+_INDEX_IMPORT_MAP_MARKER = "    <!-- CHESS_GAZE_IMPORT_MAP -->"
+_INDEX_MODULE_TAG = '    <script type="module" src="./scene_viewer.js"></script>'
+
 
 @dataclass(frozen=True)
 class ViewerBuildResult:
@@ -83,7 +86,8 @@ def build_scene_viewer(
         viewer_dir,
         updated_scene_result.viewer_data,
     )
-    _write_file_url_compatible_index(viewer_dir, updated_scene_result.viewer_data)
+    _write_served_index(viewer_dir)
+    _write_file_url_compatible_standalone(viewer_dir, updated_scene_result.viewer_data)
     return ViewerBuildResult(
         viewer_dir=viewer_dir,
         index_path=viewer_dir / "index.html",
@@ -103,14 +107,23 @@ def write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
     return path
 
 
-def _write_file_url_compatible_index(
+def _write_served_index(viewer_dir: Path) -> None:
+    index_path = viewer_dir / "index.html"
+    html = index_path.read_text(encoding="utf-8")
+    if _INDEX_IMPORT_MAP_MARKER not in html:
+        raise ViewerServerError("viewer index template is missing import map marker")
+
+    html = html.replace(_INDEX_IMPORT_MAP_MARKER, _import_map_script(three_import_map()))
+    atomic_write_bytes(index_path, html.encode("utf-8"))
+
+
+def _write_file_url_compatible_standalone(
     viewer_dir: Path,
     data: ViewerSceneData,
 ) -> None:
-    index_path = viewer_dir / "index.html"
-    html = index_path.read_text(encoding="utf-8")
-    module_tag = '    <script type="module" src="./scene_viewer.js"></script>'
-    if module_tag not in html:
+    standalone_path = viewer_dir / "standalone.html"
+    html = (viewer_dir / "index.html").read_text(encoding="utf-8")
+    if _INDEX_MODULE_TAG not in html:
         raise ViewerServerError("viewer index template is missing module script tag")
 
     scene_data_json = json.dumps(
@@ -123,7 +136,6 @@ def _write_file_url_compatible_index(
             '    <script type="application/json" id="scene-data-json">',
             _safe_script_payload(scene_data_json),
             "    </script>",
-            _import_map_script(three_import_map()),
             _module_source_script(
                 "scene-viewer-source",
                 (viewer_dir / "scene_viewer.js").read_text(encoding="utf-8"),
@@ -133,8 +145,8 @@ def _write_file_url_compatible_index(
             "    </script>",
         )
     )
-    html = html.replace(module_tag, embedded_bootstrap)
-    atomic_write_bytes(index_path, html.encode("utf-8"))
+    html = html.replace(_INDEX_MODULE_TAG, embedded_bootstrap)
+    atomic_write_bytes(standalone_path, html.encode("utf-8"))
 
 
 def _module_source_script(script_id: str, source: str) -> str:

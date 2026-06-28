@@ -211,7 +211,12 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
 def _read_viewer_app_assets(viewer_dir: Path) -> dict[str, str]:
     return {
         relative_path: (viewer_dir / relative_path).read_text(encoding="utf-8")
-        for relative_path in ("index.html", "scene_viewer.js", "styles.css")
+        for relative_path in (
+            "index.html",
+            "standalone.html",
+            "scene_viewer.js",
+            "styles.css",
+        )
     }
 
 
@@ -274,12 +279,13 @@ def built_viewer(tmp_path: Path) -> tuple[RunLayout, ViewerSceneData]:
     )
 
 
-def test_build_scene_viewer_writes_index_and_scene_data(
+def test_build_scene_viewer_writes_server_and_standalone_indexes(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, viewer_data = built_viewer
 
     assert (layout.viewer_dir / "index.html").is_file()
+    assert (layout.viewer_dir / "standalone.html").is_file()
     assert (layout.viewer_dir / "scene-data.json").is_file()
     assert viewer_data.schema_version == "gaze-scene-viewer-data-v1"
 
@@ -297,6 +303,7 @@ def test_build_scene_viewer_writes_app_assets_without_local_vendor_modules(
 
     assert {
         "index.html",
+        "standalone.html",
         "scene-data.json",
         "scene_viewer.js",
         "styles.css",
@@ -494,46 +501,60 @@ def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
     unexpected_urls = _external_urls(combined_assets) - APPROVED_REMOTE_MODULE_URLS
     assert unexpected_urls == set()
 
-    html = app_assets["index.html"]
+    index_html = app_assets["index.html"]
+    standalone_html = app_assets["standalone.html"]
     js = app_assets["scene_viewer.js"]
     css = app_assets["styles.css"]
-    import_map = _extract_import_map(html)
-    assert import_map == EXPECTED_IMPORT_MAP
-    assert THREE_MODULE_URL in _external_urls(html)
-    assert THREE_ADDONS_URL in _external_urls(html)
     assert _external_urls(js) == set()
     assert _external_urls(css) == set()
 
-    load_references = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html)
-    assert load_references
-    assert all(
-        not reference.startswith(("http://", "https://", "//"))
-        for reference in load_references
-    )
-    assert 'rel="icon" href="data:,"' in html
-    assert 'href="./styles.css"' in html
-    assert 'src="./scene_viewer.js"' not in html
+    for html in (index_html, standalone_html):
+        import_map = _extract_import_map(html)
+        assert import_map == EXPECTED_IMPORT_MAP
+        assert THREE_MODULE_URL in _external_urls(html)
+        assert THREE_ADDONS_URL in _external_urls(html)
+        load_references = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html)
+        assert load_references
+        assert all(
+            not reference.startswith(("http://", "https://", "//"))
+            for reference in load_references
+        )
+        assert 'rel="icon" href="data:,"' in html
+        assert 'href="./styles.css"' in html
+        assert (
+            _resolve_import_map_specifier(
+                import_map, "three/addons/controls/OrbitControls.js"
+            )
+            == ORBIT_CONTROLS_URL
+        )
+
+    assert 'type="module" src="./scene_viewer.js"' in index_html
+    assert 'src="./scene_viewer.js"' not in standalone_html
     assert 'from "three"' in js
     assert 'from "three/addons/controls/OrbitControls.js"' in js
-    assert (
-        _resolve_import_map_specifier(
-            import_map, "three/addons/controls/OrbitControls.js"
-        )
-        == ORBIT_CONTROLS_URL
-    )
 
 
-def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
+def test_generated_index_fetches_scene_data_without_embedding_payload(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, viewer_data = built_viewer
     html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
 
+    assert 'type="module" src="./scene_viewer.js"' in html
+    assert 'id="scene-data-json"' not in html
+    assert 'id="scene-viewer-source"' not in html
+    assert "window.__CHESS_GAZE_SCENE_DATA__" not in html
+    assert viewer_data.run_id not in html
+
+
+def test_generated_standalone_embeds_file_url_bootstrap_and_scene_data(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, viewer_data = built_viewer
+    html = (layout.viewer_dir / "standalone.html").read_text(encoding="utf-8")
+
     assert 'type="module" src="./scene_viewer.js"' not in html
     assert 'id="scene-data-json"' in html
-    _assert_absent(html, 'id="three-core-source"', "generated viewer index")
-    _assert_absent(html, 'id="three-module-source"', "generated viewer index")
-    _assert_absent(html, 'id="orbit-controls-source"', "generated viewer index")
     assert 'id="scene-viewer-source"' in html
     assert "window.__CHESS_GAZE_SCENE_DATA__" in html
     assert viewer_data.run_id in html
@@ -601,18 +622,18 @@ def test_generated_index_import_map_resolves_pinned_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
-    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    for relative_path in ("index.html", "standalone.html"):
+        html = (layout.viewer_dir / relative_path).read_text(encoding="utf-8")
+        import_map = _extract_import_map(html)
 
-    import_map = _extract_import_map(html)
-
-    assert import_map == EXPECTED_IMPORT_MAP
-    assert _resolve_import_map_specifier(import_map, "three") == THREE_MODULE_URL
-    assert (
-        _resolve_import_map_specifier(
-            import_map, "three/addons/controls/OrbitControls.js"
+        assert import_map == EXPECTED_IMPORT_MAP
+        assert _resolve_import_map_specifier(import_map, "three") == THREE_MODULE_URL
+        assert (
+            _resolve_import_map_specifier(
+                import_map, "three/addons/controls/OrbitControls.js"
+            )
+            == ORBIT_CONTROLS_URL
         )
-        == ORBIT_CONTROLS_URL
-    )
 
 
 def test_build_scene_viewer_updates_viewer_exists_summary(
