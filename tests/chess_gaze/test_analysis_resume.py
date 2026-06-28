@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from chess_gaze.analysis_resume import (
+    AnalysisState,
     find_latest_resumable_run,
+    flush_jsonl_checkpoint,
     prepare_resume_run,
+    write_analysis_state,
 )
 from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
@@ -107,6 +113,112 @@ def test_find_latest_resumable_run_ignores_complete_and_incompatible_runs(
     )
 
     assert result == compatible
+
+
+def test_prepare_resume_run_refuses_to_delete_frame_artifacts_outside_run_root(
+    tmp_path: Path,
+) -> None:
+    layout = _make_resume_layout(tmp_path, frame_count=2)
+    committed_record = _fake_frame_record(0)
+    (layout.records_dir / "frames.jsonl").write_text(
+        committed_record.model_dump_json() + "\n",
+        encoding="utf-8",
+    )
+    outside_dir = tmp_path / "outside-raw-frames"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "f000000001.png"
+    outside_file.write_bytes(b"outside")
+    malformed_layout = RunLayout(
+        run_dir=layout.run_dir,
+        raw_frames_dir=outside_dir,
+        processed_frames_dir=layout.processed_frames_dir,
+        crops_dir=layout.crops_dir,
+        face_crops_dir=layout.face_crops_dir,
+        eyes_crops_dir=layout.eyes_crops_dir,
+        left_eye_crops_dir=layout.left_eye_crops_dir,
+        right_eye_crops_dir=layout.right_eye_crops_dir,
+        records_dir=layout.records_dir,
+    )
+
+    with pytest.raises(ValueError, match="outside run root"):
+        prepare_resume_run(
+            malformed_layout,
+            _video_manifest(frame_count=2),
+            clock=lambda: datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
+        )
+
+    assert outside_file.exists()
+
+
+def test_prepare_resume_run_refuses_to_traverse_symlinked_run_subdirectories(
+    tmp_path: Path,
+) -> None:
+    layout = _make_resume_layout(tmp_path, frame_count=1)
+    (layout.records_dir / "frames.jsonl").write_text("", encoding="utf-8")
+    outside_scene_dir = tmp_path / "outside-scene"
+    outside_scene_dir.mkdir()
+    outside_file = outside_scene_dir / "scene_manifest.json"
+    outside_file.write_text('{"preserve": true}', encoding="utf-8")
+    layout.scene_dir.rmdir()
+    layout.scene_dir.symlink_to(outside_scene_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="outside run root"):
+        prepare_resume_run(
+            layout,
+            _video_manifest(frame_count=1),
+            clock=lambda: datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
+        )
+
+    assert outside_file.exists()
+
+
+def test_write_analysis_state_writes_expected_json(tmp_path: Path) -> None:
+    layout = _make_resume_layout(tmp_path, frame_count=3)
+    state = AnalysisState(
+        run_id=layout.run_dir.name,
+        input_path="artifacts/input/clip.mp4",
+        source_video_sha256="b" * 64,
+        frame_count_decoded=3,
+        next_frame_index=2,
+        status="processing",
+        updated_at_utc="2026-06-28T12:00:00Z",
+    )
+
+    result = write_analysis_state(layout, state)
+
+    assert result == layout.run_dir / "analysis_state.json"
+    assert (
+        AnalysisState.model_validate_json(result.read_text(encoding="utf-8")) == state
+    )
+
+
+def test_flush_jsonl_checkpoint_flushes_and_fsyncs_each_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fsync_calls: list[int] = []
+
+    def record_fsync(fileno: int) -> None:
+        fsync_calls.append(fileno)
+
+    monkeypatch.setattr(os, "fsync", record_fsync)
+    first_path = tmp_path / "first.jsonl"
+    second_path = tmp_path / "second.jsonl"
+    with (
+        first_path.open("w", encoding="utf-8") as first_handle,
+        second_path.open(
+            "w",
+            encoding="utf-8",
+        ) as second_handle,
+    ):
+        first_handle.write('{"frame":0}\n')
+        second_handle.write('{"frame":1}\n')
+
+        flush_jsonl_checkpoint(first_handle, second_handle)
+
+        assert fsync_calls == [first_handle.fileno(), second_handle.fileno()]
+        assert first_path.read_text(encoding="utf-8") == '{"frame":0}\n'
+        assert second_path.read_text(encoding="utf-8") == '{"frame":1}\n'
 
 
 def _make_resume_layout(tmp_path: Path, *, frame_count: int) -> RunLayout:

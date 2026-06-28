@@ -230,10 +230,20 @@ def _delete_uncommitted_frame_artifacts(
         layout.left_eye_crops_dir,
         layout.right_eye_crops_dir,
     ):
-        _delete_frame_indexed_files(directory, next_frame_index=next_frame_index)
+        _delete_frame_indexed_files(
+            directory,
+            next_frame_index=next_frame_index,
+            root=layout.run_dir,
+        )
 
 
-def _delete_frame_indexed_files(directory: Path, *, next_frame_index: int) -> None:
+def _delete_frame_indexed_files(
+    directory: Path,
+    *,
+    next_frame_index: int,
+    root: Path,
+) -> None:
+    _require_within_run_root(directory, root=root)
     if not directory.exists():
         return
 
@@ -243,7 +253,7 @@ def _delete_frame_indexed_files(directory: Path, *, next_frame_index: int) -> No
 
         index = _frame_index_from_path(path)
         if index is not None and index >= next_frame_index:
-            path.unlink()
+            _unlink_if_file(path, root=root)
 
 
 def _delete_derived_artifacts(layout: RunLayout) -> None:
@@ -255,6 +265,7 @@ def _delete_derived_artifacts(layout: RunLayout) -> None:
         _unlink_if_file(path, root=layout.run_dir)
 
     for directory in (layout.scene_dir, layout.viewer_dir):
+        _require_within_run_root(directory, root=layout.run_dir)
         if not directory.exists():
             continue
         for path in directory.rglob("*"):
@@ -263,13 +274,19 @@ def _delete_derived_artifacts(layout: RunLayout) -> None:
 
 
 def _unlink_if_file(path: Path, *, root: Path) -> None:
-    try:
-        path.relative_to(root)
-    except ValueError as exc:  # pragma: no cover - defensive boundary
-        raise ValueError(f"refusing to delete outside run root: {path}") from exc
+    _require_within_run_root(path, root=root)
 
     if path.is_file():
         path.unlink()
+
+
+def _require_within_run_root(path: Path, *, root: Path) -> None:
+    resolved_root = root.resolve(strict=False)
+    resolved_path = path.resolve(strict=False)
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"refusing to delete outside run root: {path}") from exc
 
 
 def _frame_index_from_path(path: Path) -> int | None:
