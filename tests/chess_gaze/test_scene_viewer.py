@@ -447,6 +447,12 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "HIT_AREA_MAX_OPACITY = 1" in js
     assert "updateHitAreaOpacityLabel" in js
     assert "materials.hitArea.opacity = hitAreaOpacity()" in js
+    opacity_handler_body = js.split(
+        'elements.hitAreaOpacity.addEventListener("input", () => {', 1
+    )[1].split("  });", 1)[0]
+    assert "applyHitAreaOpacity()" in opacity_handler_body
+    assert "renderCurrentFrame()" not in opacity_handler_body
+    assert "renderAccumulatedHits()" not in opacity_handler_body
     assert "rayT * Math.tan(alphaRadians)" in js
     assert "minorRadius / normalDirectionDot" in js
     assert "direction.clone().sub(" in js

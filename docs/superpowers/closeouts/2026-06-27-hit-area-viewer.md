@@ -421,18 +421,47 @@ Results:
 - `65 files already formatted`
 - `Success: no issues found in 65 source files`
 
-Regeneration command used existing run records rather than rerunning model
-inference. Result:
+Because the requested run directory had been removed, final regeneration reran
+`artifacts/input/nakamura_1.mp4` with the Python API's deterministic
+`clock`/`run_suffix` hooks so the recreated immutable run kept the requested
+id:
+
+```sh
+UV_CACHE_DIR=.uv-cache MPLCONFIGDIR=/private/tmp/chess-gaze-matplotlib uv run python - <<'PY'
+from datetime import UTC, datetime
+from pathlib import Path
+
+from chess_gaze.pipeline import AnalyzeRequest, analyze_video
+
+result = analyze_video(
+    AnalyzeRequest(
+        video_path=Path("artifacts/input/nakamura_1.mp4"),
+        output_root=Path("artifacts/output"),
+        models_root=Path("models"),
+        run_suffix="0d256588",
+        clock=lambda: datetime(2026, 6, 28, 8, 42, 16, tzinfo=UTC),
+    )
+)
+print(result.layout.run_dir)
+print(f"viewer: {result.viewer_index_path}")
+print(f"decoded_frame_count: {result.decoded_frame_count}")
+print(f"validated_record_count: {result.validated_record_count}")
+print(f"valid_monitor_hit_count: {result.valid_monitor_hit_count}")
+PY
+```
+
+Result:
 
 - viewer:
   `artifacts/output/nakamura_1/runs/20260628T084216Z-0d256588/viewer/index.html`
-- frame count: `1973`
-- valid hit points: `1973`
-- QA final status: `complete`
+- decoded frame count: `1973`
+- validated record count: `1973`
+- valid monitor hit count: `1973`
+- QA final status from `qa_summary.json`: `complete`
 
 Browser smoke for the regenerated viewer:
 
-- URL: `http://127.0.0.1:54281/`
+- URL: `http://127.0.0.1:54838/`
 - initial status: `Accumulated mode. Frame 1 of 1973: monitor hit is valid.`
 - `Accumulated` checked by default; `Instant` unchecked
 - angular slider min/max: `0` / `12`
@@ -445,14 +474,22 @@ Canvas pixel evidence:
 
 | State | PNG data URL length | Sample hash |
 | --- | ---: | ---: |
-| accumulated frame 41, angular 8, opacity 24% | `343454` | `1949856123` |
-| opacity 0% | `274498` | `418470569` |
-| opacity 80% | `296766` | `1506378810` |
-| angular 0 deg, opacity 80% | `274498` | `418470569` |
+| accumulated frame 41, angular 8, opacity 24% | `343454` | `294927700` |
+| opacity 0% | `274498` | `3271123786` |
+| opacity 80% | `296766` | `2338173071` |
+| angular 0 deg, opacity 80% | `274498` | `3271123786` |
 
 Screenshot captured at:
 
-`/private/tmp/chess-gaze-nakamura-1-hit-area-opacity.png`
+`/private/tmp/chess-gaze-nakamura-1-regenerated-hit-area-opacity.png`
+
+Review fix:
+
+- Removed geometry rebuilds from the opacity slider handler; opacity now updates
+  only the shared material and label, and the animation loop renders the changed
+  material.
+- Added a regression assertion that the opacity handler does not call
+  `renderCurrentFrame()` or `renderAccumulatedHits()`.
 
 ## Residual Uncertainty
 

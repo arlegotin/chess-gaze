@@ -710,8 +710,6 @@ function bindControls() {
   elements.hitAreaOpacity.addEventListener("input", () => {
     updateHitAreaOpacityLabel();
     applyHitAreaOpacity();
-    renderCurrentFrame();
-    renderAccumulatedHits();
   });
   for (const toggle of Object.values(elements.toggles)) {
     toggle.addEventListener("change", () => {
