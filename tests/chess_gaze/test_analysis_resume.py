@@ -115,6 +115,26 @@ def test_find_latest_resumable_run_ignores_complete_and_incompatible_runs(
     assert result == compatible
 
 
+def test_find_latest_resumable_run_ignores_symlinked_run_directories(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    outside_run = _make_compatible_run(tmp_path / "outside-run")
+    symlink_run = runs_root / "20260628T120000Z-symlink"
+    symlink_run.parent.mkdir(parents=True)
+    symlink_run.symlink_to(outside_run.run_dir, target_is_directory=True)
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+    )
+
+    assert result is None
+
+
 def test_prepare_resume_run_refuses_to_delete_frame_artifacts_outside_run_root(
     tmp_path: Path,
 ) -> None:
@@ -144,6 +164,28 @@ def test_prepare_resume_run_refuses_to_delete_frame_artifacts_outside_run_root(
         prepare_resume_run(
             malformed_layout,
             _video_manifest(frame_count=2),
+            clock=lambda: datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
+        )
+
+    assert outside_file.exists()
+
+
+def test_prepare_resume_run_refuses_nested_symlinked_derived_directories(
+    tmp_path: Path,
+) -> None:
+    layout = _make_resume_layout(tmp_path, frame_count=1)
+    (layout.records_dir / "frames.jsonl").write_text("", encoding="utf-8")
+    outside_viewer_dir = tmp_path / "outside-viewer"
+    outside_viewer_dir.mkdir()
+    outside_file = outside_viewer_dir / "scene-data.json"
+    outside_file.write_text('{"preserve": true}', encoding="utf-8")
+    symlink_dir = layout.viewer_dir / "nested"
+    symlink_dir.symlink_to(outside_viewer_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="outside run root"):
+        prepare_resume_run(
+            layout,
+            _video_manifest(frame_count=1),
             clock=lambda: datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
         )
 

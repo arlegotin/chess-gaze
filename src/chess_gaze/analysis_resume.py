@@ -53,7 +53,11 @@ def find_latest_resumable_run(
 
     expected_video_path = str(video_path)
     for run_dir in sorted(
-        (path for path in runs_root.iterdir() if path.is_dir()),
+        (
+            path
+            for path in runs_root.iterdir()
+            if path.is_dir() and not path.is_symlink()
+        ),
         key=lambda path: path.name,
         reverse=True,
     ):
@@ -269,6 +273,7 @@ def _delete_derived_artifacts(layout: RunLayout) -> None:
         if not directory.exists():
             continue
         for path in directory.rglob("*"):
+            _require_within_run_root(path, root=layout.run_dir)
             if path.is_file():
                 _unlink_if_file(path, root=layout.run_dir)
 
@@ -281,6 +286,9 @@ def _unlink_if_file(path: Path, *, root: Path) -> None:
 
 
 def _require_within_run_root(path: Path, *, root: Path) -> None:
+    if root.is_symlink():
+        raise ValueError(f"refusing to delete outside run root: {path}")
+
     resolved_root = root.resolve(strict=False)
     resolved_path = path.resolve(strict=False)
     try:
