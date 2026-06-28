@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -37,14 +36,18 @@ from chess_gaze.frame_records import (
     FrameRecord,
 )
 from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
-from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
+from chess_gaze.image_io import save_rgb_png
 from chess_gaze.model_assets import (
     ModelAssetError,
     ResolvedModelAsset,
     load_model_registry,
     validate_required_assets,
 )
-from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
+from chess_gaze.qa_summary import (
+    ArtifactValidationError,
+    build_qa_summary,
+    write_qa_summary,
+)
 from chess_gaze.scene_artifacts import build_scene_artifacts
 from chess_gaze.scene_viewer import build_scene_viewer
 from chess_gaze.unigaze_runtime import (
@@ -64,7 +67,6 @@ from chess_gaze.visualization import render_processed_frame
 
 DEFAULT_MODEL_REGISTRY_PATH = Path(__file__).with_name("model_registry.json")
 DEFAULT_APPROVED_LICENSES = frozenset({"MG-NC-RAI-2.0"})
-QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
 RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
@@ -389,7 +391,7 @@ def analyze_video(
         raise
 
     try:
-        qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
+        qa_summary = build_qa_summary(layout)
     except ArtifactValidationError as exc:
         analysis_state = update_analysis_state(
             analysis_state,
@@ -406,7 +408,7 @@ def analyze_video(
     )
     analysis_state_path = write_analysis_state(layout, analysis_state)
     try:
-        qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
+        qa_summary = write_qa_summary(layout, qa_summary_path)
     except ArtifactValidationError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
     if not qa_summary.artifact_validation.schema_validation_passed:
@@ -436,25 +438,6 @@ def analyze_video(
         valid_scene_frame_count=scene_result.scene_frame_count,
         valid_monitor_hit_count=scene_result.valid_monitor_hit_count,
     )
-
-
-def _build_and_write_qa_summary(
-    run_layout: RunLayout, qa_summary_path: Path
-) -> QASummary:
-    qa_summary = build_qa_summary(run_layout)
-    stable_total_run_bytes: int | None = None
-
-    for _attempt in range(QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS):
-        _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
-        refreshed_summary = build_qa_summary(run_layout)
-        refreshed_total_run_bytes = refreshed_summary.byte_counts.total_run_bytes
-        if refreshed_total_run_bytes == stable_total_run_bytes:
-            return qa_summary
-        stable_total_run_bytes = refreshed_total_run_bytes
-        qa_summary = refreshed_summary
-
-    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
-    return qa_summary
 
 
 def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
@@ -765,14 +748,6 @@ def _append_frame_errors(errors_handle: TextIO, record: FrameRecord) -> None:
 
 
 frame_error_writer: FrameErrorWriter = _append_frame_errors
-
-
-def _write_json(path: Path, payload: object) -> None:
-    data = (
-        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True).encode("utf-8")
-        + b"\n"
-    )
-    atomic_write_bytes(path, data)
 
 
 def _validate_image_format(actual: str, expected: str) -> None:

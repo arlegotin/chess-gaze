@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from collections import Counter
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from chess_gaze.frame_records import (
     read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import StrictSchemaModel
+from chess_gaze.image_io import atomic_write_bytes
 from chess_gaze.scene_records import (
     SceneFrameRecord,
     SceneManifest,
@@ -28,6 +30,7 @@ from chess_gaze.scene_records import (
     ViewerSceneData,
 )
 
+QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
 QA_SAMPLE_COUNT = 30
 REPRESENTATIVE_FAILURE_COUNT = 20
 QUALITY_FAILURE_COUNT = 20
@@ -180,6 +183,71 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
         disk_space=disk_space,
         artifact_validation=artifact_validation,
         built_from_disk_at_utc=_format_utc(datetime.now(UTC)),
+    )
+
+
+def write_qa_summary(run_layout: RunLayout, qa_summary_path: Path) -> QASummary:
+    qa_summary = _build_stabilized_qa_summary(run_layout, qa_summary_path)
+    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
+    return qa_summary
+
+
+def _build_stabilized_qa_summary(
+    run_layout: RunLayout, qa_summary_path: Path
+) -> QASummary:
+    qa_summary = build_qa_summary(run_layout)
+    existing_qa_summary_bytes = (
+        qa_summary_path.stat().st_size if qa_summary_path.exists() else 0
+    )
+    run_bytes_without_qa_summary = (
+        qa_summary.byte_counts.total_run_bytes - existing_qa_summary_bytes
+    )
+    stable_total_run_bytes: int | None = None
+
+    for _attempt in range(QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS):
+        candidate_total_run_bytes = run_bytes_without_qa_summary + len(
+            _json_bytes(qa_summary.model_dump(mode="json"))
+        )
+        qa_summary = _qa_summary_with_total_run_bytes(
+            qa_summary,
+            candidate_total_run_bytes,
+        )
+        if candidate_total_run_bytes == stable_total_run_bytes:
+            return qa_summary
+        stable_total_run_bytes = candidate_total_run_bytes
+
+    return qa_summary
+
+
+def _qa_summary_with_total_run_bytes(
+    qa_summary: QASummary, total_run_bytes: int
+) -> QASummary:
+    byte_counts = qa_summary.byte_counts.model_copy(
+        update={"total_run_bytes": total_run_bytes}
+    )
+    artifact_validation = qa_summary.artifact_validation.model_copy(
+        update={"byte_counts": byte_counts}
+    )
+    disk_space = qa_summary.disk_space.model_copy(
+        update={"preflight_estimate_bytes": max(total_run_bytes, 1)}
+    )
+    return qa_summary.model_copy(
+        update={
+            "byte_counts": byte_counts,
+            "artifact_validation": artifact_validation,
+            "disk_space": disk_space,
+        }
+    )
+
+
+def _write_json(path: Path, payload: object) -> None:
+    atomic_write_bytes(path, _json_bytes(payload))
+
+
+def _json_bytes(payload: object) -> bytes:
+    return (
+        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True).encode("utf-8")
+        + b"\n"
     )
 
 

@@ -1043,6 +1043,37 @@ def test_analyze_video_fails_when_scene_artifact_validation_fails(
     )
 
 
+def test_final_state_write_failure_does_not_leave_complete_qa_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    real_write_analysis_state = pipeline.write_analysis_state
+
+    def fail_complete_state_write(layout: object, state: Any) -> Path:
+        if state.status == "complete":
+            raise RuntimeError("simulated final state write failure")
+        return real_write_analysis_state(cast(Any, layout), cast(Any, state))
+
+    monkeypatch.setattr(
+        pipeline,
+        "write_analysis_state",
+        fail_complete_state_write,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated final state write failure"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    [run_dir] = (tmp_path / "output" / "tiny" / "runs").iterdir()
+    assert not (run_dir / "qa_summary.json").exists()
+
+
 def test_config_output_root_controls_run_layout_for_fake_observers(
     tmp_path: Path,
 ) -> None:
