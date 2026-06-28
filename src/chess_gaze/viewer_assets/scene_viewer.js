@@ -764,7 +764,10 @@ function renderCurrentHitArea(frame) {
 function updateStatusPanel() {
   const frame = currentFrame();
   const total = state.sceneData?.frame_count || 0;
-  const validHitsToFrame = state.sceneData ? visibleHitPointCount() : 0;
+  let validHitsToFrame = 0;
+  if (state.sceneData) {
+    validHitsToFrame = visibleHitPointCount();
+  }
 
   elements.frameLabel.textContent =
     total > 0 ? `${state.frameIndex + 1} / ${total}` : "0 / 0";
@@ -831,35 +834,32 @@ function resizeRenderer() {
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
   if (width === state.canvasWidth && height === state.canvasHeight) {
-    return false;
+    return;
   }
   state.canvasWidth = width;
   state.canvasHeight = height;
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  return true;
+  requestRender();
 }
 
 function requestRender() {
   state.renderRequested = true;
-  if (state.animationFrameRequested) {
-    return;
+  if (!state.animationFrameRequested) {
+    state.animationFrameRequested = true;
+    window.requestAnimationFrame(renderFrame);
   }
-  state.animationFrameRequested = true;
-  window.requestAnimationFrame(renderScene);
 }
 
-function renderScene() {
+function renderFrame() {
   state.animationFrameRequested = false;
-  const resized = resizeRenderer();
-  const controlsChanged = controls.update();
-  if (!state.renderRequested && !resized && !controlsChanged) {
-    return;
+  const controlsNeedRender = controls.enableDamping && controls.update();
+  if (state.renderRequested || state.playing || controlsNeedRender) {
+    state.renderRequested = false;
+    renderer.render(scene, camera);
   }
-  state.renderRequested = false;
-  renderer.render(scene, camera);
-  if (controlsChanged) {
+  if (state.playing || controlsNeedRender || state.renderRequested) {
     requestRender();
   }
 }
@@ -879,6 +879,7 @@ function bindControls() {
   });
   elements.playPause.addEventListener("click", () => {
     setPlaying(!state.playing);
+    requestRender();
   });
   elements.modeInstant.addEventListener("change", () => {
     setMode("instant");
@@ -922,6 +923,7 @@ function applySceneData(sceneData) {
   applyHitAreaOpacity();
   buildAccumulatedHitPoints();
   rebuildAccumulatedHitAreasForAngularError();
+  resizeRenderer();
   setFrameIndex(0);
   requestRender();
 }
@@ -951,5 +953,10 @@ async function loadSceneData() {
 }
 
 controls.addEventListener("change", requestRender);
-window.addEventListener("resize", requestRender);
+const resizeObserver =
+  typeof ResizeObserver === "function" ? new ResizeObserver(resizeRenderer) : null;
+if (resizeObserver) {
+  resizeObserver.observe(elements.canvas);
+}
+window.addEventListener("resize", resizeRenderer);
 boot();

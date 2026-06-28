@@ -504,6 +504,24 @@ def test_generated_viewer_keeps_accumulated_layers_independent(
     assert "hitPoints.checked && hitArea.checked" not in visibility_body
 
 
+def test_generated_viewer_renders_on_demand_and_uses_prefix_counts(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "function requestRender()" in js
+    assert "function renderFrame()" in js
+    assert "new ResizeObserver(" in js
+    assert 'controls.addEventListener("change", requestRender)' in js
+    assert "window.requestAnimationFrame(renderFrame)" in js
+    assert "state.sceneData?.valid_hit_points.filter" not in js
+    assert "validHitsToFrame = visibleHitPointCount()" in js
+    assert "resizeRenderer();" not in js.split("function renderFrame()", 1)[1].split(
+        "\n}", 1
+    )[0]
+
+
 def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
