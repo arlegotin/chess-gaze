@@ -461,10 +461,10 @@ def test_analyze_video_no_resume_forces_fresh_run_for_partial_run(
     )
 
     assert result.layout.run_dir != partial_run_dir
-    assert sorted(path.name for path in (output_root / "tiny" / "runs").iterdir()) == [
+    assert {path.name for path in (output_root / "tiny" / "runs").iterdir()} == {
         partial_run_dir.name,
         result.layout.run_dir.name,
-    ]
+    }
     assert [
         record.frame_index for record in _records_from(result.frames_jsonl_path)
     ] == [0, 1, 2]

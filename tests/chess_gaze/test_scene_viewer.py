@@ -508,9 +508,9 @@ def test_generated_viewer_updates_accumulated_hit_area_without_rebuilds(
     error_handler_body = js.split(
         'elements.hitAreaErrorDegrees.addEventListener("input", () => {', 1
     )[1].split("  });", 1)[0]
-    update_body = js.split(
-        "function updateAccumulatedHitAreasForAngularError() {", 1
-    )[1].split("\nfunction ", 1)[0]
+    update_body = js.split("function updateAccumulatedHitAreasForAngularError() {", 1)[
+        1
+    ].split("\nfunction ", 1)[0]
 
     assert "updateAccumulatedHitAreasForAngularError()" in error_handler_body
     assert "buildAccumulatedHitAreaMesh()" not in error_handler_body
