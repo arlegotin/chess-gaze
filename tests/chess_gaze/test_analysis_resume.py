@@ -135,6 +135,26 @@ def test_find_latest_resumable_run_ignores_symlinked_run_directories(
     assert result is None
 
 
+def test_find_latest_resumable_run_skips_malformed_newest_run(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    compatible = _make_compatible_run(runs_root / "20260628T100000Z-good")
+    malformed = runs_root / "20260628T130000Z-malformed"
+    malformed.mkdir(parents=True)
+    (malformed / "run_manifest.json").mkdir()
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+    )
+
+    assert result == compatible
+
+
 def test_prepare_resume_run_refuses_to_delete_frame_artifacts_outside_run_root(
     tmp_path: Path,
 ) -> None:

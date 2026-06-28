@@ -162,7 +162,7 @@ def _run_matches(
         persisted_calibration = CalibrationRecord.model_validate_json(
             (run_dir / "calibration.json").read_text(encoding="utf-8")
         )
-    except (FileNotFoundError, ValidationError, ValueError):
+    except (OSError, ValidationError, ValueError):
         return False
 
     return (
@@ -183,7 +183,7 @@ def _run_is_complete(run_dir: Path) -> bool:
         qa_summary = QASummary.model_validate_json(
             qa_summary_path.read_text(encoding="utf-8")
         )
-    except (FileNotFoundError, ValidationError, ValueError):
+    except (OSError, ValidationError, ValueError):
         return False
 
     validation = qa_summary.artifact_validation
