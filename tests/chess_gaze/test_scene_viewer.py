@@ -466,18 +466,42 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "frame?.unigaze_ray?.valid" in js
     assert "projectedDirection" in js
     assert "renderCurrentHitArea" in js
-    assert "renderAccumulatedHitAreas" in js
-    assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" in js
-    assert "addHitArea(groups.accumulated, geometry)" in js
-    accumulated_hit_area_body = js.split("function renderAccumulatedHitAreas() {", 1)[
-        1
-    ].split("\nfunction renderAccumulatedHits()", 1)[0]
-    assert "elements.toggles.hitArea.checked" in accumulated_hit_area_body
-    assert "hitPoints" not in accumulated_hit_area_body
-    assert "valid_hit_points" not in accumulated_hit_area_body
+    assert "rebuildAccumulatedHitAreasForAngularError" in js
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
     assert ".hit-area-opacity-row" in css
+
+
+def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "new THREE.Points(" in js
+    assert "new THREE.PointsMaterial(" in js
+    assert "buildAccumulatedHitPoints" in js
+    assert "buildAccumulatedHitAreaMesh" in js
+    assert "setDrawRange(0, visibleHitAreaTriangleIndexCount" in js
+    assert "hitPointFrameIndices" in js
+    assert "hitAreaPatchFrameIndices" in js
+    assert "upperBoundFrameIndex" in js
+    assert "for (const hit of state.sceneData.valid_hit_points)" not in js
+    assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" not in js
+
+
+def test_generated_viewer_keeps_accumulated_layers_independent(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    visibility_body = js.split("function updateAccumulatedVisibility() {", 1)[1].split(
+        "\nfunction ", 1
+    )[0]
+    assert "elements.toggles.hitPoints.checked" in visibility_body
+    assert "elements.toggles.hitArea.checked" in visibility_body
+    assert "hitPoints.checked && hitArea.checked" not in visibility_body
 
 
 def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(

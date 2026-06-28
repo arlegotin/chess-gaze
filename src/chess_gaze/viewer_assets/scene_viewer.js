@@ -77,6 +77,18 @@ const state = {
   mode: "accumulated",
   playing: false,
   playTimer: null,
+  renderCache: {
+    hitPoints: null,
+    hitPointFrameIndices: [],
+    hitAreas: null,
+    hitAreaPatchFrameIndices: [],
+    hitAreaTriangleIndexCounts: [],
+    hitAreaAngularErrorDegrees: null,
+  },
+  renderRequested: false,
+  animationFrameRequested: false,
+  canvasWidth: 0,
+  canvasHeight: 0,
 };
 
 const renderer = new THREE.WebGLRenderer({
@@ -128,9 +140,10 @@ const materials = {
     color: COLORS.currentHit,
     roughness: 0.42,
   }),
-  accumulatedHit: new THREE.MeshStandardMaterial({
+  accumulatedHitPoints: new THREE.PointsMaterial({
     color: COLORS.accumulatedHit,
-    roughness: 0.7,
+    size: 0.016,
+    sizeAttenuation: true,
   }),
   monitorPlane: new THREE.MeshBasicMaterial({
     color: COLORS.monitorPlane,
@@ -307,6 +320,14 @@ function clearGroup(group) {
   }
 }
 
+function removeAccumulatedObject(object) {
+  if (!object) {
+    return;
+  }
+  object.geometry?.dispose?.();
+  groups.accumulated.remove(object);
+}
+
 function addLine(group, start, end, material) {
   const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
   const line = new THREE.Line(geometry, material);
@@ -326,6 +347,20 @@ function addHitArea(group, geometry) {
   const mesh = new THREE.Mesh(geometry, materials.hitArea);
   group.add(mesh);
   return mesh;
+}
+
+function upperBoundFrameIndex(frameIndices, frameIndex) {
+  let low = 0;
+  let high = frameIndices.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (frameIndices[middle] <= frameIndex) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
 }
 
 function axisInMonitorPlane(preferredAxis, normal) {
@@ -350,7 +385,7 @@ function fallbackAxisInMonitorPlane(normal) {
     .normalize();
 }
 
-function hitAreaGeometry(frame, angularErrorDegreesValue) {
+function hitAreaPatchVertices(frame, angularErrorDegreesValue) {
   const hit = frame?.main_monitor_hit;
   if (!hit?.valid || !frame?.unigaze_ray?.valid || !hit.point_scene_m) {
     return null;
@@ -394,9 +429,10 @@ function hitAreaGeometry(frame, angularErrorDegreesValue) {
   const minorAxis = new THREE.Vector3()
     .crossVectors(normal, orientedMajorAxis)
     .normalize();
-  const patchCenter = center.add(normal.clone().multiplyScalar(HIT_AREA_PLANE_OFFSET_M));
+  const patchCenter = center
+    .clone()
+    .add(normal.clone().multiplyScalar(HIT_AREA_PLANE_OFFSET_M));
   const vertices = [patchCenter.x, patchCenter.y, patchCenter.z];
-  const indices = [];
 
   for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
     const theta = (index / HIT_AREA_SEGMENTS) * Math.PI * 2;
@@ -409,9 +445,21 @@ function hitAreaGeometry(frame, angularErrorDegreesValue) {
       )
       .add(minorAxis.clone().multiplyScalar(Math.sin(theta) * minorRadius));
     vertices.push(point.x, point.y, point.z);
-    indices.push(0, index + 1, ((index + 1) % HIT_AREA_SEGMENTS) + 1);
   }
 
+  return vertices;
+}
+
+function hitAreaGeometry(frame, angularErrorDegreesValue) {
+  const vertices = hitAreaPatchVertices(frame, angularErrorDegreesValue);
+  if (!vertices) {
+    return null;
+  }
+
+  const indices = [];
+  for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
+    indices.push(0, index + 1, ((index + 1) % HIT_AREA_SEGMENTS) + 1);
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
@@ -420,6 +468,149 @@ function hitAreaGeometry(frame, angularErrorDegreesValue) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function buildAccumulatedHitPoints() {
+  removeAccumulatedObject(state.renderCache.hitPoints);
+  state.renderCache.hitPoints = null;
+  state.renderCache.hitPointFrameIndices = [];
+
+  const positions = [];
+  const frameIndices = [];
+  for (const hit of state.sceneData?.valid_hit_points || []) {
+    const point = finiteVector(hit.point_scene_m);
+    if (point && Number.isInteger(hit.frame_index)) {
+      positions.push(point.x, point.y, point.z);
+      frameIndices.push(hit.frame_index);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  geometry.setDrawRange(0, 0);
+
+  const points = new THREE.Points(geometry, materials.accumulatedHitPoints);
+  points.userData.layer = "hitPoints";
+  points.visible = false;
+  groups.accumulated.add(points);
+  state.renderCache.hitPoints = points;
+  state.renderCache.hitPointFrameIndices = frameIndices;
+}
+
+function buildAccumulatedHitAreaMesh() {
+  removeAccumulatedObject(state.renderCache.hitAreas);
+  state.renderCache.hitAreas = null;
+  state.renderCache.hitAreaPatchFrameIndices = [];
+  state.renderCache.hitAreaTriangleIndexCounts = [];
+  state.renderCache.hitAreaAngularErrorDegrees = null;
+
+  const positions = [];
+  const indices = [];
+  const patchFrameIndices = [];
+  const triangleIndexCounts = [];
+  const angularErrorDegreesValue = angularErrorDegrees();
+
+  for (const frame of state.sceneData?.frames || []) {
+    const patchVertices = hitAreaPatchVertices(frame, angularErrorDegreesValue);
+    if (!patchVertices || !Number.isInteger(frame.frame_index)) {
+      continue;
+    }
+
+    const vertexOffset = positions.length / 3;
+    positions.push(...patchVertices);
+    for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
+      indices.push(
+        vertexOffset,
+        vertexOffset + index + 1,
+        vertexOffset + ((index + 1) % HIT_AREA_SEGMENTS) + 1,
+      );
+    }
+    patchFrameIndices.push(frame.frame_index);
+    triangleIndexCounts.push(HIT_AREA_SEGMENTS * 3);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  geometry.setIndex(indices);
+  geometry.setDrawRange(0, 0);
+  if (indices.length > 0) {
+    geometry.computeVertexNormals();
+  }
+
+  const mesh = new THREE.Mesh(geometry, materials.hitArea);
+  mesh.userData.layer = "hitArea";
+  mesh.visible = false;
+  groups.accumulated.add(mesh);
+  state.renderCache.hitAreas = mesh;
+  state.renderCache.hitAreaPatchFrameIndices = patchFrameIndices;
+  state.renderCache.hitAreaTriangleIndexCounts = triangleIndexCounts;
+  state.renderCache.hitAreaAngularErrorDegrees = angularErrorDegreesValue;
+}
+
+function visibleHitPointCount() {
+  return upperBoundFrameIndex(
+    state.renderCache.hitPointFrameIndices,
+    state.frameIndex,
+  );
+}
+
+function visibleHitAreaTriangleIndexCount() {
+  const visiblePatchCount = upperBoundFrameIndex(
+    state.renderCache.hitAreaPatchFrameIndices,
+    state.frameIndex,
+  );
+  let triangleIndexCount = 0;
+  for (let index = 0; index < visiblePatchCount; index += 1) {
+    triangleIndexCount += state.renderCache.hitAreaTriangleIndexCounts[index] || 0;
+  }
+  return triangleIndexCount;
+}
+
+function updateAccumulatedVisibility() {
+  const accumulatedVisible = state.mode === "accumulated";
+
+  if (state.renderCache.hitPoints) {
+    const visibleHitPointCountValue =
+      accumulatedVisible && elements.toggles.hitPoints.checked
+        ? visibleHitPointCount()
+        : 0;
+    state.renderCache.hitPoints.geometry.setDrawRange(0, visibleHitPointCountValue);
+    state.renderCache.hitPoints.visible =
+      accumulatedVisible &&
+      elements.toggles.hitPoints.checked &&
+      visibleHitPointCountValue > 0;
+  }
+
+  if (state.renderCache.hitAreas) {
+    const visibleHitAreaTriangleIndexCountValue =
+      accumulatedVisible && elements.toggles.hitArea.checked
+        ? visibleHitAreaTriangleIndexCount()
+        : 0;
+    state.renderCache.hitAreas.geometry.setDrawRange(0, visibleHitAreaTriangleIndexCountValue);
+    state.renderCache.hitAreas.visible =
+      accumulatedVisible &&
+      elements.toggles.hitArea.checked &&
+      visibleHitAreaTriangleIndexCountValue > 0;
+  }
+}
+
+function rebuildAccumulatedHitAreasForAngularError() {
+  if (!state.sceneData) {
+    return;
+  }
+  if (
+    state.renderCache.hitAreas &&
+    state.renderCache.hitAreaAngularErrorDegrees === angularErrorDegrees()
+  ) {
+    return;
+  }
+  buildAccumulatedHitAreaMesh();
 }
 
 function addMonitorPlane(width, height, opacityMaterial, center, visible) {
@@ -501,7 +692,7 @@ function applyStaticVisibility() {
 }
 
 function currentFrame() {
-  return state.sceneData.frames[state.frameIndex] || null;
+  return state.sceneData?.frames?.[state.frameIndex] || null;
 }
 
 function renderCurrentFrame() {
@@ -570,48 +761,10 @@ function renderCurrentHitArea(frame) {
   }
 }
 
-function renderAccumulatedHitAreas() {
-  if (!elements.toggles.hitArea.checked || !state.sceneData) {
-    return;
-  }
-
-  for (const frame of state.sceneData.frames.slice(0, state.frameIndex + 1)) {
-    const geometry = hitAreaGeometry(frame, angularErrorDegrees());
-    if (geometry) {
-      addHitArea(groups.accumulated, geometry);
-    }
-  }
-}
-
-function renderAccumulatedHits() {
-  clearGroup(groups.accumulated);
-  if (state.mode !== "accumulated" || !state.sceneData) {
-    return;
-  }
-
-  if (elements.toggles.hitPoints.checked) {
-    for (const hit of state.sceneData.valid_hit_points) {
-      if (hit.frame_index <= state.frameIndex) {
-        addSphere(
-          groups.accumulated,
-          vector(hit.point_scene_m),
-          0.008,
-          materials.accumulatedHit,
-        );
-      }
-    }
-  }
-
-  renderAccumulatedHitAreas();
-}
-
 function updateStatusPanel() {
   const frame = currentFrame();
   const total = state.sceneData?.frame_count || 0;
-  const validHitsToFrame =
-    state.sceneData?.valid_hit_points.filter(
-      (hit) => hit.frame_index <= state.frameIndex,
-    ).length || 0;
+  const validHitsToFrame = state.sceneData ? visibleHitPointCount() : 0;
 
   elements.frameLabel.textContent =
     total > 0 ? `${state.frameIndex + 1} / ${total}` : "0 / 0";
@@ -643,16 +796,18 @@ function setFrameIndex(index) {
   elements.frameSlider.value = String(state.frameIndex);
   elements.frameNumber.value = String(state.frameIndex);
   renderCurrentFrame();
-  renderAccumulatedHits();
+  updateAccumulatedVisibility();
   updateStatusPanel();
+  requestRender();
 }
 
 function setMode(mode) {
   state.mode = mode;
   elements.modeInstant.checked = mode === "instant";
   elements.modeAccumulated.checked = mode === "accumulated";
-  renderAccumulatedHits();
+  updateAccumulatedVisibility();
   updateStatusPanel();
+  requestRender();
 }
 
 function setPlaying(playing) {
@@ -675,9 +830,38 @@ function resizeRenderer() {
   const rect = elements.canvas.getBoundingClientRect();
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
+  if (width === state.canvasWidth && height === state.canvasHeight) {
+    return false;
+  }
+  state.canvasWidth = width;
+  state.canvasHeight = height;
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
+  return true;
+}
+
+function requestRender() {
+  state.renderRequested = true;
+  if (state.animationFrameRequested) {
+    return;
+  }
+  state.animationFrameRequested = true;
+  window.requestAnimationFrame(renderScene);
+}
+
+function renderScene() {
+  state.animationFrameRequested = false;
+  const resized = resizeRenderer();
+  const controlsChanged = controls.update();
+  if (!state.renderRequested && !resized && !controlsChanged) {
+    return;
+  }
+  state.renderRequested = false;
+  renderer.render(scene, camera);
+  if (controlsChanged) {
+    requestRender();
+  }
 }
 
 function bindControls() {
@@ -705,17 +889,21 @@ function bindControls() {
   elements.hitAreaErrorDegrees.addEventListener("input", () => {
     updateHitAreaErrorLabel();
     renderCurrentFrame();
-    renderAccumulatedHits();
+    rebuildAccumulatedHitAreasForAngularError();
+    updateAccumulatedVisibility();
+    requestRender();
   });
   elements.hitAreaOpacity.addEventListener("input", () => {
     updateHitAreaOpacityLabel();
     applyHitAreaOpacity();
+    requestRender();
   });
   for (const toggle of Object.values(elements.toggles)) {
     toggle.addEventListener("change", () => {
       applyStaticVisibility();
       renderCurrentFrame();
-      renderAccumulatedHits();
+      updateAccumulatedVisibility();
+      requestRender();
     });
   }
 }
@@ -732,7 +920,23 @@ function applySceneData(sceneData) {
   updateHitAreaErrorLabel();
   updateHitAreaOpacityLabel();
   applyHitAreaOpacity();
+  buildAccumulatedHitPoints();
+  rebuildAccumulatedHitAreasForAngularError();
   setFrameIndex(0);
+  requestRender();
+}
+
+async function boot() {
+  setControlState(true);
+  bindControls();
+  try {
+    const sceneData = await loadSceneData();
+    applySceneData(sceneData);
+  } catch (error) {
+    setControlState(true);
+    setStatus(`Scene data unavailable: ${error.message}`, true);
+  }
+  requestRender();
 }
 
 async function loadSceneData() {
@@ -746,25 +950,6 @@ async function loadSceneData() {
   return response.json();
 }
 
-function animate() {
-  resizeRenderer();
-  controls.update();
-  renderer.render(scene, camera);
-  window.requestAnimationFrame(animate);
-}
-
-async function boot() {
-  setControlState(true);
-  bindControls();
-  try {
-    const sceneData = await loadSceneData();
-    applySceneData(sceneData);
-  } catch (error) {
-    setControlState(true);
-    setStatus(`Scene data unavailable: ${error.message}`, true);
-  }
-  animate();
-}
-
-window.addEventListener("resize", resizeRenderer);
+controls.addEventListener("change", requestRender);
+window.addEventListener("resize", requestRender);
 boot();
