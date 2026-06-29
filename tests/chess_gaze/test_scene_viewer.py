@@ -211,7 +211,12 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
 def _read_viewer_app_assets(viewer_dir: Path) -> dict[str, str]:
     return {
         relative_path: (viewer_dir / relative_path).read_text(encoding="utf-8")
-        for relative_path in ("index.html", "scene_viewer.js", "styles.css")
+        for relative_path in (
+            "index.html",
+            "served.html",
+            "scene_viewer.js",
+            "styles.css",
+        )
     }
 
 
@@ -274,12 +279,13 @@ def built_viewer(tmp_path: Path) -> tuple[RunLayout, ViewerSceneData]:
     )
 
 
-def test_build_scene_viewer_writes_index_and_scene_data(
+def test_build_scene_viewer_writes_embedded_index_and_served_entrypoint(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, viewer_data = built_viewer
 
     assert (layout.viewer_dir / "index.html").is_file()
+    assert (layout.viewer_dir / "served.html").is_file()
     assert (layout.viewer_dir / "scene-data.json").is_file()
     assert viewer_data.schema_version == "gaze-scene-viewer-data-v1"
 
@@ -297,6 +303,7 @@ def test_build_scene_viewer_writes_app_assets_without_local_vendor_modules(
 
     assert {
         "index.html",
+        "served.html",
         "scene-data.json",
         "scene_viewer.js",
         "styles.css",
@@ -390,9 +397,159 @@ def test_generated_html_includes_required_selectors(
         'data-testid="toggle-extended-plane"',
         'data-testid="toggle-axes"',
         'data-testid="toggle-hit-points"',
+        'data-testid="toggle-hit-area"',
+        'data-testid="hit-area-error-degrees"',
+        'data-testid="hit-area-error-label"',
+        'data-testid="hit-area-opacity"',
+        'data-testid="hit-area-opacity-label"',
         'data-testid="status-panel"',
     ):
         assert selector in html
+
+
+def test_generated_viewer_exposes_hit_area_controls_and_math(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    css = (layout.viewer_dir / "styles.css").read_text(encoding="utf-8")
+
+    assert "Hit Area" in html
+    assert "Angular Error" in html
+    assert "Opacity" in html
+    mode_instant = re.search(
+        r'<input[^>]*data-testid="mode-instant"[^>]*>', html, flags=re.DOTALL
+    )
+    assert mode_instant is not None
+    assert "checked" not in mode_instant.group(0)
+    mode_accumulated = re.search(
+        r'<input[^>]*data-testid="mode-accumulated"[^>]*>', html, flags=re.DOTALL
+    )
+    assert mode_accumulated is not None
+    assert "checked" in mode_accumulated.group(0)
+    assert re.search(
+        r'id="hit-area-error-degrees"[^>]*data-testid="hit-area-error-degrees"'
+        r'[^>]*type="range"[^>]*min="0"[^>]*max="12"[^>]*value="8"'
+        r'[^>]*step="0.5"',
+        html,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r'id="hit-area-opacity"[^>]*data-testid="hit-area-opacity"'
+        r'[^>]*type="range"[^>]*min="0"[^>]*max="1"[^>]*value="0.24"'
+        r'[^>]*step="0.01"',
+        html,
+        flags=re.DOTALL,
+    )
+    assert 'max="12"' in html
+    assert 'step="0.5"' in html
+    assert 'value="8"' in html
+    assert "DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8" in js
+    assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0" in js
+    assert "HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12" in js
+    assert 'mode: "accumulated"' in js
+    assert "DEFAULT_HIT_AREA_OPACITY = 0.24" in js
+    assert "HIT_AREA_MIN_OPACITY = 0" in js
+    assert "HIT_AREA_MAX_OPACITY = 1" in js
+    assert "updateHitAreaOpacityLabel" in js
+    assert "materials.hitArea.opacity = hitAreaOpacity()" in js
+    opacity_handler_body = js.split(
+        'elements.hitAreaOpacity.addEventListener("input", () => {', 1
+    )[1].split("  });", 1)[0]
+    assert "applyHitAreaOpacity()" in opacity_handler_body
+    assert "renderCurrentFrame()" not in opacity_handler_body
+    assert "renderAccumulatedHits()" not in opacity_handler_body
+    assert "Math.tan(alphaRadians)" in js
+    assert "const minorScale = rayT" in js
+    assert "const majorScale = rayT / normalDirectionDot" in js
+    assert "minorX: minorAxis.x * minorScale" in js
+    assert "majorX: orientedMajorAxis.x * majorScale" in js
+    assert "direction.clone().sub(" in js
+    assert "frame?.unigaze_ray?.valid" in js
+    assert "projectedDirection" in js
+    assert "renderCurrentHitArea" in js
+    assert "updateAccumulatedHitAreasForAngularError" in js
+    assert "--color-hit-area:" in css
+    assert ".hit-area-error-row" in css
+    assert ".hit-area-opacity-row" in css
+
+
+def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "new THREE.Points(" in js
+    assert "new THREE.PointsMaterial(" in js
+    assert "buildAccumulatedHitPoints" in js
+    assert "buildAccumulatedHitAreaMesh" in js
+    assert "hitAreaPatchBases" in js
+    assert "hitAreaPositionAttribute" in js
+    assert "updateAccumulatedHitAreaPositions" in js
+    assert "mesh.frustumCulled = false" in js
+    assert "new Float32Array(" in js
+    assert "new Uint32Array(" in js
+    assert "setDrawRange(0, visibleHitAreaTriangleIndexCount" in js
+    assert "hitPointFrameIndices" in js
+    assert "hitAreaPatchFrameIndices" in js
+    assert "upperBoundFrameIndex" in js
+    assert "computeVertexNormals()" not in js
+    assert "for (const hit of state.sceneData.valid_hit_points)" not in js
+    assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" not in js
+
+
+def test_generated_viewer_updates_accumulated_hit_area_without_rebuilds(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    error_handler_body = js.split(
+        'elements.hitAreaErrorDegrees.addEventListener("input", () => {', 1
+    )[1].split("  });", 1)[0]
+    update_body = js.split("function updateAccumulatedHitAreasForAngularError() {", 1)[
+        1
+    ].split("\nfunction ", 1)[0]
+
+    assert "updateAccumulatedHitAreasForAngularError()" in error_handler_body
+    assert "buildAccumulatedHitAreaMesh()" not in error_handler_body
+    assert "updateAccumulatedHitAreaPositions()" in update_body
+    assert "buildAccumulatedHitAreaMesh()" in update_body
+
+
+def test_generated_viewer_keeps_accumulated_layers_independent(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    visibility_body = js.split("function updateAccumulatedVisibility() {", 1)[1].split(
+        "\nfunction ", 1
+    )[0]
+    assert "elements.toggles.hitPoints.checked" in visibility_body
+    assert "elements.toggles.hitArea.checked" in visibility_body
+    assert "hitPoints.checked && hitArea.checked" not in visibility_body
+
+
+def test_generated_viewer_renders_on_demand_and_uses_prefix_counts(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+
+    assert "function requestRender()" in js
+    assert "function renderFrame()" in js
+    assert "new ResizeObserver(" in js
+    assert 'controls.addEventListener("change", requestRender)' in js
+    assert "window.requestAnimationFrame(renderFrame)" in js
+    assert "state.sceneData?.valid_hit_points.filter" not in js
+    assert "validHitsToFrame = visibleHitPointCount()" in js
+    assert (
+        "resizeRenderer();"
+        not in js.split("function renderFrame()", 1)[1].split("\n}", 1)[0]
+    )
 
 
 def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
@@ -416,33 +573,37 @@ def test_generated_html_js_and_css_reference_only_approved_remote_three_modules(
     unexpected_urls = _external_urls(combined_assets) - APPROVED_REMOTE_MODULE_URLS
     assert unexpected_urls == set()
 
-    html = app_assets["index.html"]
+    index_html = app_assets["index.html"]
+    served_html = app_assets["served.html"]
     js = app_assets["scene_viewer.js"]
     css = app_assets["styles.css"]
-    import_map = _extract_import_map(html)
-    assert import_map == EXPECTED_IMPORT_MAP
-    assert THREE_MODULE_URL in _external_urls(html)
-    assert THREE_ADDONS_URL in _external_urls(html)
     assert _external_urls(js) == set()
     assert _external_urls(css) == set()
 
-    load_references = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html)
-    assert load_references
-    assert all(
-        not reference.startswith(("http://", "https://", "//"))
-        for reference in load_references
-    )
-    assert 'rel="icon" href="data:,"' in html
-    assert 'href="./styles.css"' in html
-    assert 'src="./scene_viewer.js"' not in html
+    for html in (index_html, served_html):
+        import_map = _extract_import_map(html)
+        assert import_map == EXPECTED_IMPORT_MAP
+        assert THREE_MODULE_URL in _external_urls(html)
+        assert THREE_ADDONS_URL in _external_urls(html)
+        load_references = re.findall(r"""(?:src|href)=["']([^"']+)["']""", html)
+        assert load_references
+        assert all(
+            not reference.startswith(("http://", "https://", "//"))
+            for reference in load_references
+        )
+        assert 'rel="icon" href="data:,"' in html
+        assert 'href="./styles.css"' in html
+        assert (
+            _resolve_import_map_specifier(
+                import_map, "three/addons/controls/OrbitControls.js"
+            )
+            == ORBIT_CONTROLS_URL
+        )
+
+    assert 'type="module" src="./scene_viewer.js"' not in index_html
+    assert 'type="module" src="./scene_viewer.js"' in served_html
     assert 'from "three"' in js
     assert 'from "three/addons/controls/OrbitControls.js"' in js
-    assert (
-        _resolve_import_map_specifier(
-            import_map, "three/addons/controls/OrbitControls.js"
-        )
-        == ORBIT_CONTROLS_URL
-    )
 
 
 def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
@@ -453,12 +614,22 @@ def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
 
     assert 'type="module" src="./scene_viewer.js"' not in html
     assert 'id="scene-data-json"' in html
-    _assert_absent(html, 'id="three-core-source"', "generated viewer index")
-    _assert_absent(html, 'id="three-module-source"', "generated viewer index")
-    _assert_absent(html, 'id="orbit-controls-source"', "generated viewer index")
     assert 'id="scene-viewer-source"' in html
     assert "window.__CHESS_GAZE_SCENE_DATA__" in html
     assert viewer_data.run_id in html
+
+
+def test_generated_served_html_fetches_scene_data_without_embedding_payload(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, viewer_data = built_viewer
+    html = (layout.viewer_dir / "served.html").read_text(encoding="utf-8")
+
+    assert 'type="module" src="./scene_viewer.js"' in html
+    assert 'id="scene-data-json"' not in html
+    assert 'id="scene-viewer-source"' not in html
+    assert "window.__CHESS_GAZE_SCENE_DATA__" not in html
+    assert viewer_data.run_id not in html
 
 
 def test_generated_js_prefers_embedded_scene_data_for_file_url_viewer(
@@ -523,18 +694,18 @@ def test_generated_index_import_map_resolves_pinned_three_modules(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
-    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    for relative_path in ("index.html", "served.html"):
+        html = (layout.viewer_dir / relative_path).read_text(encoding="utf-8")
+        import_map = _extract_import_map(html)
 
-    import_map = _extract_import_map(html)
-
-    assert import_map == EXPECTED_IMPORT_MAP
-    assert _resolve_import_map_specifier(import_map, "three") == THREE_MODULE_URL
-    assert (
-        _resolve_import_map_specifier(
-            import_map, "three/addons/controls/OrbitControls.js"
+        assert import_map == EXPECTED_IMPORT_MAP
+        assert _resolve_import_map_specifier(import_map, "three") == THREE_MODULE_URL
+        assert (
+            _resolve_import_map_specifier(
+                import_map, "three/addons/controls/OrbitControls.js"
+            )
+            == ORBIT_CONTROLS_URL
         )
-        == ORBIT_CONTROLS_URL
-    )
 
 
 def test_build_scene_viewer_updates_viewer_exists_summary(
@@ -589,7 +760,8 @@ def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     viewer_dir = run_dir / "viewer"
     viewer_dir.mkdir(parents=True)
-    (viewer_dir / "index.html").write_text("<!doctype html>viewer", encoding="utf-8")
+    (viewer_dir / "index.html").write_text("<!doctype html>embedded", encoding="utf-8")
+    (viewer_dir / "served.html").write_text("<!doctype html>served", encoding="utf-8")
     (viewer_dir / "scene-data.json").write_text('{"ok": true}', encoding="utf-8")
 
     server = scene_viewer.serve_viewer(run_dir)
@@ -598,7 +770,11 @@ def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
 
         with urllib.request.urlopen(server.url, timeout=2) as response:
             assert response.status == 200
-            assert response.read().decode("utf-8") == "<!doctype html>viewer"
+            assert response.read().decode("utf-8") == "<!doctype html>served"
+
+        with urllib.request.urlopen(f"{server.url}index.html", timeout=2) as response:
+            assert response.status == 200
+            assert response.read().decode("utf-8") == "<!doctype html>embedded"
 
         scene_data_url = f"{server.url}scene-data.json"
         with urllib.request.urlopen(scene_data_url, timeout=2) as response:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -12,6 +11,15 @@ import numpy as np
 import numpy.typing as npt
 from pydantic import ValidationError
 
+from chess_gaze.analysis_resume import (
+    commit_processed_records,
+    find_latest_resumable_run,
+    new_analysis_state,
+    prepare_resume_run,
+    update_analysis_state,
+    write_analysis_state,
+    write_initial_run_artifacts,
+)
 from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import (
@@ -25,18 +33,22 @@ from chess_gaze.frame_records import (
     CalibrationRecord,
     ErrorRecord,
     FrameErrorRecord,
+    FrameImageRetentionPolicy,
     FrameRecord,
-    RunManifest,
 )
 from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
-from chess_gaze.image_io import atomic_write_bytes, save_rgb_png
+from chess_gaze.image_io import save_rgb_png
 from chess_gaze.model_assets import (
     ModelAssetError,
     ResolvedModelAsset,
     load_model_registry,
     validate_required_assets,
 )
-from chess_gaze.qa_summary import ArtifactValidationError, QASummary, build_qa_summary
+from chess_gaze.qa_summary import (
+    ArtifactValidationError,
+    build_qa_summary,
+    write_qa_summary,
+)
 from chess_gaze.scene_artifacts import build_scene_artifacts
 from chess_gaze.scene_viewer import build_scene_viewer
 from chess_gaze.unigaze_runtime import (
@@ -56,7 +68,6 @@ from chess_gaze.visualization import render_processed_frame
 
 DEFAULT_MODEL_REGISTRY_PATH = Path(__file__).with_name("model_registry.json")
 DEFAULT_APPROVED_LICENSES = frozenset({"MG-NC-RAI-2.0"})
-QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
 RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
@@ -106,8 +117,10 @@ class AnalyzeRequest:
     config_path: Path | None = None
     unigaze_device: str | None = None
     unigaze_batch_size: int | None = None
+    save_frame_images: bool | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
+    resume: bool = True
     clock: Clock = utc_now
 
 
@@ -117,6 +130,7 @@ class AnalyzeResult:
     run_manifest_path: Path
     calibration_path: Path
     video_manifest_path: Path
+    analysis_state_path: Path
     frames_jsonl_path: Path
     errors_jsonl_path: Path
     scene_manifest_path: Path
@@ -147,6 +161,7 @@ class _ResolvedRequest:
     raw_frame_image_format: str
     processed_frame_image_format: str
     processed_frame_jpeg_quality: int
+    save_frame_images: bool
     unigaze_device: str
     unigaze_batch_size: int
 
@@ -173,6 +188,9 @@ def analyze_video(
     resolved_model_assets: list[ResolvedModelAsset] | None = None
     prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
     inference = external_observer_inference_record()
+    frame_image_retention = FrameImageRetentionPolicy(
+        save_frame_images=resolved.save_frame_images
+    )
     if observers is None:
         resolved_model_assets = _validate_model_assets(
             request.model_registry_path, resolved
@@ -192,33 +210,64 @@ def analyze_video(
     _estimate_disk_space(resolved.output_root)
 
     created_at = request.clock()
-    layout = create_run_layout(
-        input_path=resolved.video_path,
-        output_root=resolved.output_root / resolved.video_path.stem / "runs",
-        clock=lambda: created_at,
-        run_suffix=request.run_suffix,
+    runs_root = resolved.output_root / resolved.video_path.stem / "runs"
+    layout = (
+        find_latest_resumable_run(
+            runs_root,
+            resolved.video_path,
+            inspection.video_manifest,
+            calibration,
+            inference,
+            frame_image_retention,
+        )
+        if request.resume
+        else None
     )
+    resume_next_frame_index = 0
+    frame_error_count = 0
+
+    if layout is None:
+        layout = create_run_layout(
+            input_path=resolved.video_path,
+            output_root=runs_root,
+            clock=lambda: created_at,
+            run_suffix=request.run_suffix,
+        )
+        write_initial_run_artifacts(
+            layout,
+            created_at=created_at,
+            input_path=resolved.video_path,
+            video_manifest=inspection.video_manifest,
+            calibration=calibration,
+            inference=inference,
+            frame_image_retention=frame_image_retention,
+        )
+        analysis_state = new_analysis_state(
+            layout,
+            video_manifest=inspection.video_manifest,
+            next_frame_index=0,
+            status="processing",
+            clock=request.clock,
+        )
+    else:
+        preparation = prepare_resume_run(
+            layout,
+            inspection.video_manifest,
+            clock=request.clock,
+        )
+        resume_next_frame_index = preparation.next_frame_index
+        frame_error_count = sum(
+            len(record.errors) for record in preparation.committed_records
+        )
+        analysis_state = preparation.analysis_state
+
     run_manifest_path = layout.run_dir / "run_manifest.json"
     calibration_path = layout.run_dir / "calibration.json"
     video_manifest_path = layout.run_dir / "video_manifest.json"
+    analysis_state_path = write_analysis_state(layout, analysis_state)
     frames_jsonl_path = layout.records_dir / "frames.jsonl"
     errors_jsonl_path = layout.records_dir / "errors.jsonl"
     qa_summary_path = layout.run_dir / "qa_summary.json"
-
-    _write_json(
-        run_manifest_path,
-        RunManifest(
-            run_id=layout.run_dir.name,
-            created_at_utc=_format_utc(created_at),
-            input_path=str(resolved.video_path),
-            video=inspection.video_manifest,
-            inference=inference,
-        ).model_dump(mode="json"),
-    )
-    _write_json(calibration_path, calibration.model_dump(mode="json"))
-    _write_json(video_manifest_path, inspection.video_manifest.model_dump(mode="json"))
-    frames_jsonl_path.touch()
-    errors_jsonl_path.touch()
 
     if observers is None:
         if resolved_model_assets is None:
@@ -232,67 +281,142 @@ def analyze_video(
             prepared_unigaze_runtime.model,
         )
 
-    decoded_frame_count = 0
-    frame_error_count = 0
     try:
-        with (
-            frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
-            errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
-        ):
-            use_batch_accumulator = (
-                observers.frame_batch_observer is not None
-                and resolved.unigaze_batch_size > 1
-            )
-            pending_batch: list[DecodedFrame] = []
-            for decoded_frame in iter_decoded_frames(resolved.video_path):
-                decoded_frame_count += 1
-                if not use_batch_accumulator:
-                    record, frame_errors = _process_frame(
-                        decoded_frame,
+        decoded_frame_count = 0
+        try:
+            with (
+                frames_jsonl_path.open("a", encoding="utf-8") as frames_handle,
+                errors_jsonl_path.open("a", encoding="utf-8") as errors_handle,
+            ):
+                use_batch_accumulator = (
+                    observers.frame_batch_observer is not None
+                    and resolved.unigaze_batch_size > 1
+                )
+                pending_batch: list[DecodedFrame] = []
+                for decoded_frame in iter_decoded_frames(resolved.video_path):
+                    decoded_frame_count += 1
+                    if decoded_frame.frame_index < resume_next_frame_index:
+                        continue
+                    if not use_batch_accumulator:
+                        processed = [
+                            _process_frame(
+                                decoded_frame,
+                                observers,
+                                resolved,
+                                layout,
+                                errors_handle=errors_handle,
+                            )
+                        ]
+                        committed_next_frame_index, committed_error_count = (
+                            commit_processed_records(
+                                processed,
+                                frames_handle=frames_handle,
+                                errors_handle=errors_handle,
+                            )
+                        )
+                        frame_error_count += committed_error_count
+                        analysis_state = update_analysis_state(
+                            analysis_state,
+                            next_frame_index=committed_next_frame_index,
+                            status="processing",
+                            clock=request.clock,
+                        )
+                        analysis_state_path = write_analysis_state(
+                            layout, analysis_state
+                        )
+                        continue
+                    pending_batch.append(decoded_frame)
+                    if len(pending_batch) < resolved.unigaze_batch_size:
+                        continue
+                    processed = _process_frame_batch(
+                        pending_batch,
                         observers,
                         resolved,
                         layout,
                         errors_handle=errors_handle,
                     )
-                    frame_error_count += len(frame_errors)
-                    frames_handle.write(record.model_dump_json() + "\n")
-                    continue
-                pending_batch.append(decoded_frame)
-                if len(pending_batch) < resolved.unigaze_batch_size:
-                    continue
-                for record, frame_errors in _process_frame_batch(
-                    pending_batch,
-                    observers,
-                    resolved,
-                    layout,
-                    errors_handle=errors_handle,
-                ):
-                    frame_error_count += len(frame_errors)
-                    frames_handle.write(record.model_dump_json() + "\n")
-                pending_batch = []
+                    committed_next_frame_index, committed_error_count = (
+                        commit_processed_records(
+                            processed,
+                            frames_handle=frames_handle,
+                            errors_handle=errors_handle,
+                        )
+                    )
+                    frame_error_count += committed_error_count
+                    analysis_state = update_analysis_state(
+                        analysis_state,
+                        next_frame_index=committed_next_frame_index,
+                        status="processing",
+                        clock=request.clock,
+                    )
+                    analysis_state_path = write_analysis_state(layout, analysis_state)
+                    pending_batch = []
 
-            if pending_batch:
-                for record, frame_errors in _process_frame_batch(
-                    pending_batch,
-                    observers,
-                    resolved,
-                    layout,
-                    errors_handle=errors_handle,
-                ):
-                    frame_error_count += len(frame_errors)
-                    frames_handle.write(record.model_dump_json() + "\n")
-    finally:
-        if observers.close is not None:
-            observers.close()
+                if pending_batch:
+                    processed = _process_frame_batch(
+                        pending_batch,
+                        observers,
+                        resolved,
+                        layout,
+                        errors_handle=errors_handle,
+                    )
+                    committed_next_frame_index, committed_error_count = (
+                        commit_processed_records(
+                            processed,
+                            frames_handle=frames_handle,
+                            errors_handle=errors_handle,
+                        )
+                    )
+                    frame_error_count += committed_error_count
+                    analysis_state = update_analysis_state(
+                        analysis_state,
+                        next_frame_index=committed_next_frame_index,
+                        status="processing",
+                        clock=request.clock,
+                    )
+                    analysis_state_path = write_analysis_state(layout, analysis_state)
+        finally:
+            if observers.close is not None:
+                observers.close()
 
-    try:
         scene_result = build_scene_artifacts(layout)
         viewer_result = build_scene_viewer(layout, scene_result)
     except (OSError, ValueError) as exc:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
         raise PipelineError(CliErrorCode.SCHEMA_VALIDATION_FAILED, str(exc)) from exc
+    except Exception:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
+        raise
 
     try:
-        qa_summary = _build_and_write_qa_summary(layout, qa_summary_path)
+        qa_summary = build_qa_summary(layout)
+    except ArtifactValidationError as exc:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
+        raise PipelineError(exc.code, str(exc)) from exc
+    analysis_state = update_analysis_state(
+        analysis_state,
+        next_frame_index=qa_summary.counts.decoded_frames,
+        status=qa_summary.final_status,
+        clock=request.clock,
+    )
+    analysis_state_path = write_analysis_state(layout, analysis_state)
+    try:
+        qa_summary = write_qa_summary(layout, qa_summary_path)
     except ArtifactValidationError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
     if not qa_summary.artifact_validation.schema_validation_passed:
@@ -306,6 +430,7 @@ def analyze_video(
         run_manifest_path=run_manifest_path,
         calibration_path=calibration_path,
         video_manifest_path=video_manifest_path,
+        analysis_state_path=analysis_state_path,
         frames_jsonl_path=frames_jsonl_path,
         errors_jsonl_path=errors_jsonl_path,
         scene_manifest_path=scene_result.paths.scene_manifest_path,
@@ -323,25 +448,6 @@ def analyze_video(
     )
 
 
-def _build_and_write_qa_summary(
-    run_layout: RunLayout, qa_summary_path: Path
-) -> QASummary:
-    qa_summary = build_qa_summary(run_layout)
-    stable_total_run_bytes: int | None = None
-
-    for _attempt in range(QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS):
-        _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
-        refreshed_summary = build_qa_summary(run_layout)
-        refreshed_total_run_bytes = refreshed_summary.byte_counts.total_run_bytes
-        if refreshed_total_run_bytes == stable_total_run_bytes:
-            return qa_summary
-        stable_total_run_bytes = refreshed_total_run_bytes
-        qa_summary = refreshed_summary
-
-    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
-    return qa_summary
-
-
 def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
     try:
         config = load_config(request.config_path)
@@ -354,6 +460,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
             models_root=request.models_root,
             unigaze_device=request.unigaze_device,
             unigaze_batch_size=request.unigaze_batch_size,
+            save_frame_images=request.save_frame_images,
         )
     except ValidationError as exc:
         raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
@@ -365,6 +472,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         raw_frame_image_format=resolved_config.raw_frame_image_format,
         processed_frame_image_format=resolved_config.processed_frame_image_format,
         processed_frame_jpeg_quality=resolved_config.processed_frame_jpeg_quality,
+        save_frame_images=resolved_config.save_frame_images,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
     )
@@ -482,17 +590,18 @@ def _prepare_decoded_frame(
     layout: RunLayout,
 ) -> _PreparedDecodedFrame:
     frame_errors: list[ErrorRecord] = []
-    raw_path = layout.raw_frames_dir / f"{decoded_frame.frame_id}.png"
-    try:
-        _validate_image_format(resolved.raw_frame_image_format, "png")
-        raw_frame_writer(raw_path, decoded_frame.rgb)
-    except Exception as exc:
-        frame_errors.append(
-            ErrorRecord(
-                code=ErrorCode.RAW_FRAME_WRITE_FAILED,
-                message=f"Raw frame write failed: {exc}",
+    if resolved.save_frame_images:
+        raw_path = layout.raw_frames_dir / f"{decoded_frame.frame_id}.png"
+        try:
+            _validate_image_format(resolved.raw_frame_image_format, "png")
+            raw_frame_writer(raw_path, decoded_frame.rgb)
+        except Exception as exc:
+            frame_errors.append(
+                ErrorRecord(
+                    code=ErrorCode.RAW_FRAME_WRITE_FAILED,
+                    message=f"Raw frame write failed: {exc}",
+                )
             )
-        )
     observer_frame = ObserverFrame(
         frame_id=decoded_frame.frame_id,
         frame_index=decoded_frame.frame_index,
@@ -515,6 +624,9 @@ def _render_processed_frame_and_collect_errors(
     resolved: _ResolvedRequest,
     layout: RunLayout,
 ) -> tuple[FrameRecord, list[ErrorRecord]]:
+    if not resolved.save_frame_images:
+        return record, []
+
     frame_errors: list[ErrorRecord] = []
     processed_path = layout.processed_frames_dir / f"{decoded_frame.frame_id}.jpg"
     try:
@@ -652,23 +764,9 @@ def _append_frame_errors(errors_handle: TextIO, record: FrameRecord) -> None:
 frame_error_writer: FrameErrorWriter = _append_frame_errors
 
 
-def _write_json(path: Path, payload: object) -> None:
-    data = (
-        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True).encode("utf-8")
-        + b"\n"
-    )
-    atomic_write_bytes(path, data)
-
-
 def _validate_image_format(actual: str, expected: str) -> None:
     if actual.lower() != expected:
         raise PipelineError(
             CliErrorCode.USAGE,
             f"Unsupported image format {actual!r}; expected {expected!r}",
         )
-
-
-def _format_utc(value: datetime) -> str:
-    return (
-        value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    )

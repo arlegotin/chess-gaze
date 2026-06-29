@@ -6,6 +6,7 @@
     <title>Chess Gaze Scene Viewer</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="./styles.css">
+    <!-- CHESS_GAZE_IMPORT_MAP -->
   </head>
   <body>
     <main class="viewer-shell" aria-label="Chess gaze 3D scene viewer">
@@ -81,7 +82,6 @@
               type="radio"
               name="hit-mode"
               value="instant"
-              checked
             >
             Instant
           </label>
@@ -91,6 +91,7 @@
               type="radio"
               name="hit-mode"
               value="accumulated"
+              checked
             >
             Accumulated
           </label>
@@ -106,6 +107,33 @@
           <label><input data-testid="toggle-extended-plane" type="checkbox" checked> Extended Plane</label>
           <label><input data-testid="toggle-axes" type="checkbox" checked> Axes</label>
           <label><input data-testid="toggle-hit-points" type="checkbox" checked> Hit Points</label>
+          <label><input data-testid="toggle-hit-area" type="checkbox" checked> Hit Area</label>
+          <div class="hit-area-error-row">
+            <label for="hit-area-error-degrees">Angular Error</label>
+            <input
+              id="hit-area-error-degrees"
+              data-testid="hit-area-error-degrees"
+              type="range"
+              min="0"
+              max="12"
+              value="8"
+              step="0.5"
+            >
+            <output data-testid="hit-area-error-label" for="hit-area-error-degrees">8 deg</output>
+          </div>
+          <div class="hit-area-opacity-row">
+            <label for="hit-area-opacity">Opacity</label>
+            <input
+              id="hit-area-opacity"
+              data-testid="hit-area-opacity"
+              type="range"
+              min="0"
+              max="1"
+              value="0.24"
+              step="0.01"
+            >
+            <output data-testid="hit-area-opacity-label" for="hit-area-opacity">24%</output>
+          </div>
         </fieldset>
 
         <section

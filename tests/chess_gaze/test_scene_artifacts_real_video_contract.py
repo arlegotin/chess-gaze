@@ -155,6 +155,16 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
         2,
     ]
     assert viewer_data.valid_hit_points[-1].frame_index == expected_frame_count - 1
+    valid_frame = next(
+        frame for frame in viewer_data.frames if frame.main_monitor_hit.valid
+    )
+    assert valid_frame.main_monitor_hit.t is not None
+    assert valid_frame.main_monitor_hit.point_scene_m is not None
+    assert valid_frame.main_monitor_hit.point_camera_m is not None
+    assert valid_frame.unigaze_ray.direction_scene is not None
+    assert valid_frame.unigaze_ray.direction_camera is not None
+    assert viewer_data.monitor_plane.normal_camera is not None
+    assert viewer_data.axis_basis.right_camera is not None
     assert summary.decoded_frames == expected_frame_count
     assert summary.scene_frame_records == expected_frame_count
     assert summary.valid_monitor_hit_frames == expected_frame_count

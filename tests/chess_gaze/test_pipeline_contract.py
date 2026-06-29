@@ -285,7 +285,7 @@ def _write_model_registry_with_assets(models_root: Path, registry_path: Path) ->
     )
 
 
-def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
+def test_analyze_video_does_not_retain_raw_or_processed_frame_images_by_default(
     tmp_path: Path,
 ) -> None:
     video_path = tmp_path / "tiny.mp4"
@@ -297,8 +297,8 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     )
 
     assert result.decoded_frame_count == 4
-    assert len(list(result.layout.raw_frames_dir.glob("*.png"))) == 4
-    assert len(list(result.layout.processed_frames_dir.glob("*.jpg"))) == 4
+    assert list(result.layout.raw_frames_dir.glob("*.png")) == []
+    assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
     records = _records_from(result.frames_jsonl_path)
     assert len(records) == 4
     assert [record.frame_id for record in records] == [
@@ -316,15 +316,217 @@ def test_analyze_video_writes_one_artifact_set_per_decoded_frame(
     assert (result.layout.run_dir / "run_manifest.json").is_file()
     assert (result.layout.run_dir / "video_manifest.json").is_file()
     assert (result.layout.run_dir / "calibration.json").is_file()
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["frame_image_retention"] == {
+        "schema_version": "frame-image-retention-v1",
+        "save_frame_images": False,
+    }
     assert result.qa_summary_path.is_file()
     summary = QASummary.model_validate_json(
         result.qa_summary_path.read_text(encoding="utf-8")
     )
+    assert summary.counts.raw_frames == 0
+    assert summary.counts.processed_frames == 0
+    assert summary.artifact_validation.counts_match is True
+    assert summary.final_status == "complete"
     assert summary.byte_counts.total_run_bytes == sum(
         path.stat().st_size
         for path in result.layout.run_dir.rglob("*")
         if path.is_file()
     )
+
+
+def test_analyze_video_retains_raw_and_processed_frame_images_when_requested(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=3)
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            save_frame_images=True,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert result.decoded_frame_count == 3
+    assert len(list(result.layout.raw_frames_dir.glob("*.png"))) == 3
+    assert len(list(result.layout.processed_frames_dir.glob("*.jpg"))) == 3
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["frame_image_retention"] == {
+        "schema_version": "frame-image-retention-v1",
+        "save_frame_images": True,
+    }
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
+    assert summary.counts.raw_frames == 3
+    assert summary.counts.processed_frames == 3
+    assert summary.artifact_validation.counts_match is True
+
+
+def test_analyze_video_resumes_latest_compatible_partial_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=5)
+    observed_frames: list[int] = []
+
+    def interrupt_after_two(frame: ObserverFrame) -> FrameRecord:
+        observed_frames.append(frame.frame_index)
+        if frame.frame_index == 2:
+            raise RuntimeError("simulated interruption")
+        return _fake_record(frame)
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            observers=ObserverBundle(frame_observer=interrupt_after_two),
+        )
+
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    assert observed_frames == [0, 1, 2]
+    assert len(_records_from(run_dir / "records" / "frames.jsonl")) == 2
+
+    resumed_observed_frames: list[int] = []
+
+    def resumed_observer(frame: ObserverFrame) -> FrameRecord:
+        resumed_observed_frames.append(frame.frame_index)
+        return _fake_record(frame)
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=resumed_observer),
+    )
+
+    assert result.layout.run_dir == run_dir
+    assert resumed_observed_frames == [2, 3, 4]
+    assert [
+        record.frame_index for record in _records_from(result.frames_jsonl_path)
+    ] == [0, 1, 2, 3, 4]
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
+    assert summary.final_status == "complete"
+    assert summary.counts.frame_records == 5
+
+
+def test_analyze_video_resumes_partial_batched_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=5)
+    interrupted_batches: list[list[int]] = []
+
+    def interrupting_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        frame_indices = [frame.frame_index for frame in frames]
+        interrupted_batches.append(frame_indices)
+        if frame_indices == [2, 3]:
+            raise RuntimeError("simulated batch interruption")
+        return [_fake_record(frame) for frame in frames]
+
+    with pytest.raises(RuntimeError, match="simulated batch interruption"):
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=interrupting_batch,
+            ),
+        )
+
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    assert interrupted_batches == [[0, 1], [2, 3]]
+    assert len(_records_from(run_dir / "records" / "frames.jsonl")) == 2
+
+    resumed_batches: list[list[int]] = []
+
+    def resumed_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        resumed_batches.append([frame.frame_index for frame in frames])
+        return [_fake_record(frame) for frame in frames]
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            unigaze_batch_size=2,
+        ),
+        observers=ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=resumed_batch,
+        ),
+    )
+
+    assert result.layout.run_dir == run_dir
+    assert resumed_batches == [[2, 3], [4]]
+    assert [
+        record.frame_index for record in _records_from(result.frames_jsonl_path)
+    ] == [0, 1, 2, 3, 4]
+
+
+def test_analyze_video_no_resume_forces_fresh_run_for_partial_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=3)
+
+    def interrupt_after_first(frame: ObserverFrame) -> FrameRecord:
+        if frame.frame_index == 1:
+            raise RuntimeError("simulated interruption")
+        return _fake_record(frame)
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            observers=ObserverBundle(frame_observer=interrupt_after_first),
+        )
+
+    [partial_run_dir] = (output_root / "tiny" / "runs").iterdir()
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            resume=False,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert result.layout.run_dir != partial_run_dir
+    assert {path.name for path in (output_root / "tiny" / "runs").iterdir()} == {
+        partial_run_dir.name,
+        result.layout.run_dir.name,
+    }
+    assert [
+        record.frame_index for record in _records_from(result.frames_jsonl_path)
+    ] == [0, 1, 2]
+
+
+def test_analyze_video_does_not_resume_complete_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+
+    first = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+    second = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert second.layout.run_dir != first.layout.run_dir
 
 
 def test_analyze_video_uses_batch_observer_without_reordering_frames(
@@ -363,8 +565,8 @@ def test_analyze_video_uses_batch_observer_without_reordering_frames(
         "f000000003",
         "f000000004",
     ]
-    assert len(list(result.layout.raw_frames_dir.glob("*.png"))) == 5
-    assert len(list(result.layout.processed_frames_dir.glob("*.jpg"))) == 5
+    assert list(result.layout.raw_frames_dir.glob("*.png")) == []
+    assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
     assert result.decoded_frame_count == 5
 
 
@@ -422,7 +624,7 @@ def test_single_observer_fallback_keeps_immediate_frame_processing(
 
     assert observed_frames == ["f000000000"]
     [run_dir] = (output_root / "tiny" / "runs").iterdir()
-    assert len(list((run_dir / "raw_frames").glob("*.png"))) == 1
+    assert list((run_dir / "raw_frames").glob("*.png")) == []
 
 
 def test_batch_observer_record_count_mismatch_fails_schema_validation(
@@ -977,6 +1179,37 @@ def test_analyze_video_fails_when_scene_artifact_validation_fails(
     )
 
 
+def test_final_state_write_failure_does_not_leave_complete_qa_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    real_write_analysis_state = cast(Any, pipeline).write_analysis_state
+
+    def fail_complete_state_write(layout: object, state: Any) -> Path:
+        if state.status == "complete":
+            raise RuntimeError("simulated final state write failure")
+        return cast(Path, real_write_analysis_state(cast(Any, layout), state))
+
+    monkeypatch.setattr(
+        pipeline,
+        "write_analysis_state",
+        fail_complete_state_write,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated final state write failure"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    [run_dir] = (tmp_path / "output" / "tiny" / "runs").iterdir()
+    assert not (run_dir / "qa_summary.json").exists()
+
+
 def test_config_output_root_controls_run_layout_for_fake_observers(
     tmp_path: Path,
 ) -> None:
@@ -1122,7 +1355,7 @@ def test_no_face_fake_observer_records_face_not_found_and_processed_frames(
 
     records = _records_from(result.frames_jsonl_path)
     assert len(records) == 2
-    assert len(list(result.layout.processed_frames_dir.glob("*.jpg"))) == 2
+    assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
     assert all(record.status is FrameStatus.ERROR for record in records)
     assert all(
         record.face.reason_invalid is ErrorCode.FACE_NOT_FOUND for record in records
@@ -1192,7 +1425,11 @@ def test_raw_frame_write_failure_records_partial_status_and_error_evidence(
     monkeypatch.setattr(pipeline, "raw_frame_writer", fail_second_raw_frame)
 
     result = analyze_video(
-        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            save_frame_images=True,
+        ),
         observers=ObserverBundle(frame_observer=_fake_record),
     )
 
@@ -1241,7 +1478,11 @@ def test_processed_frame_write_failure_records_error_evidence(
     )
 
     result = analyze_video(
-        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            save_frame_images=True,
+        ),
         observers=ObserverBundle(frame_observer=_fake_record),
     )
 

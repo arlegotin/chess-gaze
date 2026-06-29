@@ -166,20 +166,17 @@ def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
     }
     assert summary.artifact_validation.source_artifacts == summary.source_artifacts
     assert summary.counts.decoded_frames == expected_count
-    assert summary.counts.raw_frames == expected_count
-    assert summary.counts.processed_frames == expected_count
+    assert summary.counts.raw_frames == 0
+    assert summary.counts.processed_frames == 0
     assert summary.counts.frame_records == expected_count
     assert summary.artifact_validation.schema_validation_passed is True
     assert summary.artifact_validation.counts_match is True
     assert len(summary.qa_sample_frame_ids) == 30
     assert summary.qa_sample_frame_ids == sorted(summary.qa_sample_frame_ids)
-    assert summary.byte_counts.raw_frames_bytes > 0
-    assert summary.byte_counts.processed_frames_bytes > 0
+    assert summary.byte_counts.raw_frames_bytes == 0
+    assert summary.byte_counts.processed_frames_bytes == 0
     assert summary.byte_counts.jsonl_bytes > 0
-    assert summary.byte_counts.total_run_bytes > (
-        summary.byte_counts.raw_frames_bytes
-        + summary.byte_counts.processed_frames_bytes
-    )
+    assert summary.byte_counts.total_run_bytes > summary.byte_counts.jsonl_bytes
     assert summary.status_transitions == [
         "created",
         "processing",

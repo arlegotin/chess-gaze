@@ -3,8 +3,9 @@
 Local Python pipeline for per-frame video evidence and 3D scene artifacts used
 by chess gaze analysis.
 
-The implemented pipeline decodes video, writes strict run artifacts, preserves raw
-and processed frame evidence, and revalidates artifacts into `qa_summary.json`.
+The implemented pipeline decodes video, writes strict run artifacts, keeps raw
+and processed frame images only when explicitly requested, and revalidates
+artifacts into `qa_summary.json`.
 The default CLI path validates local model checksums, runs MediaPipe face
 landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
 checkpoint, records strict per-frame gaze outputs, builds pseudo-metric 3D scene
@@ -47,6 +48,7 @@ Useful options:
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --output-root artifacts/output
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --models-root models
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --config analysis.json
+uv run chess-gaze analyze artifacts/input/test_1.mp4 --save-frames
 ```
 
 By default, UniGaze runs on Apple Silicon MPS with batch size 7:
@@ -84,19 +86,40 @@ Runs are written under:
 artifacts/output/<video-stem>/runs/<run-id>/
 ```
 
+By default, rerunning the same `chess-gaze analyze <video>` command resumes the
+newest compatible interrupted run for that video. Compatibility is checked
+against the input video path and hash, video manifest, calibration, and inference
+runtime metadata. Completed runs are never resumed; a completed rerun creates a
+new run directory.
+
+Use `--no-resume` to force a fresh run even when a compatible partial run
+exists:
+
+```sh
+uv run chess-gaze analyze artifacts/input/test_1.mp4 --no-resume
+```
+
+By default, completed runs do not retain decoded raw PNGs or processed overlay
+JPEGs. The analyzer keeps decoded frames in memory only as long as needed for
+observation and visualization data generation. Use `--save-frames` when a run
+must retain `raw_frames/*.png` and `processed_frames/*.jpg` for visual debugging
+or external QA.
+
 Each completed run contains:
 
 - `run_manifest.json`
 - `calibration.json`
 - `video_manifest.json`
-- `raw_frames/`
-- `processed_frames/`
+- `analysis_state.json`
+- `raw_frames/` (empty by default; populated by `--save-frames`)
+- `processed_frames/` (empty by default; populated by `--save-frames`)
 - `records/frames.jsonl`
 - `records/errors.jsonl`
 - `records/scene_frames.jsonl`
 - `scene/scene_manifest.json`
 - `scene/scene_summary.json`
 - `viewer/index.html`
+- `viewer/served.html`
 - `viewer/scene-data.json`
 - `qa_summary.json`
 
@@ -108,15 +131,16 @@ artifacts/output/<video-stem>/runs/<run-id>
 viewer: artifacts/output/<video-stem>/runs/<run-id>/viewer/index.html
 ```
 
-Open `viewer/index.html` directly in a browser, or serve the same files through
-the localhost-only static server:
+Open `viewer/index.html` directly in a browser. For large runs, prefer the
+localhost-only static server:
 
 ```sh
 uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>
 ```
 
-The command prints a local URL and serves only files under that run's
-`viewer/` directory. It binds to loopback hosts only.
+The command prints a local URL, serves `viewer/served.html` at `/`, and keeps
+`viewer/index.html` available as the direct file-url artifact. It serves only
+files under that run's `viewer/` directory and binds to loopback hosts only.
 
 The viewer keeps run artifacts local, but it loads Three.js `0.185.0` from
 pinned jsDelivr module URLs when the page renders. Expected remote module
@@ -125,6 +149,14 @@ requests are `three.module.js`, its transitive `three.core.js`, and
 upload scene JSON, frames, crops, or model data, but the remote modules execute
 in the same page as embedded scene data and must be trusted. Offline viewing
 requires those pinned modules to already be present in the browser cache.
+
+The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
+estimate and overlays translucent angular-error patches on the monitor plane.
+In `Accumulated` mode, hit-area patches accumulate like hit points but remain
+controlled by the separate `Hit Area` toggle. The default typical angular error
+is 8 degrees and can be adjusted from 0 to 12 degrees in the viewer. Hit-area
+opacity defaults to 24% and is adjustable in the same control group. This is a
+display assumption, not per-frame UniGaze confidence.
 
 ## Scene Artifacts
 

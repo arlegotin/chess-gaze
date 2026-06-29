@@ -1,5 +1,11 @@
 # Frame-Level Gaze Analysis Pipeline Implementation Plan
 
+Supersession note, 2026-06-29: this historical plan's raw/processed frame image
+retention requirements are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs do not retain raw or processed frame image files
+unless `--save-frames` or `save_frame_images=True` is used.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the local `chess-gaze analyze <video_path>` pipeline that decodes every frame, preserves raw evidence, records strict per-frame face/eye/head/gaze observations, and writes QA artifacts without temporal smoothing.

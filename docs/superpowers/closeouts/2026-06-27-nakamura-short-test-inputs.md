@@ -1,5 +1,10 @@
 # Nakamura Short Test Inputs Closeout
 
+> Fixture note, 2026-06-29: `artifacts/input/nakamura_short.mp4` was replaced
+> after this closeout. Current fixture expectations and digest are in
+> [2026-06-29-nakamura-short-video-refresh.md](2026-06-29-nakamura-short-video-refresh.md).
+> Historical values below describe the prior clip.
+
 ## Summary
 
 - Replaced tests that consumed removed or slower `artifacts/input/*.mp4` real

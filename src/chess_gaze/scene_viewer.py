@@ -21,6 +21,9 @@ from chess_gaze.scene_artifacts import (
 from chess_gaze.scene_records import SceneSummary, ViewerSceneData
 from chess_gaze.viewer_dependencies import three_import_map
 
+_INDEX_IMPORT_MAP_MARKER = "    <!-- CHESS_GAZE_IMPORT_MAP -->"
+_INDEX_MODULE_TAG = '    <script type="module" src="./scene_viewer.js"></script>'
+
 
 @dataclass(frozen=True)
 class ViewerBuildResult:
@@ -83,6 +86,7 @@ def build_scene_viewer(
         viewer_dir,
         updated_scene_result.viewer_data,
     )
+    _write_served_entrypoint(viewer_dir)
     _write_file_url_compatible_index(viewer_dir, updated_scene_result.viewer_data)
     return ViewerBuildResult(
         viewer_dir=viewer_dir,
@@ -103,14 +107,48 @@ def write_viewer_scene_data(viewer_dir: Path, data: ViewerSceneData) -> Path:
     return path
 
 
+def _write_served_entrypoint(viewer_dir: Path) -> None:
+    served_path = viewer_dir / "served.html"
+    html = _render_viewer_html(
+        _viewer_html_template(viewer_dir),
+        viewer_dir=viewer_dir,
+    )
+    atomic_write_bytes(served_path, html.encode("utf-8"))
+
+
 def _write_file_url_compatible_index(
     viewer_dir: Path,
     data: ViewerSceneData,
 ) -> None:
     index_path = viewer_dir / "index.html"
-    html = index_path.read_text(encoding="utf-8")
-    module_tag = '    <script type="module" src="./scene_viewer.js"></script>'
-    if module_tag not in html:
+    html = _render_viewer_html(
+        _viewer_html_template(viewer_dir),
+        viewer_dir=viewer_dir,
+        data=data,
+    )
+    atomic_write_bytes(index_path, html.encode("utf-8"))
+
+
+def _viewer_html_template(viewer_dir: Path) -> str:
+    return (viewer_dir / "index.html").read_text(encoding="utf-8")
+
+
+def _render_viewer_html(
+    html: str,
+    *,
+    viewer_dir: Path,
+    data: ViewerSceneData | None = None,
+) -> str:
+    if _INDEX_IMPORT_MAP_MARKER not in html:
+        raise ViewerServerError("viewer index template is missing import map marker")
+
+    html = html.replace(
+        _INDEX_IMPORT_MAP_MARKER, _import_map_script(three_import_map())
+    )
+    if data is None:
+        return html
+
+    if _INDEX_MODULE_TAG not in html:
         raise ViewerServerError("viewer index template is missing module script tag")
 
     scene_data_json = json.dumps(
@@ -123,7 +161,6 @@ def _write_file_url_compatible_index(
             '    <script type="application/json" id="scene-data-json">',
             _safe_script_payload(scene_data_json),
             "    </script>",
-            _import_map_script(three_import_map()),
             _module_source_script(
                 "scene-viewer-source",
                 (viewer_dir / "scene_viewer.js").read_text(encoding="utf-8"),
@@ -133,8 +170,7 @@ def _write_file_url_compatible_index(
             "    </script>",
         )
     )
-    html = html.replace(module_tag, embedded_bootstrap)
-    atomic_write_bytes(index_path, html.encode("utf-8"))
+    return html.replace(_INDEX_MODULE_TAG, embedded_bootstrap)
 
 
 def _module_source_script(script_id: str, source: str) -> str:
@@ -295,6 +331,10 @@ class _LockedViewerRequestHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(self._viewer_root), **kwargs)  # type: ignore[arg-type]
 
     def translate_path(self, path: str) -> str:
+        if path in ("", "/"):
+            served_path = self._viewer_root / "served.html"
+            if served_path.is_file():
+                return str(served_path)
         candidate = Path(super().translate_path(path)).resolve()
         if _is_relative_to(candidate, self._viewer_root):
             return str(candidate)

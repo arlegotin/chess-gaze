@@ -48,6 +48,20 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--config", default=None)
     analyze.add_argument("--unigaze-device", choices=("cpu", "mps"), default=None)
     analyze.add_argument("--unigaze-batch-size", type=int, default=None)
+    analyze.add_argument(
+        "--save-frames",
+        action="store_true",
+        default=None,
+        dest="save_frame_images",
+        help="retain raw decoded PNGs and processed overlay JPEGs",
+    )
+    analyze.add_argument(
+        "--no-resume",
+        action="store_false",
+        dest="resume",
+        default=True,
+        help="create a fresh run instead of resuming a compatible interrupted run",
+    )
     view = subparsers.add_parser("view")
     view.add_argument("run_dir")
     view.add_argument("--host", default="127.0.0.1")
@@ -86,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
                 config_path=Path(args.config) if args.config is not None else None,
                 unigaze_device=args.unigaze_device,
                 unigaze_batch_size=args.unigaze_batch_size,
+                save_frame_images=args.save_frame_images,
+                resume=args.resume,
             )
         )
     except PipelineError as exc:

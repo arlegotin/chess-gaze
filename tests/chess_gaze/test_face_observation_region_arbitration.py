@@ -61,6 +61,8 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -86,6 +88,8 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
         (540, 960, 3),
         (540, 960, 3),
         (486, 960, 3),
+        (480, 720, 3),
+        (450, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
@@ -138,6 +142,8 @@ def test_mediapipe_observer_rejects_larger_focused_overexpanded_candidate(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
+            empty_detection_result(),
+            empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
@@ -217,6 +223,8 @@ def test_mediapipe_observer_rejects_top_shift_candidate_without_compact_geometry
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -286,6 +294,8 @@ def test_mediapipe_observer_rejects_large_full_frame_refinement_without_compact_
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -311,3 +321,427 @@ def test_mediapipe_observer_rejects_large_full_frame_refinement_without_compact_
     assert candidate.bounding_box_image_px.y_min == pytest.approx(486.0)
     assert candidate.bounding_box_image_px.x_max == pytest.approx(806.4)
     assert candidate.bounding_box_image_px.y_max == pytest.approx(810.0)
+
+
+def test_mediapipe_observer_ignores_seam_clipped_consensus_for_large_full_frame_refinement(  # noqa: E501
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.17, y=0.45, z=0.0),
+                        SimpleNamespace(x=0.42, y=0.75, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [SimpleNamespace(category_name="large_full_face", score=0.50)]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.375, y=0.2685185185, z=0.0),
+                        SimpleNamespace(x=0.5625, y=0.45, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="left_half_compact_face",
+                            score=0.80,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.375, y=0.5967078189, z=0.0),
+                        SimpleNamespace(x=0.5625, y=1.0, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="seam_clipped_support_only_face",
+                            score=0.40,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((1080, 1920, 3), dtype=np.uint8),
+        frame_id="f000001502",
+    )
+
+    assert observation.selection.present is True
+    candidate = observation.selection.candidates[0]
+    assert candidate.blendshapes[0].category_name == "large_full_face"
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(326.4)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(486.0)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(806.4)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(810.0)
+
+
+def test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_region_candidate(  # noqa: E501
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.375, y=0.20, z=0.0),
+                        SimpleNamespace(x=0.5625, y=0.40, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="cross_region_real_face", score=0.80
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.375, y=0.4444444444, z=0.0),
+                        SimpleNamespace(x=0.5625, y=0.8888888889, z=0.0),
+                    ],
+                    [
+                        SimpleNamespace(x=0.2604166667, y=0.3703703704, z=0.0),
+                        SimpleNamespace(x=0.6354166667, y=0.8641975309, z=0.0),
+                    ],
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="cross_region_real_face", score=0.80
+                        )
+                    ],
+                    [
+                        SimpleNamespace(
+                            category_name="larger_single_region_false_positive",
+                            score=0.30,
+                        )
+                    ],
+                ],
+                facial_transformation_matrixes=[
+                    np.eye(4, dtype=np.float64) * 2.0,
+                    np.eye(4, dtype=np.float64) * 3.0,
+                ],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((1080, 1920, 3), dtype=np.uint8),
+        frame_id="f000001503",
+    )
+
+    assert captured["detect_shapes"] == [
+        (1080, 1920, 3),
+        (1080, 960, 3),
+        (1080, 960, 3),
+        (540, 960, 3),
+        (540, 960, 3),
+        (486, 960, 3),
+        (480, 720, 3),
+        (450, 720, 3),
+        (486, 960, 3),
+        (525, 960, 3),
+    ]
+    assert observation.selection.present is True
+    assert observation.selection.primary_candidate_id is not None
+    candidate = next(
+        candidate
+        for candidate in observation.selection.candidates
+        if candidate.candidate_id == observation.selection.primary_candidate_id
+    )
+    assert candidate.blendshapes[0].category_name == "cross_region_real_face"
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(360.0)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(216.0)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(540.0)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(432.0)
+
+
+def test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger_single_region_candidate(  # noqa: E501
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.375, y=0.1851851852, z=0.0),
+                        SimpleNamespace(x=0.46875, y=0.2425925926, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="cross_region_supported_small_face",
+                            score=0.80,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.375, y=0.4115226337, z=0.0),
+                        SimpleNamespace(x=0.46875, y=0.5390946502, z=0.0),
+                    ],
+                    [
+                        SimpleNamespace(x=0.2604166667, y=0.3292181070, z=0.0),
+                        SimpleNamespace(x=0.6770833333, y=0.7818930041, z=0.0),
+                    ],
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="cross_region_supported_small_face",
+                            score=0.80,
+                        )
+                    ],
+                    [
+                        SimpleNamespace(
+                            category_name="stronger_single_region_false_positive",
+                            score=0.30,
+                        )
+                    ],
+                ],
+                facial_transformation_matrixes=[
+                    np.eye(4, dtype=np.float64) * 2.0,
+                    np.eye(4, dtype=np.float64) * 3.0,
+                ],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((1080, 1920, 3), dtype=np.uint8),
+        frame_id="f000001504",
+    )
+
+    assert captured["detect_shapes"] == [
+        (1080, 1920, 3),
+        (1080, 960, 3),
+        (1080, 960, 3),
+        (540, 960, 3),
+        (540, 960, 3),
+        (486, 960, 3),
+        (480, 720, 3),
+        (450, 720, 3),
+        (486, 960, 3),
+        (525, 960, 3),
+    ]
+    assert observation.selection.present is True
+    assert observation.selection.primary_candidate_id is not None
+    candidate = next(
+        candidate
+        for candidate in observation.selection.candidates
+        if candidate.candidate_id == observation.selection.primary_candidate_id
+    )
+    assert candidate.blendshapes[0].category_name == (
+        "cross_region_supported_small_face"
+    )
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(360.0)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(200.0)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(450.0)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(262.0)
+
+
+def test_mediapipe_observer_prefers_inner_consensus_over_broad_upper_false_positive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.20, z=0.0),
+                        SimpleNamespace(x=0.875, y=0.4592592593, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="broad_upper_false_positive", score=0.40
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.2222222222, z=0.0),
+                        SimpleNamespace(x=0.875, y=0.5102880658, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="broad_upper_false_positive", score=0.40
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
+            ),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.50625, z=0.0),
+                        SimpleNamespace(x=0.95, y=0.7875, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="paired_inner_consensus_real_face",
+                            score=0.80,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
+            ),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.54, z=0.0),
+                        SimpleNamespace(x=0.95, y=0.84, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="paired_inner_consensus_real_face",
+                            score=0.80,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 4.0],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((1080, 1920, 3), dtype=np.uint8),
+        frame_id="f000002042",
+    )
+
+    assert observation.selection.present is True
+    assert observation.selection.primary_candidate_id is not None
+    candidate = next(
+        candidate
+        for candidate in observation.selection.candidates
+        if candidate.candidate_id == observation.selection.primary_candidate_id
+    )
+    assert candidate.blendshapes[0].category_name == (
+        "paired_inner_consensus_real_face"
+    )
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(540.0)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(243.0)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(684.0)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(378.0)
+    assert captured["detect_shapes"] == [
+        (1080, 1920, 3),
+        (1080, 960, 3),
+        (1080, 960, 3),
+        (540, 960, 3),
+        (540, 960, 3),
+        (486, 960, 3),
+        (480, 720, 3),
+        (450, 720, 3),
+        (486, 960, 3),
+        (525, 960, 3),
+    ]

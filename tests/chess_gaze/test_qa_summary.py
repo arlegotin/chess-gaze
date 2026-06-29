@@ -11,6 +11,7 @@ from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
+    FrameImageRetentionPolicy,
     FrameRecord,
     InferenceRuntimeRecord,
     RunManifest,
@@ -162,7 +163,13 @@ def _external_observer_inference_record() -> InferenceRuntimeRecord:
     )
 
 
-def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
+def _write_fixture_run(
+    tmp_path: Path,
+    frame_count: int = 35,
+    *,
+    save_frame_images: bool = True,
+    write_frame_images: bool = True,
+) -> RunLayout:
     layout = _make_layout(tmp_path)
     video_path = tmp_path / "source.mp4"
     video_path.write_bytes(b"source-video")
@@ -179,6 +186,9 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
             frame_count_decoded=frame_count,
         ),
         inference=_external_observer_inference_record(),
+        frame_image_retention=FrameImageRetentionPolicy(
+            save_frame_images=save_frame_images
+        ),
     )
     (layout.run_dir / "run_manifest.json").write_text(
         run_manifest.model_dump_json(), encoding="utf-8"
@@ -195,12 +205,13 @@ def _write_fixture_run(tmp_path: Path, frame_count: int = 35) -> RunLayout:
         status = FrameStatus.ERROR if frame_index in {4, 17, 31} else FrameStatus.OK
         record = _record(frame_index, status=status)
         frame_records.append(record)
-        pixel_value = frame_index * 7 % 255
-        image = _solid_rgb(pixel_value)
-        save_rgb_png(layout.raw_frames_dir / f"{record.frame_id}.png", image)
-        (layout.processed_frames_dir / f"{record.frame_id}.jpg").write_bytes(
-            b"processed" + bytes([frame_index])
-        )
+        if write_frame_images:
+            pixel_value = frame_index * 7 % 255
+            image = _solid_rgb(pixel_value)
+            save_rgb_png(layout.raw_frames_dir / f"{record.frame_id}.png", image)
+            (layout.processed_frames_dir / f"{record.frame_id}.jpg").write_bytes(
+                b"processed" + bytes([frame_index])
+            )
     (layout.face_crops_dir / "f000000000.png").write_bytes(b"face-crop")
     (layout.left_eye_crops_dir / "f000000000.png").write_bytes(b"left-crop")
     (layout.right_eye_crops_dir / "f000000000.png").write_bytes(b"right-crop")
@@ -587,6 +598,45 @@ def test_validate_run_artifacts_reports_count_mismatches_without_hiding_records(
     ]
     assert result.counts.decoded_frames == 3
     assert result.counts.raw_frames == 2
+
+
+def test_validate_run_artifacts_accepts_unretained_frame_images_when_disabled(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(
+        tmp_path,
+        frame_count=3,
+        save_frame_images=False,
+        write_frame_images=False,
+    )
+
+    result = validate_run_artifacts(layout)
+    summary = build_qa_summary(layout)
+
+    assert result.counts.raw_frames == 0
+    assert result.counts.processed_frames == 0
+    assert result.counts_match is True
+    assert summary.final_status == "complete"
+
+
+def test_validate_run_artifacts_rejects_stray_frame_images_when_policy_disables_saving(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(
+        tmp_path,
+        frame_count=2,
+        save_frame_images=False,
+        write_frame_images=False,
+    )
+    (layout.raw_frames_dir / "f000000000.png").write_bytes(b"stray")
+
+    result = validate_run_artifacts(layout)
+
+    assert result.counts_match is False
+    assert result.final_status == "failed"
+    assert result.validation_errors == [
+        "raw frame count does not match frame image retention policy: 1 != 0"
+    ]
 
 
 def test_tail_truncated_run_uses_video_manifest_decoded_count(tmp_path: Path) -> None:

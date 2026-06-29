@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
@@ -300,12 +300,20 @@ class InferenceRuntimeRecord(StrictSchemaModel):
         return self
 
 
+class FrameImageRetentionPolicy(StrictSchemaModel):
+    schema_version: Literal["frame-image-retention-v1"] = "frame-image-retention-v1"
+    save_frame_images: bool
+
+
 class RunManifest(StrictSchemaModel):
     run_id: str
     created_at_utc: str
     input_path: str
     video: VideoManifest
     inference: InferenceRuntimeRecord
+    frame_image_retention: FrameImageRetentionPolicy = Field(
+        default_factory=lambda: FrameImageRetentionPolicy(save_frame_images=True)
+    )
 
 
 def _legacy_artifact_inference_record() -> InferenceRuntimeRecord:

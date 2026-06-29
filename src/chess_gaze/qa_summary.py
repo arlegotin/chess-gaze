@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from collections import Counter
 from datetime import UTC, datetime
@@ -15,12 +16,14 @@ from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
     CalibrationRecord,
     FrameErrorRecord,
+    FrameImageRetentionPolicy,
     FrameRecord,
     RunManifest,
     VideoManifest,
     read_run_manifest_artifact_json,
 )
 from chess_gaze.geometry import StrictSchemaModel
+from chess_gaze.image_io import atomic_write_bytes
 from chess_gaze.scene_records import (
     SceneFrameRecord,
     SceneManifest,
@@ -28,6 +31,7 @@ from chess_gaze.scene_records import (
     ViewerSceneData,
 )
 
+QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
 QA_SAMPLE_COUNT = 30
 REPRESENTATIVE_FAILURE_COUNT = 20
 QUALITY_FAILURE_COUNT = 20
@@ -183,6 +187,71 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
     )
 
 
+def write_qa_summary(run_layout: RunLayout, qa_summary_path: Path) -> QASummary:
+    qa_summary = _build_stabilized_qa_summary(run_layout, qa_summary_path)
+    _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
+    return qa_summary
+
+
+def _build_stabilized_qa_summary(
+    run_layout: RunLayout, qa_summary_path: Path
+) -> QASummary:
+    qa_summary = build_qa_summary(run_layout)
+    existing_qa_summary_bytes = (
+        qa_summary_path.stat().st_size if qa_summary_path.exists() else 0
+    )
+    run_bytes_without_qa_summary = (
+        qa_summary.byte_counts.total_run_bytes - existing_qa_summary_bytes
+    )
+    stable_total_run_bytes: int | None = None
+
+    for _attempt in range(QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS):
+        candidate_total_run_bytes = run_bytes_without_qa_summary + len(
+            _json_bytes(qa_summary.model_dump(mode="json"))
+        )
+        qa_summary = _qa_summary_with_total_run_bytes(
+            qa_summary,
+            candidate_total_run_bytes,
+        )
+        if candidate_total_run_bytes == stable_total_run_bytes:
+            return qa_summary
+        stable_total_run_bytes = candidate_total_run_bytes
+
+    return qa_summary
+
+
+def _qa_summary_with_total_run_bytes(
+    qa_summary: QASummary, total_run_bytes: int
+) -> QASummary:
+    byte_counts = qa_summary.byte_counts.model_copy(
+        update={"total_run_bytes": total_run_bytes}
+    )
+    artifact_validation = qa_summary.artifact_validation.model_copy(
+        update={"byte_counts": byte_counts}
+    )
+    disk_space = qa_summary.disk_space.model_copy(
+        update={"preflight_estimate_bytes": max(total_run_bytes, 1)}
+    )
+    return qa_summary.model_copy(
+        update={
+            "byte_counts": byte_counts,
+            "artifact_validation": artifact_validation,
+            "disk_space": disk_space,
+        }
+    )
+
+
+def _write_json(path: Path, payload: object) -> None:
+    atomic_write_bytes(path, _json_bytes(payload))
+
+
+def _json_bytes(payload: object) -> bytes:
+    return (
+        json.dumps(payload, allow_nan=False, indent=2, sort_keys=True).encode("utf-8")
+        + b"\n"
+    )
+
+
 def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
     run_manifest = _read_run_manifest(run_layout.run_dir / "run_manifest.json")
     _read_json_model(run_layout.run_dir / "calibration.json", CalibrationRecord)
@@ -260,7 +329,10 @@ def _validate_loaded_run_artifacts(
     counts = _artifact_counts(loaded)
     byte_counts = _byte_counts(run_layout, loaded)
     count_validation_errors = _count_validation_errors(
-        counts, loaded.frame_records, loaded.scene_frame_records
+        counts,
+        loaded.frame_records,
+        loaded.scene_frame_records,
+        loaded.run_manifest.frame_image_retention,
     )
     validation_errors = loaded.schema_validation_errors + count_validation_errors
     final_status: Literal["complete", "failed"] = (
@@ -381,6 +453,7 @@ def _count_validation_errors(
     counts: ArtifactCounts,
     frame_records: list[FrameRecord],
     scene_frame_records: list[SceneFrameRecord],
+    frame_image_retention: FrameImageRetentionPolicy,
 ) -> list[str]:
     errors: list[str] = []
     if counts.frame_records != counts.decoded_frames:
@@ -388,16 +461,17 @@ def _count_validation_errors(
             "frame record count does not match decoded frame count: "
             f"{counts.frame_records} != {counts.decoded_frames}"
         )
-    if counts.raw_frames != counts.decoded_frames:
-        errors.append(
-            "raw frame count does not match decoded frame count: "
-            f"{counts.raw_frames} != {counts.decoded_frames}"
+    expected_frame_images = (
+        counts.decoded_frames if frame_image_retention.save_frame_images else 0
+    )
+    errors.extend(
+        _frame_image_count_validation_errors(
+            raw_frames=counts.raw_frames,
+            processed_frames=counts.processed_frames,
+            expected_frame_images=expected_frame_images,
+            save_frame_images=frame_image_retention.save_frame_images,
         )
-    if counts.processed_frames != counts.decoded_frames:
-        errors.append(
-            "processed frame count does not match decoded frame count: "
-            f"{counts.processed_frames} != {counts.decoded_frames}"
-        )
+    )
     if counts.scene_frame_records != counts.decoded_frames:
         errors.append(
             "scene frame record count does not match decoded frame count: "
@@ -413,6 +487,53 @@ def _count_validation_errors(
     if observed_scene_indices != list(range(counts.decoded_frames)):
         errors.append("scene frame records are not contiguous from decoded frame zero")
     return errors
+
+
+def _frame_image_count_validation_errors(
+    *,
+    raw_frames: int,
+    processed_frames: int,
+    expected_frame_images: int,
+    save_frame_images: bool,
+) -> list[str]:
+    errors: list[str] = []
+    if raw_frames != expected_frame_images:
+        errors.append(
+            _frame_image_count_error(
+                "raw",
+                observed=raw_frames,
+                expected=expected_frame_images,
+                save_frame_images=save_frame_images,
+            )
+        )
+    if processed_frames != expected_frame_images:
+        errors.append(
+            _frame_image_count_error(
+                "processed",
+                observed=processed_frames,
+                expected=expected_frame_images,
+                save_frame_images=save_frame_images,
+            )
+        )
+    return errors
+
+
+def _frame_image_count_error(
+    frame_kind: str,
+    *,
+    observed: int,
+    expected: int,
+    save_frame_images: bool,
+) -> str:
+    if save_frame_images:
+        return (
+            f"{frame_kind} frame count does not match decoded frame count: "
+            f"{observed} != {expected}"
+        )
+    return (
+        f"{frame_kind} frame count does not match frame image retention policy: "
+        f"{observed} != {expected}"
+    )
 
 
 def _detection_rates(frame_records: list[FrameRecord]) -> DetectionRates:

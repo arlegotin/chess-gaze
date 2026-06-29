@@ -12,6 +12,12 @@
 > current no-override default is MPS batch size 7; CPU/1 remains an explicit
 > compatibility and benchmark-baseline profile.
 
+> Supersession note, 2026-06-29: this historical plan's raw/processed frame
+> image retention assumptions are superseded by
+> `docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+> ADR-0004. Current default runs do not retain raw or processed frame image
+> files unless `--save-frames` or `save_frame_images=True` is used.
+
 **Tech Stack:** Python 3.12, uv, pytest, Ruff, mypy, PyTorch 2.12.1 MPS, UniGaze 0.1.3, MediaPipe Face Landmarker IMAGE mode, NumPy, Pydantic v2, existing PyAV/OpenCV/Pillow pipeline.
 
 ## Global Constraints

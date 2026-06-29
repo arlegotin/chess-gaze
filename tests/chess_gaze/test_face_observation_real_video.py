@@ -19,17 +19,48 @@ MODELS_ROOT = REPO_ROOT / "models"
 MEDIAPIPE_MODEL_ID = "mediapipe-face-landmarker"
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
 NAKAMURA_SHORT_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
+CARLSEN_VIDEO = Path("artifacts/input/carlsen_1.mp4")
+CARLSEN_REPORTED_VISIBLE_FRAME_INDICES = (
+    2036,
+    2037,
+    2042,
+    2050,
+    2062,
+    5694,
+    5695,
+    5697,
+    9029,
+    9030,
+    9031,
+    15079,
+    15080,
+    15081,
+    15082,
+    15083,
+)
+CARLSEN_ADJACENT_CONTROL_FRAME_INDICES = (
+    2035,
+    2063,
+    5693,
+    5698,
+    9028,
+    9032,
+    15078,
+    15084,
+)
+CARLSEN_FACE_CENTER_X_BOUNDS = (450.0, 660.0)
+CARLSEN_FACE_CENTER_Y_BOUNDS = (240.0, 430.0)
 SAMPLED_FRAME_INDICES = {
     NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
 NAKAMURA_SHORT_EXPECTED_FACE_BOXES = {
-    "f000000000": (329.6, 669.6, 518.1, 873.4),
-    "f000000030": (333.0, 710.5, 526.4, 903.9),
-    "f000000060": (328.3, 676.9, 529.2, 888.5),
-    "f000000090": (353.8, 650.5, 550.0, 903.1),
-    "f000000120": (371.5, 686.1, 578.9, 938.1),
-    "f000000150": (369.5, 688.5, 581.1, 941.5),
-    "f000000179": (354.2, 668.4, 576.7, 947.8),
+    "f000000000": (368.3, 678.9, 532.2, 871.1),
+    "f000000030": (348.9, 705.1, 513.4, 884.7),
+    "f000000060": (353.7, 720.1, 519.3, 893.4),
+    "f000000090": (363.7, 695.2, 527.9, 894.5),
+    "f000000120": (390.8, 650.9, 547.8, 852.3),
+    "f000000150": (388.0, 635.1, 541.8, 823.0),
+    "f000000179": (389.6, 685.2, 551.0, 869.4),
 }
 
 
@@ -209,6 +240,71 @@ def test_mediapipe_observer_keeps_nakamura_short_faces_bounded() -> None:
             )
 
         assert recovered_boxes == NAKAMURA_SHORT_EXPECTED_FACE_BOXES
+    finally:
+        observer.close()
+
+
+def test_mediapipe_observer_keeps_carlsen_face_centers_in_visible_person_region() -> (
+    None
+):
+    video_path = REPO_ROOT / CARLSEN_VIDEO
+    if not video_path.is_file():
+        pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
+
+    registry = load_model_registry(MODEL_REGISTRY_PATH)
+    model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
+    model_path = MODELS_ROOT / model_entry.expected_relative_path
+    if not model_path.is_file():
+        pytest.skip(
+            "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
+            f"{model_path}"
+        )
+    assert model_entry.checksum_sha256 is not None
+    assert sha256_file(model_path) == model_entry.checksum_sha256
+
+    sampled_indices = (
+        CARLSEN_ADJACENT_CONTROL_FRAME_INDICES + CARLSEN_REPORTED_VISIBLE_FRAME_INDICES
+    )
+    observer = MediaPipeFaceObserver(
+        model_asset_path=model_path,
+        calibration=default_calibration(),
+    )
+    try:
+        sampled_frames = _sample_frames(video_path, sampled_indices)
+        recovered_centers: dict[str, tuple[float, float]] = {}
+        for frame in sampled_frames:
+            observation = observer.observe(frame.rgb, frame_id=frame.frame_id)
+            assert observation.selection.present, (
+                f"{frame.frame_id} should recover the visible player face"
+            )
+            assert observation.selection.primary_candidate_id is not None
+            candidate = next(
+                item
+                for item in observation.selection.candidates
+                if item.candidate_id == observation.selection.primary_candidate_id
+            )
+            bbox = candidate.bounding_box_image_px
+            center_x = round((bbox.x_min + bbox.x_max) / 2, 1)
+            center_y = round((bbox.y_min + bbox.y_max) / 2, 1)
+            recovered_centers[frame.frame_id] = (center_x, center_y)
+            assert (
+                CARLSEN_FACE_CENTER_X_BOUNDS[0]
+                <= center_x
+                <= (CARLSEN_FACE_CENTER_X_BOUNDS[1])
+            ), (
+                f"{frame.frame_id} selected center x={center_x:.1f} outside "
+                "visible player-face bounds"
+            )
+            assert (
+                CARLSEN_FACE_CENTER_Y_BOUNDS[0]
+                <= center_y
+                <= (CARLSEN_FACE_CENTER_Y_BOUNDS[1])
+            ), (
+                f"{frame.frame_id} selected center y={center_y:.1f} outside "
+                "visible player-face bounds"
+            )
+
+        assert set(recovered_centers) == {f"f{index:09d}" for index in sampled_indices}
     finally:
         observer.close()
 

@@ -26,6 +26,8 @@ DETECTION_REGION_RIGHT_HALF = "right_half"
 DETECTION_REGION_LEFT_TOP = "left_top"
 DETECTION_REGION_RIGHT_TOP = "right_top"
 DETECTION_REGION_LEFT_UPPER_BAND = "left_upper_band"
+DETECTION_REGION_LEFT_UPPER_INNER = "left_upper_inner"
+DETECTION_REGION_LEFT_UPPER_INNER_NEARBY = "left_upper_inner_nearby"
 DETECTION_REGION_RIGHT_UPPER_BAND = "right_upper_band"
 DETECTION_REGION_RIGHT_UPPER_MIDDLE = "right_upper_middle"
 REGION_REFINEMENT_MIN_IOU = 0.25
@@ -47,6 +49,9 @@ OVEREXPANDED_FULL_FRAME_MIN_GEOMETRY_SCORE_DELTA = 0.05
 FOCUSED_REGION_SCORE_MULTIPLIER = 0.1
 RIGHT_UPPER_MIDDLE_TOP_FRACTION = 1.0 / 9.0
 RIGHT_UPPER_MIDDLE_BOTTOM_FRACTION = 43.0 / 72.0
+LEFT_UPPER_INNER_RIGHT_FRACTION = 3.0 / 8.0
+LEFT_UPPER_INNER_BOTTOM_FRACTION = 4.0 / 9.0
+LEFT_UPPER_INNER_NEARBY_BOTTOM_FRACTION = 5.0 / 12.0
 
 
 @dataclass(frozen=True)
@@ -545,19 +550,42 @@ def _select_fallback_face(
     full_frame_selection: FaceSelection,
 ) -> FaceSelection:
     scored_fallbacks = [
-        (score, region_selection.selection)
+        (score, max_iou, candidate, region_selection.selection)
         for region_selection in region_selections
         if region_selection.region.name != DETECTION_REGION_FULL_FRAME
-        for score in (_fallback_selection_score(region_selection),)
-        if score is not None
+        for candidate in region_selection.selection.candidates
+        for fallback_score in (
+            _fallback_candidate_score(
+                candidate, region_selection.region, region_selections
+            ),
+        )
+        if fallback_score is not None
+        for score, max_iou in (fallback_score,)
     ]
     if not scored_fallbacks:
         return full_frame_selection
 
-    return max(
-        scored_fallbacks,
-        key=lambda item: (item[0], _primary_selection_area(item[1])),
-    )[1]
+    has_consensus_evidence = any(
+        max_iou >= REGION_CONSENSUS_MIN_IOU
+        for _score, max_iou, _candidate, _selection in scored_fallbacks
+    )
+    fallback_pool = (
+        [item for item in scored_fallbacks if item[1] >= REGION_CONSENSUS_MIN_IOU]
+        if has_consensus_evidence
+        else [
+            item
+            for item in scored_fallbacks
+            if item[2].candidate_id == item[3].primary_candidate_id
+        ]
+    )
+    if not fallback_pool:
+        return full_frame_selection
+
+    _score, _max_iou, candidate, selection = max(
+        fallback_pool,
+        key=lambda item: (item[0], _bbox_area(item[2].bounding_box_image_px)),
+    )
+    return replace(selection, primary_candidate_id=candidate.candidate_id)
 
 
 def _region_refinement_score(
@@ -616,13 +644,23 @@ def _region_refinement_score(
     return area * max_iou
 
 
-def _fallback_selection_score(region_selection: _RegionSelection) -> float | None:
-    candidate = _primary_candidate(region_selection.selection)
-    if candidate is None:
+def _fallback_candidate_score(
+    candidate: FaceCandidate,
+    region: _DetectionRegion,
+    region_selections: Sequence[_RegionSelection],
+) -> tuple[float, float] | None:
+    if not candidate.has_valid_landmarks:
         return None
-    if _candidate_is_near_region_seam(candidate, region_selection.region):
+    if _candidate_is_near_region_seam(candidate, region):
         return None
-    return _candidate_geometry_score(candidate, region_selection.region)
+
+    score = _candidate_geometry_score(candidate, region)
+    max_iou = _max_iou_with_valid_other_region_candidates(
+        candidate, region, region_selections
+    )
+    if max_iou < REGION_CONSENSUS_MIN_IOU:
+        return score, max_iou
+    return score * (1.0 + max_iou), max_iou
 
 
 def _large_full_frame_refinement_score(
@@ -641,7 +679,7 @@ def _large_full_frame_refinement_score(
     if not _candidate_area_is_plausible(fallback):
         return None
     if (
-        _max_iou_with_other_region_candidates(fallback, region, region_selections)
+        _max_iou_with_valid_other_region_candidates(fallback, region, region_selections)
         < REGION_CONSENSUS_MIN_IOU
     ):
         return None
@@ -769,6 +807,33 @@ def _max_iou_with_other_region_candidates(
     )
 
 
+def _max_iou_with_valid_other_region_candidates(
+    candidate: FaceCandidate,
+    region: _DetectionRegion,
+    region_selections: Sequence[_RegionSelection],
+) -> float:
+    return max(
+        (
+            _bbox_iou(
+                candidate.bounding_box_image_px,
+                other_candidate.bounding_box_image_px,
+            )
+            for region_selection in region_selections
+            if region_selection.region.name
+            not in {
+                DETECTION_REGION_FULL_FRAME,
+                region.name,
+            }
+            for other_candidate in region_selection.selection.candidates
+            if other_candidate.has_valid_landmarks
+            and not _candidate_is_near_region_seam(
+                other_candidate, region_selection.region
+            )
+        ),
+        default=0.0,
+    )
+
+
 def _primary_selection_area(selection: FaceSelection) -> float:
     candidate = _primary_candidate(selection)
     if candidate is None:
@@ -884,6 +949,18 @@ def _detection_regions(
     midpoint_x = image_width_px // 2
     midpoint_y = image_height_px // 2
     upper_band_y = max(1, round(image_height_px * 0.45))
+    left_upper_inner_x_max = min(
+        image_width_px,
+        max(1, round(image_width_px * LEFT_UPPER_INNER_RIGHT_FRACTION)),
+    )
+    left_upper_inner_y_max = min(
+        image_height_px,
+        max(1, round(image_height_px * LEFT_UPPER_INNER_BOTTOM_FRACTION)),
+    )
+    left_upper_inner_nearby_y_max = min(
+        image_height_px,
+        max(1, round(image_height_px * LEFT_UPPER_INNER_NEARBY_BOTTOM_FRACTION)),
+    )
     right_upper_middle_y_min = max(
         0, round(image_height_px * RIGHT_UPPER_MIDDLE_TOP_FRACTION)
     )
@@ -936,6 +1013,20 @@ def _detection_regions(
             y_min_px=0,
             x_max_px=midpoint_x,
             y_max_px=upper_band_y,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_LEFT_UPPER_INNER,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=left_upper_inner_x_max,
+            y_max_px=left_upper_inner_y_max,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_LEFT_UPPER_INNER_NEARBY,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=left_upper_inner_x_max,
+            y_max_px=left_upper_inner_nearby_y_max,
         ),
         _DetectionRegion(
             name=DETECTION_REGION_RIGHT_UPPER_BAND,

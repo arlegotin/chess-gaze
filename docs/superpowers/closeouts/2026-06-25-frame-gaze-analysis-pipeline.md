@@ -2,6 +2,12 @@
 
 Date: 2026-06-25
 
+Supersession note, 2026-06-29: this historical closeout's statements about
+preserved raw evidence and default processed overlay writes are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs do not retain raw or processed frame image files
+unless `--save-frames` or `save_frame_images=True` is used.
+
 ## Request Summary
 
 Execute the frame-gaze analysis implementation plan with Superpowers and
