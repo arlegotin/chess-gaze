@@ -32,7 +32,7 @@ operations.
 
 ## Decision
 
-Default analysis does not persist crop image files under `crops/`.
+Default analysis does not create or persist crop image files under `crops/`.
 
 Crop image retention is opt-in:
 
@@ -63,9 +63,10 @@ Resume compatibility requires matching crop-retention policy.
 
 ## Consequences
 
-- Default runs retain no crop PNGs and use less disk space.
-- The `crops/` directory tree remains present but empty for layout
-  compatibility.
+- Default runs do not create the `crops/` directory tree and use less disk
+  space.
+- `RunLayout` still exposes stable crop paths in memory; those directories are
+  created lazily only when explicit crop-saving writes occur.
 - Eye crop geometry and transforms are still computed in memory.
 - Crop write failures are only possible in explicit `--save-crops` runs.
 - Historical run artifacts remain readable under the legacy crop-saving policy.

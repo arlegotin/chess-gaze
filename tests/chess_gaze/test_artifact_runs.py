@@ -33,9 +33,10 @@ def test_run_layout_is_immutable_and_complete(tmp_path: Path) -> None:
     assert layout.records_dir.is_dir()
     assert layout.scene_dir.is_dir()
     assert layout.viewer_dir.is_dir()
-    assert layout.face_crops_dir.is_dir()
-    assert layout.left_eye_crops_dir.is_dir()
-    assert layout.right_eye_crops_dir.is_dir()
+    assert not layout.crops_dir.exists()
+    assert not layout.face_crops_dir.exists()
+    assert not layout.left_eye_crops_dir.exists()
+    assert not layout.right_eye_crops_dir.exists()
     assert layout.raw_frames_dir == layout.run_dir / "raw_frames"
     assert layout.processed_frames_dir == layout.run_dir / "processed_frames"
     assert layout.crops_dir == layout.run_dir / "crops"

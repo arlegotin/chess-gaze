@@ -62,6 +62,7 @@ def test_prepare_resume_run_repairs_committed_prefix_and_rebuilds_errors(
     (layout.raw_frames_dir / "f000000002.png").write_bytes(b"raw2")
     (layout.processed_frames_dir / "f000000001.jpg").write_bytes(b"processed1")
     (layout.processed_frames_dir / "f000000002.jpg").write_bytes(b"processed2")
+    layout.left_eye_crops_dir.mkdir(parents=True)
     (layout.left_eye_crops_dir / "f000000002.png").write_bytes(b"crop")
     (layout.records_dir / "scene_frames.jsonl").write_text("stale\n", encoding="utf-8")
     (layout.scene_dir / "scene_manifest.json").write_text("{}", encoding="utf-8")

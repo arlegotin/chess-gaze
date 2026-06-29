@@ -115,7 +115,7 @@ Each completed run contains:
 - `analysis_state.json`
 - `raw_frames/` (empty by default; populated by `--save-frames`)
 - `processed_frames/` (empty by default; populated by `--save-frames`)
-- `crops/` (empty by default; populated by `--save-crops`)
+- `crops/` (not created by default; created and populated by `--save-crops`)
 - `records/frames.jsonl`
 - `records/errors.jsonl`
 - `records/scene_frames.jsonl`

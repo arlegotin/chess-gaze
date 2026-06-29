@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make default analysis avoid retaining `crops/**/*.png`, while preserving crop files when explicitly requested with `--save-crops` or `save_crop_images=True`.
+**Goal:** Make default analysis avoid creating or retaining `crops/**/*.png`, while preserving crop files when explicitly requested with `--save-crops` or `save_crop_images=True`.
 
 **Architecture:** Persist a crop-image retention policy in `run_manifest.json`, resolve it from config/request/CLI, and enforce it at the eye crop PNG write boundary. QA validates zero crop files when saving is disabled and reports crop counts without exact-count enforcement when saving is enabled because current durable records do not encode every write-eligible crop.
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Do not add a new third-party dependency.
-- Default `chess-gaze analyze <video>` must retain zero crop image files under `crops/`.
+- Default `chess-gaze analyze <video>` must not create the `crops/` directory tree.
 - `--save-crops` must be the explicit CLI opt-in that retains eye crop PNGs.
 - `--save-frames` must continue to control only raw decoded frame PNGs and processed overlay JPEGs.
 - Programmatic callers opt in with `AnalyzeRequest(save_crop_images=True)`.
@@ -207,7 +207,7 @@ Expected: PASS.
 **Interfaces:**
 - Consumes: `observe_eyes(..., save_crop_images: bool = False)`
 - Consumes: `ModelBackedFrameObserver.save_crop_images`
-- Produces: no crop files by default while keeping `crop_bbox_image_px` and `eye_crop_transform_to_image_px`
+- Produces: no `crops/` directory or crop files by default while keeping `crop_bbox_image_px` and `eye_crop_transform_to_image_px`
 - Produces: retained crop paths and hashes when `save_crop_images=True`
 
 - [x] **Step 1: Write failing eye-observation tests**
@@ -220,6 +220,7 @@ assert observation.left.eye_crop_path is None
 assert observation.left.eye_crop_sha256 is None
 assert observation.left.crop_bbox_image_px is not None
 assert observation.left.eye_crop_transform_to_image_px is not None
+assert not run_layout.crops_dir.exists()
 assert list(run_layout.crops_dir.rglob("*.png")) == []
 ```
 
@@ -467,7 +468,7 @@ write crop files.
 Document:
 
 - `--save-crops` in README usage/options;
-- `crops/` empty by default and populated by `--save-crops`;
+- `crops/` not created by default and created/populated by `--save-crops`;
 - `--save-frames` and `--save-crops` are separate debug-retention flags;
 - ADR-0005 with selected approach, alternatives, compatibility, and
   verification;
@@ -486,11 +487,13 @@ uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --no-resume --outpu
 Then verify:
 
 ```sh
+find /private/tmp/chess-gaze-crop-repro-after/nakamura_short/runs -type d -name crops | wc -l
 find /private/tmp/chess-gaze-crop-repro-after/nakamura_short/runs -path '*/crops/*' -type f | wc -l
 jq '.counts.crop_files, .byte_counts.crops_bytes, .final_status, .artifact_validation.counts_match' /private/tmp/chess-gaze-crop-repro-after/nakamura_short/runs/*/qa_summary.json
 ```
 
-Expected: `0`, `0`, `"complete"`, and `true`.
+Expected: `0` crop directories, `0` crop files, `0` crop bytes, `"complete"`,
+and `true`.
 
 - [x] **Step 5: Run broad gates**
 

@@ -300,6 +300,7 @@ def test_analyze_video_does_not_retain_raw_or_processed_frame_images_by_default(
     assert result.decoded_frame_count == 4
     assert list(result.layout.raw_frames_dir.glob("*.png")) == []
     assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
+    assert not result.layout.crops_dir.exists()
     records = _records_from(result.frames_jsonl_path)
     assert len(records) == 4
     assert [record.frame_id for record in records] == [

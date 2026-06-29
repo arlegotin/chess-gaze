@@ -84,9 +84,6 @@ def create_run_layout(
     for directory in (
         raw_frames_dir,
         processed_frames_dir,
-        face_crops_dir,
-        left_eye_crops_dir,
-        right_eye_crops_dir,
         records_dir,
         scene_dir,
         viewer_dir,

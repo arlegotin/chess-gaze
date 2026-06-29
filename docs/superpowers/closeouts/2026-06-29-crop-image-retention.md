@@ -4,7 +4,7 @@ Date: 2026-06-29
 
 ## Summary
 
-`chess-gaze analyze` no longer retains eye crop PNGs by default. The analyzer
+`chess-gaze analyze` no longer creates or retains eye crop PNGs by default. The analyzer
 still computes eye crop bounds, crop-to-image transforms, pupil and iris
 evidence, frame records, scene records, viewer artifacts, model runtime
 metadata, and QA summaries from in-memory image data and committed JSONL
@@ -46,6 +46,8 @@ do not persist crop paths or crop hashes.
   the PNG writer.
 - `observe_eyes(save_crop_images=True)` preserves the old crop path and hash
   behavior.
+- `create_run_layout()` keeps stable in-memory crop paths but no longer creates
+  the on-disk `crops/` directory tree up front.
 - `qa_summary.py` rejects stray crop files when the manifest disables crop
   saving. When saving is enabled, QA reports crop counts and bytes without
   enforcing an exact count because current durable records do not encode every
@@ -66,13 +68,14 @@ uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --no-resume --outpu
 Run `20260629T171227Z-5b4ddce6` completed with `360` crop PNGs, `0` raw frame
 files, and `0` processed frame files.
 
-Post-fix default verification:
+Post-fix default verification after lazy crop-directory creation:
 
 ```sh
-uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --no-resume --output-root /private/tmp/chess-gaze-crop-repro-after --progress off
+uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --no-resume --output-root /private/tmp/chess-gaze-crop-repro-after-lazy --progress off
 ```
 
-Run `20260629T173619Z-75476a2d` completed with:
+Run `20260629T180027Z-c7af0830` completed with no on-disk `crops/`
+directory and:
 
 ```json
 {
@@ -89,13 +92,13 @@ Run `20260629T173619Z-75476a2d` completed with:
 }
 ```
 
-Post-fix explicit crop-saving verification:
+Post-fix explicit crop-saving verification after lazy crop-directory creation:
 
 ```sh
-uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --no-resume --save-crops --output-root /private/tmp/chess-gaze-crop-repro-save-crops --progress off
+uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --no-resume --save-crops --output-root /private/tmp/chess-gaze-crop-repro-save-crops-lazy --progress off
 ```
 
-Run `20260629T173954Z-70f49313` completed with `360` crop PNGs, `0` raw frame
+Run `20260629T180125Z-2abb6d65` completed with `360` crop PNGs, `0` raw frame
 files, `0` processed frame files, `403163` crop bytes, and no validation
 errors. Its manifest persisted `save_frame_images=false` and
 `save_crop_images=true`.
@@ -130,14 +133,14 @@ Added or updated coverage for:
 - CLI `--save-crops`;
 - default and explicit manifest crop retention policy;
 - resume compatibility rejecting mismatched crop-retention policy;
-- `observe_eyes()` preserving crop geometry while omitting crop files by
+- `observe_eyes()` preserving crop geometry while omitting the `crops/` tree and crop files by
   default;
 - `observe_eyes(save_crop_images=True)` preserving old crop path/hash behavior;
 - model-backed observer propagation of the crop-retention policy;
 - QA accepting zero crop files when saving is disabled;
 - QA rejecting stray crop files when saving is disabled;
-- model-free and model-backed real-video contracts expecting zero default crop
-  files.
+- model-free and model-backed real-video contracts expecting no default
+  `crops/` tree or crop files.
 
 ## Verification
 
@@ -175,14 +178,14 @@ uv run pytest tests/chess_gaze/test_qa_summary.py tests/chess_gaze/test_qa_summa
 
 ```sh
 uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py -q
-# 1 passed in 1.08s
+# 3 passed, 18 warnings in 195.88s
 ```
 
 Final local gate results:
 
 ```sh
 uv run pytest
-# 401 passed, 18 warnings in 73.47s
+# 403 passed, 18 warnings in 161.92s
 ```
 
 Warnings were existing Torch JIT deprecation warnings from
@@ -208,8 +211,9 @@ boundary, and this change only threads artifact policy through that boundary.
 
 ## Residual Risk
 
-The `crops/` directory tree remains present but empty by default for layout
-compatibility. QA does not assert an exact crop count when crop saving is
-enabled because the current durable frame records do not encode every
-write-eligible eye crop. Exact opt-in crop-count validation would require adding
-explicit per-eye crop-write fields to the frame record contract.
+The `RunLayout` object still exposes crop paths for callers and resume cleanup,
+but the on-disk `crops/` tree is absent until explicit crop-saving writes create
+it. QA does not assert an exact crop count when crop saving is enabled because
+the current durable frame records do not encode every write-eligible eye crop.
+Exact opt-in crop-count validation would require adding explicit per-eye
+crop-write fields to the frame record contract.

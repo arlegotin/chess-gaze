@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from chess_gaze.errors import ErrorCode
 from chess_gaze.frame_records import (
+    CropImageRetentionPolicy,
     FrameImageRetentionPolicy,
     FrameRecord,
     GazeAngles,
@@ -350,6 +351,9 @@ def test_run_manifest_defaults_missing_frame_image_retention_to_legacy_save() ->
 
     assert manifest.frame_image_retention == FrameImageRetentionPolicy(
         save_frame_images=True
+    )
+    assert manifest.crop_image_retention == CropImageRetentionPolicy(
+        save_crop_images=True
     )
 
 

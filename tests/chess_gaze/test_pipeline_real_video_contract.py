@@ -9,6 +9,7 @@ from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.pipeline import (
     AnalyzeRequest,
+    AnalyzeResult,
     ObserverBundle,
     ObserverFrame,
     analyze_video,
@@ -138,6 +139,32 @@ def _records(path: Path) -> list[FrameRecord]:
     ]
 
 
+def _assert_completed_artifact_contract(
+    result: AnalyzeResult, *, expected_count: int
+) -> tuple[list[FrameRecord], QASummary]:
+    records = _records(result.frames_jsonl_path)
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
+
+    assert result.decoded_frame_count == expected_count
+    assert len(records) == expected_count
+    assert records[0].frame_id == "f000000000"
+    assert records[-1].frame_index == expected_count - 1
+    assert summary.counts.decoded_frames == expected_count
+    assert summary.counts.frame_records == expected_count
+    assert summary.counts.scene_frame_records == expected_count
+    assert summary.artifact_validation.counts_match is True
+    assert summary.artifact_validation.validation_errors == []
+    assert summary.final_status == "complete"
+    assert result.scene_manifest_path.is_file()
+    assert result.scene_summary_path.is_file()
+    assert result.scene_frames_jsonl_path.is_file()
+    assert result.viewer_index_path.is_file()
+    assert result.viewer_scene_data_path.is_file()
+    return records, summary
+
+
 @pytest.mark.parametrize(
     ("video_path", "expected_count"),
     [(NAKAMURA_SHORT_VIDEO, NAKAMURA_SHORT_FRAME_COUNT)],
@@ -151,12 +178,11 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
         AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
         observers=ObserverBundle(frame_observer=_deterministic_real_video_record),
     )
-    records = _records(result.frames_jsonl_path)
     raw_count = len(list(result.layout.raw_frames_dir.glob("*.png")))
     processed_count = len(list(result.layout.processed_frames_dir.glob("*.jpg")))
     crop_count = len(list(result.layout.crops_dir.rglob("*.png")))
-    summary = QASummary.model_validate_json(
-        result.qa_summary_path.read_text(encoding="utf-8")
+    records, summary = _assert_completed_artifact_contract(
+        result, expected_count=expected_count
     )
     print(
         f"{video_path}: decoded={result.decoded_frame_count} "
@@ -164,20 +190,76 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
         f"records={len(records)}"
     )
 
-    assert result.decoded_frame_count == expected_count, (
-        f"{video_path} decoded {result.decoded_frame_count} frames; "
-        f"expected {expected_count}"
-    )
     assert raw_count == 0
     assert processed_count == 0
     assert crop_count == 0
+    assert not result.layout.crops_dir.exists()
     assert summary.counts.crop_files == 0
     assert summary.byte_counts.crops_bytes == 0
-    assert len(records) == expected_count
-    assert records[0].frame_id == "f000000000"
-    assert records[-1].frame_index == expected_count - 1
     assert all(record.status is FrameStatus.OK for record in records)
     assert all(
         ErrorCode.FACE_NOT_FOUND not in {error.code for error in record.errors}
         for record in records[:5]
     )
+
+
+@pytest.mark.native_mediapipe
+def test_nakamura_short_default_model_pipeline_does_not_create_crop_directory(
+    tmp_path: Path,
+) -> None:
+    assert NAKAMURA_SHORT_VIDEO.is_file(), (
+        f"missing mandatory real-data video: {NAKAMURA_SHORT_VIDEO}"
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=NAKAMURA_SHORT_VIDEO,
+            output_root=tmp_path / "output",
+            unigaze_device="cpu",
+            unigaze_batch_size=7,
+        )
+    )
+    _records, summary = _assert_completed_artifact_contract(
+        result, expected_count=NAKAMURA_SHORT_FRAME_COUNT
+    )
+
+    assert list(result.layout.raw_frames_dir.glob("*.png")) == []
+    assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
+    assert not result.layout.crops_dir.exists()
+    assert list(result.layout.crops_dir.rglob("*.png")) == []
+    assert summary.counts.raw_frames == 0
+    assert summary.counts.processed_frames == 0
+    assert summary.counts.crop_files == 0
+    assert summary.byte_counts.crops_bytes == 0
+
+
+@pytest.mark.native_mediapipe
+def test_nakamura_short_save_crops_retains_crop_images_only(
+    tmp_path: Path,
+) -> None:
+    assert NAKAMURA_SHORT_VIDEO.is_file(), (
+        f"missing mandatory real-data video: {NAKAMURA_SHORT_VIDEO}"
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=NAKAMURA_SHORT_VIDEO,
+            output_root=tmp_path / "output",
+            unigaze_device="cpu",
+            unigaze_batch_size=7,
+            save_crop_images=True,
+        )
+    )
+    _records, summary = _assert_completed_artifact_contract(
+        result, expected_count=NAKAMURA_SHORT_FRAME_COUNT
+    )
+    crop_paths = list(result.layout.crops_dir.rglob("*.png"))
+
+    assert list(result.layout.raw_frames_dir.glob("*.png")) == []
+    assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
+    assert result.layout.crops_dir.is_dir()
+    assert len(crop_paths) > 0
+    assert summary.counts.raw_frames == 0
+    assert summary.counts.processed_frames == 0
+    assert summary.counts.crop_files == len(crop_paths)
+    assert summary.byte_counts.crops_bytes > 0

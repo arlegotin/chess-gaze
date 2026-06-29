@@ -9,7 +9,7 @@ current default behavior for decoded raw frames and processed overlays. Crop
 files are visual/debug artifacts. They are not the durable analysis source of
 truth, and the default pipeline must keep frame records, scene records, viewer
 data, QA summaries, runtime metadata, and in-memory crop computation intact
-without writing `crops/**/*.png`.
+without creating or writing `crops/**/*.png`.
 
 The explicit crop-retention opt-in is `--save-crops` on the CLI and
 `save_crop_images=True` for programmatic `AnalyzeRequest` callers. JSON config
@@ -49,7 +49,7 @@ to mean raw decoded PNGs and processed overlay JPEGs only.
 
 ## Requirements
 
-- Default analysis must not persist any crop image files under `crops/`.
+- Default analysis must not create or persist the `crops/` directory tree.
 - Default analysis must not compromise analysis correctness. Eye crop geometry,
   crop transforms, face-region probing, UniGaze normalized face crops, frame
   records, scene records, viewer artifacts, and QA artifacts must still be
@@ -66,8 +66,9 @@ to mean raw decoded PNGs and processed overlay JPEGs only.
 - Resume must not mix runs with different crop-retention policy.
 - `--save-frames` must not silently retain crops. Users who want all debug
   images must pass both `--save-frames` and `--save-crops`.
-- The old `crops/` directory tree may still exist as an empty layout directory
-  for compatibility.
+- `RunLayout` may still expose stable crop paths in memory, but the on-disk
+  `crops/` directory tree must be created lazily only by explicit crop-saving
+  writes.
 
 ## Design
 
@@ -103,10 +104,10 @@ boundary:
   SHA-256, bbox, and transform behavior.
 
 `qa_summary.py` reads `run_manifest.crop_image_retention.save_crop_images`.
-When saving is disabled, any file under `crops/` is a validation failure. When
-saving is enabled, QA reports crop counts and bytes but does not assert an exact
-count because current durable frame records do not encode every write-eligible
-eye crop.
+When saving is disabled, the absent `crops/` tree counts as zero crop files and
+any file under `crops/` is a validation failure. When saving is enabled, QA
+reports crop counts and bytes but does not assert an exact count because current
+durable frame records do not encode every write-eligible eye crop.
 
 Resume compatibility adds the crop-image retention policy to existing matching
 criteria. Cleanup continues to delete uncommitted crop files inside the run root
@@ -156,6 +157,7 @@ This spec supersedes earlier crop-pipeline guidance that implied completed runs
 always contain eye crop image files. The durable contract is now
 policy-dependent:
 
-- default completed runs retain zero crop image files;
+- default completed runs do not create the `crops/` tree or retain crop image
+  files;
 - explicit `--save-crops` completed runs retain eye crop debug PNGs for
   write-eligible eyes.

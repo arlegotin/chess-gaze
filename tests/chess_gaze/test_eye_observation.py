@@ -99,6 +99,7 @@ def test_observe_eyes_records_independent_eye_and_iris_measurements(
     assert observation.right.eye_crop_path is None
     assert observation.left.eye_crop_sha256 is None
     assert observation.right.eye_crop_sha256 is None
+    assert not run_layout.crops_dir.exists()
     assert list(run_layout.crops_dir.rglob("*.png")) == []
 
     assert observation.left.bounding_box_image_px is not None
@@ -241,6 +242,7 @@ def test_observe_eyes_retains_crop_files_when_requested(tmp_path: Path) -> None:
     assert observation.right.eye_crop_path == Path("crops/eyes/right/f000000047.png")
     assert observation.left.eye_crop_sha256 is not None
     assert observation.right.eye_crop_sha256 is not None
+    assert run_layout.crops_dir.is_dir()
     assert (run_layout.run_dir / observation.left.eye_crop_path).is_file()
     assert (run_layout.run_dir / observation.right.eye_crop_path).is_file()
 
