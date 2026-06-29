@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+import chess_gaze.scene_records as scene_records
 from chess_gaze.geometry import CoordinateSpace, Point2D
 from chess_gaze.scene_calibration import default_scene_assumptions
 from chess_gaze.scene_records import (
@@ -43,6 +44,17 @@ EXPECTED_MODULE_URLS = {
     "three/addons/": THREE_ADDONS_URL,
     "three/addons/controls/OrbitControls.js": ORBIT_CONTROLS_URL,
 }
+
+
+def test_active_schema_surface_has_no_monitor_projection_records() -> None:
+    invalid_reason_names = {reason.name for reason in SceneInvalidReason}
+
+    assert "SceneMonitorPlaneRecord" not in dir(scene_records)
+    assert "RAY_PARALLEL_TO_MONITOR" not in invalid_reason_names
+    assert "RAY_COPLANAR_WITH_MONITOR" not in invalid_reason_names
+    assert "MONITOR_PLANE_DEGENERATE" not in invalid_reason_names
+    assert "RAY_INTERSECTION_NON_FINITE" not in invalid_reason_names
+    assert "RAY_INTERSECTION_BEHIND_ORIGIN" not in invalid_reason_names
 
 
 def _point2d_payload(x: float = 10.0, y: float = 20.0) -> dict[str, Any]:

@@ -68,14 +68,9 @@ class SceneInvalidReason(StrEnum):
     RAY_SPHERE_INTERSECTION_BEHIND_ORIGIN = (
         "RAY_SPHERE_INTERSECTION_BEHIND_ORIGIN"
     )
-    RAY_PARALLEL_TO_MONITOR = "RAY_PARALLEL_TO_MONITOR"
-    RAY_COPLANAR_WITH_MONITOR = "RAY_COPLANAR_WITH_MONITOR"
-    RAY_INTERSECTION_NON_FINITE = "RAY_INTERSECTION_NON_FINITE"
-    RAY_INTERSECTION_BEHIND_ORIGIN = "RAY_INTERSECTION_BEHIND_ORIGIN"
     SCENE_CENTER_INSUFFICIENT_INLIERS = "SCENE_CENTER_INSUFFICIENT_INLIERS"
     MAIN_DIRECTION_INSUFFICIENT_INLIERS = "MAIN_DIRECTION_INSUFFICIENT_INLIERS"
     SCENE_AXIS_DEGENERATE = "SCENE_AXIS_DEGENERATE"
-    MONITOR_PLANE_DEGENERATE = "MONITOR_PLANE_DEGENERATE"
     NON_FINITE_INPUT = "NON_FINITE_INPUT"
 
 
@@ -507,49 +502,6 @@ class SceneAxisBasisRecord(SceneSchemaModel):
             raise ValueError(
                 "determinant_right_up_back must match the computed determinant"
             )
-        return self
-
-
-class SceneMonitorPlaneRecord(SceneSchemaModel):
-    center_camera_m: Vector3D
-    center_scene_m: Vector3D
-    normal_camera: UnitVector3D
-    right_camera: UnitVector3D
-    up_camera: UnitVector3D
-    width_m: float = Field(alias="physical_width_m")
-    height_m: float = Field(alias="physical_height_m")
-    extended_width_m: float
-    extended_height_m: float
-    distance_from_scene_center_m: float
-    distance_source: str | None = None
-
-    @model_validator(mode="after")
-    def validate_spaces(self) -> SceneMonitorPlaneRecord:
-        _require_vector_space(
-            self.center_camera_m,
-            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
-            field_name="center_camera_m",
-        )
-        _require_vector_space(
-            self.center_scene_m,
-            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
-            field_name="center_scene_m",
-        )
-        _require_vector_space(
-            self.normal_camera,
-            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
-            field_name="normal_camera",
-        )
-        _require_vector_space(
-            self.right_camera,
-            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
-            field_name="right_camera",
-        )
-        _require_vector_space(
-            self.up_camera,
-            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
-            field_name="up_camera",
-        )
         return self
 
 
