@@ -26,6 +26,7 @@ DETECTION_REGION_RIGHT_HALF = "right_half"
 DETECTION_REGION_LEFT_TOP = "left_top"
 DETECTION_REGION_RIGHT_TOP = "right_top"
 DETECTION_REGION_LEFT_UPPER_BAND = "left_upper_band"
+DETECTION_REGION_LEFT_UPPER_INNER = "left_upper_inner"
 DETECTION_REGION_RIGHT_UPPER_BAND = "right_upper_band"
 DETECTION_REGION_RIGHT_UPPER_MIDDLE = "right_upper_middle"
 REGION_REFINEMENT_MIN_IOU = 0.25
@@ -47,6 +48,8 @@ OVEREXPANDED_FULL_FRAME_MIN_GEOMETRY_SCORE_DELTA = 0.05
 FOCUSED_REGION_SCORE_MULTIPLIER = 0.1
 RIGHT_UPPER_MIDDLE_TOP_FRACTION = 1.0 / 9.0
 RIGHT_UPPER_MIDDLE_BOTTOM_FRACTION = 43.0 / 72.0
+LEFT_UPPER_INNER_RIGHT_FRACTION = 3.0 / 8.0
+LEFT_UPPER_INNER_BOTTOM_FRACTION = 4.0 / 9.0
 
 
 @dataclass(frozen=True)
@@ -948,6 +951,14 @@ def _detection_regions(
     midpoint_x = image_width_px // 2
     midpoint_y = image_height_px // 2
     upper_band_y = max(1, round(image_height_px * 0.45))
+    left_upper_inner_x_max = min(
+        image_width_px,
+        max(1, round(image_width_px * LEFT_UPPER_INNER_RIGHT_FRACTION)),
+    )
+    left_upper_inner_y_max = min(
+        image_height_px,
+        max(1, round(image_height_px * LEFT_UPPER_INNER_BOTTOM_FRACTION)),
+    )
     right_upper_middle_y_min = max(
         0, round(image_height_px * RIGHT_UPPER_MIDDLE_TOP_FRACTION)
     )
@@ -1000,6 +1011,13 @@ def _detection_regions(
             y_min_px=0,
             x_max_px=midpoint_x,
             y_max_px=upper_band_y,
+        ),
+        _DetectionRegion(
+            name=DETECTION_REGION_LEFT_UPPER_INNER,
+            x_min_px=0,
+            y_min_px=0,
+            x_max_px=left_upper_inner_x_max,
+            y_max_px=left_upper_inner_y_max,
         ),
         _DetectionRegion(
             name=DETECTION_REGION_RIGHT_UPPER_BAND,

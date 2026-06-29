@@ -61,6 +61,7 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -86,6 +87,7 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
         (540, 960, 3),
         (540, 960, 3),
         (486, 960, 3),
+        (480, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
@@ -138,6 +140,7 @@ def test_mediapipe_observer_rejects_larger_focused_overexpanded_candidate(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
+            empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
@@ -217,6 +220,7 @@ def test_mediapipe_observer_rejects_top_shift_candidate_without_compact_geometry
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -280,6 +284,7 @@ def test_mediapipe_observer_rejects_large_full_frame_refinement_without_compact_
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
+            empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
@@ -371,6 +376,7 @@ def test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_re
             ),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -396,6 +402,7 @@ def test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_re
         (540, 960, 3),
         (540, 960, 3),
         (486, 960, 3),
+        (480, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
@@ -473,6 +480,7 @@ def test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger
             ),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -498,6 +506,7 @@ def test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger
         (540, 960, 3),
         (540, 960, 3),
         (486, 960, 3),
+        (480, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
