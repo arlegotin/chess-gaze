@@ -6,6 +6,10 @@ import threading
 from types import TracebackType
 from typing import BinaryIO, TextIO
 
+_CLEARCUT_SOURCE_TRACE = (
+    "wireless/android/play/playlog/cplusplus/portable_clearcut_uploader.cc:180"
+)
+
 
 class _NativeStderrLineFilter:
     def __init__(self) -> None:
@@ -16,8 +20,7 @@ class _NativeStderrLineFilter:
         if self._clearcut_trace_lines_remaining > 0:
             if (
                 stripped == "=== Source Location Trace: ==="
-                or stripped
-                == "wireless/android/play/playlog/cplusplus/portable_clearcut_uploader.cc:180"
+                or stripped == _CLEARCUT_SOURCE_TRACE
             ):
                 self._clearcut_trace_lines_remaining -= 1
                 return True
@@ -125,10 +128,7 @@ def _is_duplicate_avfoundation_class_warning(line: str) -> bool:
     return (
         line.startswith("objc[")
         and " is implemented in both " in line
-        and (
-            "Class AVFFrameReceiver" in line
-            or "Class AVFAudioReceiver" in line
-        )
+        and ("Class AVFFrameReceiver" in line or "Class AVFAudioReceiver" in line)
     )
 
 

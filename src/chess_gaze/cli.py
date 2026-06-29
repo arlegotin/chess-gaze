@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import Any, TextIO, cast
 
@@ -111,23 +112,17 @@ def main(argv: list[str] | None = None) -> int:
                 AnalyzeRequestType(
                     video_path=video_path,
                     output_root=(
-                        Path(args.output_root)
-                        if args.output_root is not None
-                        else None
+                        Path(args.output_root) if args.output_root is not None else None
                     ),
                     models_root=(
-                        Path(args.models_root)
-                        if args.models_root is not None
-                        else None
+                        Path(args.models_root) if args.models_root is not None else None
                     ),
                     config_path=Path(args.config) if args.config is not None else None,
                     unigaze_device=args.unigaze_device,
                     unigaze_batch_size=args.unigaze_batch_size,
                     save_frame_images=args.save_frame_images,
                     resume=args.resume,
-                    progress_callback=(
-                        progress.callback if progress.enabled else None
-                    ),
+                    progress_callback=(progress.callback if progress.enabled else None),
                 )
             )
         except PipelineErrorType as exc:
@@ -171,7 +166,11 @@ def _pipeline_dependencies() -> tuple[type[Any], type[Exception], AnalyzeVideoCa
     if AnalyzeRequest is None or PipelineError is None or analyze_video is None:
         from chess_gaze.pipeline import (
             AnalyzeRequest as LoadedAnalyzeRequest,
+        )
+        from chess_gaze.pipeline import (
             PipelineError as LoadedPipelineError,
+        )
+        from chess_gaze.pipeline import (
             analyze_video as loaded_analyze_video,
         )
 
@@ -198,7 +197,7 @@ class _AnalyzeProgressBar:
         if not self._enabled:
             return
         if self._bar is None:
-            from tqdm import tqdm
+            tqdm = cast(Any, import_module("tqdm")).tqdm
 
             self._bar = tqdm(
                 total=event.total_frames,

@@ -8,7 +8,12 @@ from pytest import CaptureFixture, MonkeyPatch
 import chess_gaze.cli as cli
 from chess_gaze.cli import main
 from chess_gaze.frame_records import FrameRecord
-from chess_gaze.pipeline import AnalyzeRequest, ObserverBundle, ObserverFrame
+from chess_gaze.pipeline import (
+    AnalysisProgressEvent,
+    AnalyzeRequest,
+    ObserverBundle,
+    ObserverFrame,
+)
 from chess_gaze.pipeline import analyze_video as real_analyze_video
 
 
@@ -278,14 +283,14 @@ def test_analyze_uses_native_log_filter_for_progress_stream(
     def fake_analyze_video(request: AnalyzeRequest) -> object:
         if request.progress_callback is not None:
             request.progress_callback(
-                SimpleNamespace(
+                AnalysisProgressEvent(
                     run_dir=run_dir,
                     completed_frames=0,
                     total_frames=1,
                 )
             )
             request.progress_callback(
-                SimpleNamespace(
+                AnalysisProgressEvent(
                     run_dir=run_dir,
                     completed_frames=1,
                     total_frames=1,
