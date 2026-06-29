@@ -8,16 +8,12 @@ from pydantic import ConfigDict, field_validator
 from chess_gaze.geometry import StrictSchemaModel
 
 DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M = 0.063
-DEFAULT_MONITOR_DISTANCE_FROM_EYES_M = 0.700
-DEFAULT_MONITOR_WIDTH_M = 0.600
-DEFAULT_MONITOR_HEIGHT_M = 0.340
-DEFAULT_EXTENDED_PLANE_SCALE = 3.0
+DEFAULT_GAZE_SPHERE_RADIUS_M = 0.700
 DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M = 0.090
 DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M = 0.120
 DEFAULT_HEAD_ELLIPSOID_RADIUS_Z_M = 0.100
 DEFAULT_EYE_SPHERE_RADIUS_M = 0.012
 DEFAULT_HEAD_CENTER_FROM_EYE_MIDPOINT_M = (0.0, 0.035, 0.020)
-RAY_PLANE_PARALLEL_EPSILON = 1e-6
 DEFAULT_SCENE_CENTER_CAMERA_M = (0.0, 0.0, 0.650)
 SCENE_CENTER_MIN_AXIS_TOLERANCE_M = 0.015
 MIN_SCENE_CENTER_INLIER_FRAMES = 5
@@ -64,14 +60,10 @@ class SceneAssumptions(StrictSchemaModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     adult_male_interpupillary_distance_m: float
-    monitor_distance_from_eyes_m: float
-    monitor_width_m: float
-    monitor_height_m: float
-    extended_plane_scale: float
+    gaze_sphere_radius_m: float
     head_ellipsoid_radius_m: tuple[float, float, float]
     eye_sphere_radius_m: float
     head_center_from_eye_midpoint_m: tuple[float, float, float]
-    ray_plane_parallel_epsilon: float
     default_scene_center_camera_m: tuple[float, float, float]
     scene_center_min_axis_tolerance_m: float
     min_scene_center_inlier_frames: int
@@ -104,34 +96,6 @@ def default_scene_assumptions() -> SceneAssumptions:
             uncertainty="medium",
         ),
         SceneAssumptionRecord(
-            name="DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
-            value=DEFAULT_MONITOR_DISTANCE_FROM_EYES_M,
-            unit="m",
-            source="desktop_monitor_default",
-            uncertainty="high",
-        ),
-        SceneAssumptionRecord(
-            name="DEFAULT_MONITOR_WIDTH_M",
-            value=DEFAULT_MONITOR_WIDTH_M,
-            unit="m",
-            source="desktop_monitor_default",
-            uncertainty="medium",
-        ),
-        SceneAssumptionRecord(
-            name="DEFAULT_MONITOR_HEIGHT_M",
-            value=DEFAULT_MONITOR_HEIGHT_M,
-            unit="m",
-            source="desktop_monitor_default",
-            uncertainty="medium",
-        ),
-        SceneAssumptionRecord(
-            name="DEFAULT_EXTENDED_PLANE_SCALE",
-            value=DEFAULT_EXTENDED_PLANE_SCALE,
-            unit="multiplier",
-            source="viewer_default",
-            uncertainty="low",
-        ),
-        SceneAssumptionRecord(
             name="DEFAULT_HEAD_ELLIPSOID_RADIUS_M",
             value=(
                 DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M,
@@ -141,6 +105,13 @@ def default_scene_assumptions() -> SceneAssumptions:
             unit="m",
             source="adult_male_default",
             uncertainty="medium",
+        ),
+        SceneAssumptionRecord(
+            name="DEFAULT_GAZE_SPHERE_RADIUS_M",
+            value=DEFAULT_GAZE_SPHERE_RADIUS_M,
+            unit="m",
+            source="hypothetical_gaze_sphere_default",
+            uncertainty="high",
         ),
         SceneAssumptionRecord(
             name="DEFAULT_EYE_SPHERE_RADIUS_M",
@@ -155,13 +126,6 @@ def default_scene_assumptions() -> SceneAssumptions:
             unit="m_in_head_local_axes",
             source="adult_male_default",
             uncertainty="high",
-        ),
-        SceneAssumptionRecord(
-            name="RAY_PLANE_PARALLEL_EPSILON",
-            value=RAY_PLANE_PARALLEL_EPSILON,
-            unit="unitless",
-            source="algorithm_constant",
-            uncertainty="low",
         ),
         SceneAssumptionRecord(
             name="DEFAULT_SCENE_CENTER_CAMERA_M",
@@ -203,10 +167,7 @@ def default_scene_assumptions() -> SceneAssumptions:
         adult_male_interpupillary_distance_m=(
             DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M
         ),
-        monitor_distance_from_eyes_m=DEFAULT_MONITOR_DISTANCE_FROM_EYES_M,
-        monitor_width_m=DEFAULT_MONITOR_WIDTH_M,
-        monitor_height_m=DEFAULT_MONITOR_HEIGHT_M,
-        extended_plane_scale=DEFAULT_EXTENDED_PLANE_SCALE,
+        gaze_sphere_radius_m=DEFAULT_GAZE_SPHERE_RADIUS_M,
         head_ellipsoid_radius_m=(
             DEFAULT_HEAD_ELLIPSOID_RADIUS_X_M,
             DEFAULT_HEAD_ELLIPSOID_RADIUS_Y_M,
@@ -214,7 +175,6 @@ def default_scene_assumptions() -> SceneAssumptions:
         ),
         eye_sphere_radius_m=DEFAULT_EYE_SPHERE_RADIUS_M,
         head_center_from_eye_midpoint_m=DEFAULT_HEAD_CENTER_FROM_EYE_MIDPOINT_M,
-        ray_plane_parallel_epsilon=RAY_PLANE_PARALLEL_EPSILON,
         default_scene_center_camera_m=DEFAULT_SCENE_CENTER_CAMERA_M,
         scene_center_min_axis_tolerance_m=SCENE_CENTER_MIN_AXIS_TOLERANCE_M,
         min_scene_center_inlier_frames=MIN_SCENE_CENTER_INLIER_FRAMES,
