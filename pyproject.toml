@@ -46,6 +46,10 @@ packages = ["src/chess_gaze"]
 minversion = "8.0"
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
+markers = [
+    "local_socket: tests that bind loopback sockets and require network/socket permission in the runtime",
+    "native_mediapipe: tests that instantiate the installed MediaPipe Face Landmarker native graph and require unsandboxed macOS GL/Metal runtime access",
+]
 
 [tool.ruff]
 line-length = 88

@@ -22,6 +22,8 @@ SAMPLED_FRAME_INDICES = {
     NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
 
+pytestmark = pytest.mark.native_mediapipe
+
 
 def test_eye_observation_matches_real_video_evidence(tmp_path: Path) -> None:
     for video_path in SAMPLED_FRAME_INDICES:

@@ -212,6 +212,26 @@ In the managed agent sandbox, MediaPipe's native macOS GL/Metal initialization
 fails. Run real-model gates and `chess-gaze analyze` unsandboxed with local
 assets.
 
+For sandboxed test runs, exclude the tests that need native MediaPipe or
+loopback socket permission:
+
+```sh
+uv run pytest -m "not native_mediapipe and not local_socket"
+```
+
+Before landing model-runtime or viewer-server changes, run the native and socket
+gates unsandboxed:
+
+```sh
+uv run pytest -m native_mediapipe
+uv run pytest -m local_socket
+uv run pytest
+```
+
+If MediaPipe aborts with `gl_context_nsgl.cc`, `graph_service.h:139`, or
+`DrishtiMetalHelper`, treat that as missing native runtime access. Do not hide
+that stderr; it is diagnostic evidence.
+
 ## Repository Shape
 
 - `src/chess_gaze/` contains the importable Python package.

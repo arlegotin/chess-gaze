@@ -16,6 +16,8 @@ This closeout verifies the repair committed in:
 - `9571b44` `feat: show analyze progress on stderr`
 - `2c3facd` `fix: filter known native analysis log noise`
 - `1269e79` `fix: satisfy progress log hygiene gates`
+- post-review corrections tightened the native stderr filter to exact harmless
+  message fragments and documented/selectively marked native runtime gates.
 
 ## Root Cause
 
@@ -63,6 +65,8 @@ Added or extended tests cover:
 - UniGaze local weight loading not writing to stdout;
 - CLI progress using the original stderr stream while native filtering is
   active.
+- exact-message filtering for known MediaPipe startup lines, with same-source
+  negative coverage proving unexpected diagnostics are not hidden.
 
 ## Real-Video Evidence
 
@@ -235,6 +239,40 @@ UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_eye_observation_real_
 This is a native environment constraint, not a Python assertion failure. The
 current `chess-gaze analyze` terminal path was verified outside the sandbox
 using the required `nakamura_short.mp4` smoke run above.
+
+Post-review marker checks:
+
+```text
+PYTHONPATH=src .venv/bin/python -m pytest -m "not native_mediapipe and not local_socket" -q --disable-warnings
+384 passed, 11 deselected
+
+UV_CACHE_DIR=.uv-cache uv run pytest -m native_mediapipe -q --disable-warnings
+9 passed, 386 deselected, 18 warnings in 45.52s
+```
+
+The `native_mediapipe` marker owns tests that instantiate the installed
+MediaPipe Face Landmarker graph. The `local_socket` marker owns viewer-server
+tests that bind a loopback socket. Default `pytest` still runs all tests; the
+markers provide an explicit sandbox-safe subset instead of relying on implicit
+agent knowledge.
+
+## Source-Layout Review
+
+`src/chess_gaze/pipeline.py` is 825 lines after adding progress callbacks,
+crossing the repository's approximate 800-line review trigger. I reviewed the
+module against `docs/development/architecture/source-layout.md` and kept it
+intact for this task:
+
+- the module still owns one deep runtime concept, artifact-producing video
+  analysis orchestration;
+- committed-frame progress is tied to the same checkpoint boundary as
+  `analysis_state.json`, `records/frames.jsonl`, QA summary, and resume state;
+- extracting progress now would create a pass-through helper around pipeline
+  internals rather than hide an independent invariant.
+
+A future split should be driven by a real responsibility boundary, most likely
+between run/resume state management and frame-processing orchestration, not by
+the small progress callback surface added here.
 
 ## Residual Risk
 

@@ -63,6 +63,8 @@ NAKAMURA_SHORT_EXPECTED_FACE_BOXES = {
     "f000000179": (389.6, 685.2, 551.0, 869.4),
 }
 
+pytestmark = pytest.mark.native_mediapipe
+
 
 def test_mediapipe_face_observer_matches_real_video_evidence() -> None:
     for video_path in SAMPLED_FRAME_INDICES:

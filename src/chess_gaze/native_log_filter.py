@@ -9,6 +9,21 @@ from typing import BinaryIO, TextIO
 _CLEARCUT_SOURCE_TRACE = (
     "wireless/android/play/playlog/cplusplus/portable_clearcut_uploader.cc:180"
 )
+_KNOWN_MEDIAPIPE_STARTUP_LINES = (
+    ("I", " init-domain.cc:", "Fiber init: default domain = pthread"),
+    (
+        "W",
+        " face_landmarker_graph.cc:",
+        "Sets FaceBlendshapesGraph acceleration to xnnpack by default.",
+    ),
+    ("I", " gl_context.cc:", "GL version:"),
+    (
+        "W",
+        " inference_feedback_manager.cc:",
+        "Feedback manager requires a model with a single signature inference. "
+        "Disabling support for feedback tensors.",
+    ),
+)
 
 
 class _NativeStderrLineFilter:
@@ -133,12 +148,12 @@ def _is_duplicate_avfoundation_class_warning(line: str) -> bool:
 
 
 def _is_mediapipe_startup_line(line: str) -> bool:
-    return (
-        (" init-domain.cc:" in line and line.startswith("I"))
-        or (" face_landmarker_graph.cc:" in line and line.startswith("W"))
-        or (" gl_context.cc:" in line and line.startswith("I"))
-        or line == "INFO: Created TensorFlow Lite XNNPACK delegate for CPU."
-        or (" inference_feedback_manager.cc:" in line and line.startswith("W"))
+    if line == "INFO: Created TensorFlow Lite XNNPACK delegate for CPU.":
+        return True
+
+    return any(
+        line.startswith(level) and source in line and message in line
+        for level, source, message in _KNOWN_MEDIAPIPE_STARTUP_LINES
     )
 
 

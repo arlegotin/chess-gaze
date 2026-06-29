@@ -41,6 +41,8 @@ SAMPLED_FRAME_INDICES = {
 }
 NAKAMURA_SHORT_RECOMMENDED_FRAME_INDICES = (0, 90, 170)
 
+pytestmark = pytest.mark.native_mediapipe
+
 
 def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

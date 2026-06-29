@@ -25,7 +25,8 @@ def test_native_log_filter_suppresses_known_dependency_startup_lines() -> None:
     )
     assert line_filter.should_suppress(
         "W0000 00:00:1 inference_feedback_manager.cc:121] "
-        "Feedback manager requires a model with a single signature inference."
+        "Feedback manager requires a model with a single signature inference. "
+        "Disabling support for feedback tensors."
     )
 
 
@@ -47,3 +48,14 @@ def test_native_log_filter_passes_unknown_stderr() -> None:
 
     assert not line_filter.should_suppress("SCHEMA_VALIDATION_FAILED: bad frame")
     assert not line_filter.should_suppress("E0000 unknown_native_file.cc:90] bad")
+    assert not line_filter.should_suppress(
+        "W0000 00:00:1 face_landmarker_graph.cc:180] "
+        "Unexpected graph fallback happened."
+    )
+    assert not line_filter.should_suppress(
+        "W0000 00:00:1 inference_feedback_manager.cc:121] "
+        "Feedback tensors failed for a different reason."
+    )
+    assert not line_filter.should_suppress(
+        "I0000 00:00:1 gl_context.cc:407] GL context initialization failed."
+    )

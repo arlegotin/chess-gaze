@@ -28,6 +28,8 @@ SAMPLED_FRAME_INDICES = {
 NAKAMURA_SHORT_TRANSFORM_POSE_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
 NAKAMURA_SHORT_DOWN_LOOKING_FRAME_INDICES = frozenset((0, 30, 60, 90, 179))
 
+pytestmark = pytest.mark.native_mediapipe
+
 
 def test_head_pose_matches_real_video_evidence() -> None:
     for video_path in SAMPLED_FRAME_INDICES:

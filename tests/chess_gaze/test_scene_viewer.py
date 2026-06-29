@@ -756,6 +756,7 @@ def test_write_viewer_scene_data_writes_supplied_viewer_data(
     assert written_viewer_data.run_id == "changed"
 
 
+@pytest.mark.local_socket
 def test_static_server_serves_viewer_files(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     viewer_dir = run_dir / "viewer"
@@ -796,6 +797,7 @@ def test_static_server_rejects_non_loopback_hosts(tmp_path: Path, host: str) -> 
         scene_viewer.serve_viewer(run_dir, host=host)
 
 
+@pytest.mark.local_socket
 def test_static_server_does_not_escape_viewer_root(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     viewer_dir = run_dir / "viewer"
