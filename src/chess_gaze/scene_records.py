@@ -53,7 +53,7 @@ class CoordinateFrame3D(StrEnum):
     IMAGE_PX = "image_px"
     CAMERA_OPENCV_PSEUDO_M = "camera_opencv_pseudo_m"
     SCENE_PSEUDO_M = "scene_pseudo_m"
-    MONITOR_PLANE_PSEUDO_M = "monitor_plane_pseudo_m"
+    GAZE_SPHERE_PSEUDO_M = "gaze_sphere_pseudo_m"
     THREE_VIEW = "three_view"
 
 
@@ -372,19 +372,14 @@ class SceneUniGazeRayRecord(SceneSchemaModel):
         return self
 
 
-class SceneMonitorHitRecord(SceneSchemaModel):
+class SceneSphereHitRecord(SceneSchemaModel):
     valid: bool
-    point_camera_m: Vector3D | None = None
     point_scene_m: Vector3D | None = None
-    plane_uv_m: tuple[float, float] | None = None
-    t: float | None = Field(default=None, alias="ray_t_m")
-    denominator: float | None = None
-    signed_distance_m: float | None = Field(
-        default=None,
-        alias="signed_origin_distance_m",
-    )
-    within_physical_monitor: bool | None = None
-    within_extended_plane: bool | None = None
+    ray_t_m: float | None = None
+    radius_m: float | None = None
+    theta_radians: float | None = None
+    phi_radians: float | None = None
+    hemisphere: Literal["front", "rear", "equator"] | None = None
     source_reason_invalid: str | None = None
     reason_invalid: SceneInvalidReason | None = None
 
@@ -394,18 +389,6 @@ class SceneMonitorHitRecord(SceneSchemaModel):
         if not isinstance(data, dict):
             return data
         coerced = dict(data)
-        plane_uv_m = coerced.get("plane_uv_m")
-        if isinstance(plane_uv_m, (list, tuple)) and len(plane_uv_m) == 2:
-            coerced["plane_uv_m"] = (plane_uv_m[0], plane_uv_m[1])
-        elif "u_m" in coerced or "v_m" in coerced:
-            u_m = coerced.get("u_m")
-            v_m = coerced.get("v_m")
-            if u_m is None and v_m is None:
-                coerced["plane_uv_m"] = None
-            else:
-                coerced["plane_uv_m"] = (u_m, v_m)
-        coerced.pop("u_m", None)
-        coerced.pop("v_m", None)
         _coerce_enum_field(
             coerced,
             field_name="reason_invalid",
@@ -413,57 +396,8 @@ class SceneMonitorHitRecord(SceneSchemaModel):
         )
         return coerced
 
-    @property
-    def u_m(self) -> float | None:
-        if self.plane_uv_m is None:
-            return None
-        return self.plane_uv_m[0]
-
-    @property
-    def v_m(self) -> float | None:
-        if self.plane_uv_m is None:
-            return None
-        return self.plane_uv_m[1]
-
-    @field_validator("plane_uv_m", mode="before")
-    @classmethod
-    def coerce_plane_uv(
-        cls,
-        value: Any,
-    ) -> tuple[float, float] | None:
-        if value is None:
-            return None
-        if isinstance(value, list):
-            if len(value) != 2:
-                raise ValueError("plane_uv_m must contain exactly 2 values")
-            return (value[0], value[1])
-        if isinstance(value, tuple):
-            if len(value) != 2:
-                raise ValueError("plane_uv_m must contain exactly 2 values")
-            return value
-        raise TypeError("plane_uv_m must be a 2-item tuple or list")
-
-    @field_validator("plane_uv_m")
-    @classmethod
-    def validate_plane_uv(
-        cls,
-        value: tuple[float, float] | None,
-    ) -> tuple[float, float] | None:
-        if value is None:
-            return None
-        if len(value) != 2:
-            raise ValueError("plane_uv_m must contain exactly 2 values")
-        if not math.isfinite(value[0]) or not math.isfinite(value[1]):
-            raise ValueError("plane_uv_m must contain finite values")
-        return value
-
     @model_validator(mode="after")
-    def validate_hit(self) -> SceneMonitorHitRecord:
-        _require_vector_space(
-            self.point_camera_m,
-            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
-            field_name="point_camera_m",
-        )
+    def validate_hit(self) -> SceneSphereHitRecord:
         _require_vector_space(
             self.point_scene_m,
             expected=CoordinateFrame3D.SCENE_PSEUDO_M,
@@ -471,29 +405,44 @@ class SceneMonitorHitRecord(SceneSchemaModel):
         )
         if self.valid:
             required_values = (
-                self.point_camera_m,
                 self.point_scene_m,
-                self.plane_uv_m,
-                self.t,
-                self.denominator,
-                self.signed_distance_m,
-                self.within_physical_monitor,
-                self.within_extended_plane,
+                self.ray_t_m,
+                self.radius_m,
+                self.theta_radians,
+                self.phi_radians,
+                self.hemisphere,
             )
             if any(value is None for value in required_values):
                 raise ValueError(
-                    "valid monitor hit requires point, uv, t, denominator, "
-                    "distance, and bounds flags"
+                    "valid sphere hit requires point, t, radius, angles, and hemisphere"
                 )
-            if self.t is None:
-                raise ValueError("valid monitor hit requires t")
-            if self.t < 0:
-                raise ValueError("valid monitor hit requires t >= 0")
+            if self.ray_t_m is not None and self.ray_t_m < 0:
+                raise ValueError("valid sphere hit requires ray_t_m >= 0")
+            if self.radius_m is not None and self.radius_m <= 0:
+                raise ValueError("valid sphere hit requires radius_m > 0")
             if self.reason_invalid is not None:
-                raise ValueError("valid monitor hit cannot have reason_invalid")
+                raise ValueError("valid sphere hit cannot have reason_invalid")
             return self
         if self.reason_invalid is None:
-            raise ValueError("invalid monitor hit requires reason_invalid")
+            raise ValueError("invalid sphere hit requires reason_invalid")
+        return self
+
+
+class SceneGazeSphereRecord(SceneSchemaModel):
+    center_scene_m: Vector3D
+    radius_m: float
+    radius_source: Literal["DEFAULT_GAZE_SPHERE_RADIUS_M"]
+    center_source: Literal["robust_scene_center"]
+
+    @model_validator(mode="after")
+    def validate_sphere(self) -> SceneGazeSphereRecord:
+        _require_vector_space(
+            self.center_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="center_scene_m",
+        )
+        if self.radius_m <= 0:
+            raise ValueError("gaze sphere radius_m must be > 0")
         return self
 
 
@@ -605,20 +554,20 @@ class SceneMonitorPlaneRecord(SceneSchemaModel):
 
 
 class SceneFrameRecord(SceneSchemaModel):
-    schema_version: Literal["gaze-scene-frame-v1"] = "gaze-scene-frame-v1"
+    schema_version: Literal["gaze-scene-frame-v2"] = "gaze-scene-frame-v2"
     frame_id: str
     frame_index: int
     timestamp_seconds: float
     source_frame_status: FrameStatus
     valid_for_scene_center: bool
-    valid_for_main_monitor_direction: bool
+    valid_for_sphere_projection: bool
     camera: SceneFrameCameraRecord
     left_eye: SceneEyeRecord
     right_eye: SceneEyeRecord
     eye_midpoint: SceneEyeMidpointRecord
     head: SceneHeadRecord
     unigaze_ray: SceneUniGazeRayRecord
-    main_monitor_hit: SceneMonitorHitRecord
+    sphere_hit: SceneSphereHitRecord
     diagnostics: SceneFrameDiagnosticsRecord
 
     @model_validator(mode="before")
@@ -644,12 +593,12 @@ class SceneFrameRecord(SceneSchemaModel):
             raise ValueError(
                 "valid_for_scene_center requires a valid eye_midpoint record"
             )
-        if self.valid_for_main_monitor_direction and not self.unigaze_ray.valid:
+        if self.valid_for_sphere_projection and not self.unigaze_ray.valid:
             raise ValueError(
-                "valid_for_main_monitor_direction requires a valid unigaze_ray record"
+                "valid_for_sphere_projection requires a valid unigaze_ray record"
             )
-        if self.main_monitor_hit.valid and not self.unigaze_ray.valid:
-            raise ValueError("valid monitor hit requires a valid unigaze ray")
+        if self.sphere_hit.valid and not self.unigaze_ray.valid:
+            raise ValueError("valid sphere hit requires a valid unigaze ray")
         return self
 
 
@@ -663,7 +612,7 @@ class SceneSourceArtifactsRecord(SceneSchemaModel):
 class SceneCoordinateFramesRecord(SceneSchemaModel):
     math_frame: CoordinateFrame3D
     scene_frame: CoordinateFrame3D
-    monitor_frame: CoordinateFrame3D
+    projection_frame: CoordinateFrame3D
     viewer_frame: CoordinateFrame3D
 
     @model_validator(mode="before")
@@ -675,7 +624,7 @@ class SceneCoordinateFramesRecord(SceneSchemaModel):
         for field_name in (
             "math_frame",
             "scene_frame",
-            "monitor_frame",
+            "projection_frame",
             "viewer_frame",
         ):
             _coerce_enum_field(
@@ -691,8 +640,8 @@ class SceneCoordinateFramesRecord(SceneSchemaModel):
             raise ValueError("math_frame must be camera_opencv_pseudo_m")
         if self.scene_frame != CoordinateFrame3D.SCENE_PSEUDO_M:
             raise ValueError("scene_frame must be scene_pseudo_m")
-        if self.monitor_frame != CoordinateFrame3D.MONITOR_PLANE_PSEUDO_M:
-            raise ValueError("monitor_frame must be monitor_plane_pseudo_m")
+        if self.projection_frame != CoordinateFrame3D.GAZE_SPHERE_PSEUDO_M:
+            raise ValueError("projection_frame must be gaze_sphere_pseudo_m")
         if self.viewer_frame != CoordinateFrame3D.THREE_VIEW:
             raise ValueError("viewer_frame must be three_view")
         return self
@@ -781,7 +730,7 @@ class SceneViewerDependencyRecord(SceneSchemaModel):
 
 
 class SceneManifest(SceneSchemaModel):
-    schema_version: Literal["gaze-scene-manifest-v1"] = "gaze-scene-manifest-v1"
+    schema_version: Literal["gaze-scene-manifest-v2"] = "gaze-scene-manifest-v2"
     run_id: str
     source_video_path: str
     source_video_sha256: str
@@ -792,7 +741,7 @@ class SceneManifest(SceneSchemaModel):
     robust_estimators: SceneRobustEstimatorsRecord
     scene_center_camera_m: Vector3D
     axis_basis: SceneAxisBasisRecord = Field(alias="scene_axes_camera")
-    monitor_plane: SceneMonitorPlaneRecord = Field(alias="main_monitor_plane")
+    gaze_sphere: SceneGazeSphereRecord
     viewer_dependency: SceneViewerDependencyRecord = Field(alias="viewer")
     generated_at_utc: str
 
@@ -813,11 +762,14 @@ def _coerce_invalid_reason_counts(data: dict[str, int]) -> dict[str, int]:
     return coerced
 
 
-class SceneMonitorHitBoundsRecord(SceneSchemaModel):
-    u_min_m: float
-    u_max_m: float
-    v_min_m: float
-    v_max_m: float
+class SceneSphereHitAngleBoundsRecord(SceneSchemaModel):
+    theta_min_radians: float
+    theta_max_radians: float
+    phi_min_radians: float
+    phi_max_radians: float
+    front_hemisphere_frames: int
+    rear_hemisphere_frames: int
+    equator_frames: int
 
 
 class SceneArtifactValidationRecord(SceneSchemaModel):
@@ -828,26 +780,26 @@ class SceneArtifactValidationRecord(SceneSchemaModel):
 
 
 class SceneSummary(SceneSchemaModel):
-    schema_version: Literal["gaze-scene-summary-v1"] = "gaze-scene-summary-v1"
+    schema_version: Literal["gaze-scene-summary-v2"] = "gaze-scene-summary-v2"
     run_id: str
     decoded_frames: int
     scene_frame_records: int
     valid_eye_midpoint_frames: int
     valid_unigaze_ray_frames: int
-    valid_monitor_hit_frames: int
-    invalid_monitor_hit_reasons: dict[str, int]
-    monitor_hit_bounds: SceneMonitorHitBoundsRecord
+    valid_sphere_hit_frames: int
+    invalid_sphere_hit_reasons: dict[str, int]
+    sphere_hit_angle_bounds: SceneSphereHitAngleBoundsRecord
     representative_scene_warning_frame_ids: list[str]
     artifact_validation: SceneArtifactValidationRecord
 
-    @field_validator("invalid_monitor_hit_reasons", mode="before")
+    @field_validator("invalid_sphere_hit_reasons", mode="before")
     @classmethod
     def validate_invalid_reason_counts(
         cls,
         value: Any,
     ) -> dict[str, int]:
         if not isinstance(value, dict):
-            raise TypeError("invalid_monitor_hit_reasons must be a dict")
+            raise TypeError("invalid_sphere_hit_reasons must be a dict")
         return _coerce_invalid_reason_counts(value)
 
 
@@ -855,10 +807,10 @@ class ViewerHitPoint(SceneSchemaModel):
     frame_id: str
     frame_index: int
     point_scene_m: Vector3D
-    u_m: float
-    v_m: float
-    within_physical_monitor: bool
-    within_extended_plane: bool
+    radius_m: float
+    theta_radians: float
+    phi_radians: float
+    hemisphere: Literal["front", "rear", "equator"]
 
     @model_validator(mode="after")
     def validate_spaces(self) -> ViewerHitPoint:
@@ -867,17 +819,19 @@ class ViewerHitPoint(SceneSchemaModel):
             expected=CoordinateFrame3D.SCENE_PSEUDO_M,
             field_name="point_scene_m",
         )
+        if self.radius_m <= 0:
+            raise ValueError("viewer hit point radius_m must be > 0")
         return self
 
 
 class ViewerSceneData(SceneSchemaModel):
-    schema_version: Literal["gaze-scene-viewer-data-v1"] = "gaze-scene-viewer-data-v1"
+    schema_version: Literal["gaze-scene-viewer-data-v2"] = "gaze-scene-viewer-data-v2"
     run_id: str
     source_video_stem: str
     frame_count: int
     frames: list[SceneFrameRecord]
     valid_hit_points: list[ViewerHitPoint]
-    monitor_plane: SceneMonitorPlaneRecord
+    gaze_sphere: SceneGazeSphereRecord
     axis_basis: SceneAxisBasisRecord
     assumptions: list[SceneAssumptionRecord]
     summary: SceneSummary

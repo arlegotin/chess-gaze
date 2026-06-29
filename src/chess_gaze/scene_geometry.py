@@ -16,8 +16,6 @@ from chess_gaze.scene_records import (
     SceneEyeMidpointRecord,
     SceneEyeRecord,
     SceneInvalidReason,
-    SceneMonitorHitRecord,
-    SceneMonitorPlaneRecord,
     SceneUniGazeRayRecord,
     UnitVector3D,
     Vector3D,
@@ -655,47 +653,6 @@ def build_scene_axis_basis(
     )
 
 
-def build_monitor_plane(
-    center: RobustPointEstimate,
-    direction: RobustDirectionEstimate,
-    axes: SceneAxisBasisRecord,
-    assumptions: SceneAssumptions,
-) -> SceneMonitorPlaneRecord:
-    forward_direction = _normalized_direction(direction.direction_camera)
-    if forward_direction is None:
-        forward_direction = _vector_tuple(axes.forward_camera)
-
-    center_camera = center.point_camera_m
-    monitor_center_camera = _camera_vector(
-        x=center_camera.x
-        + (forward_direction[0] * assumptions.monitor_distance_from_eyes_m),
-        y=center_camera.y
-        + (forward_direction[1] * assumptions.monitor_distance_from_eyes_m),
-        z=center_camera.z
-        + (forward_direction[2] * assumptions.monitor_distance_from_eyes_m),
-    )
-
-    return SceneMonitorPlaneRecord(
-        center_camera_m=monitor_center_camera,
-        center_scene_m=camera_point_to_scene(
-            monitor_center_camera,
-            center_camera,
-            axes,
-        ),
-        normal_camera=axes.back_camera,
-        right_camera=axes.right_camera,
-        up_camera=axes.up_camera,
-        physical_width_m=assumptions.monitor_width_m,
-        physical_height_m=assumptions.monitor_height_m,
-        extended_width_m=assumptions.monitor_width_m * assumptions.extended_plane_scale,
-        extended_height_m=(
-            assumptions.monitor_height_m * assumptions.extended_plane_scale
-        ),
-        distance_from_scene_center_m=assumptions.monitor_distance_from_eyes_m,
-        distance_source="DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
-    )
-
-
 def camera_point_to_scene(
     point: Vector3D,
     center: Vector3D,
@@ -706,124 +663,6 @@ def camera_point_to_scene(
         x=_dot(relative, _vector_tuple(axes.right_camera)),
         y=_dot(relative, _vector_tuple(axes.up_camera)),
         z=_dot(relative, _vector_tuple(axes.back_camera)),
-    )
-
-
-def intersect_ray_with_monitor(
-    ray: SceneUniGazeRayRecord,
-    monitor: SceneMonitorPlaneRecord,
-    assumptions: SceneAssumptions,
-) -> SceneMonitorHitRecord:
-    if not ray.valid or ray.origin_camera_m is None or ray.direction_camera is None:
-        return _invalid_monitor_hit(
-            reason_invalid=ray.reason_invalid or SceneInvalidReason.UNIGAZE_INVALID,
-            source_reason_invalid=_first_reason(
-                ray.source_reason_invalid,
-                "unigaze ray unavailable",
-            ),
-        )
-
-    origin = _vector_tuple(ray.origin_camera_m)
-    direction = _vector_tuple(ray.direction_camera)
-    plane_center = _vector_tuple(monitor.center_camera_m)
-    normal = _vector_tuple(monitor.normal_camera)
-    origin_to_plane = _subtract(origin, plane_center)
-
-    denominator = _dot(direction, normal)
-    signed_distance = _dot(origin_to_plane, normal)
-    persisted_denominator = _finite_or_none(denominator)
-    persisted_signed_distance = _finite_or_none(signed_distance)
-
-    if persisted_denominator is None or persisted_signed_distance is None:
-        return _invalid_monitor_hit(
-            reason_invalid=SceneInvalidReason.RAY_INTERSECTION_NON_FINITE,
-            denominator=persisted_denominator,
-            signed_distance_m=persisted_signed_distance,
-            source_reason_invalid="ray-plane denominator or distance is non-finite",
-        )
-
-    if abs(denominator) < assumptions.ray_plane_parallel_epsilon:
-        if abs(signed_distance) < assumptions.ray_plane_parallel_epsilon:
-            return _invalid_monitor_hit(
-                reason_invalid=SceneInvalidReason.RAY_COPLANAR_WITH_MONITOR,
-                denominator=denominator,
-                signed_distance_m=signed_distance,
-                source_reason_invalid="ray origin lies on monitor plane",
-            )
-        return _invalid_monitor_hit(
-            reason_invalid=SceneInvalidReason.RAY_PARALLEL_TO_MONITOR,
-            denominator=denominator,
-            signed_distance_m=signed_distance,
-            source_reason_invalid="ray direction is parallel to monitor plane",
-        )
-
-    ray_t = -signed_distance / denominator
-    if not math.isfinite(ray_t):
-        return _invalid_monitor_hit(
-            reason_invalid=SceneInvalidReason.RAY_INTERSECTION_NON_FINITE,
-            denominator=denominator,
-            signed_distance_m=signed_distance,
-            source_reason_invalid="ray-plane intersection t is non-finite",
-        )
-    if ray_t < 0.0:
-        return _invalid_monitor_hit(
-            reason_invalid=SceneInvalidReason.RAY_INTERSECTION_BEHIND_ORIGIN,
-            denominator=denominator,
-            signed_distance_m=signed_distance,
-            t=ray_t,
-            source_reason_invalid="ray-plane intersection is behind ray origin",
-        )
-
-    hit_xyz = _add(origin, _scale(direction, ray_t))
-    if not all(math.isfinite(value) for value in hit_xyz):
-        return _invalid_monitor_hit(
-            reason_invalid=SceneInvalidReason.RAY_INTERSECTION_NON_FINITE,
-            denominator=denominator,
-            signed_distance_m=signed_distance,
-            t=ray_t,
-            source_reason_invalid="ray-plane intersection point is non-finite",
-        )
-
-    hit_from_center = _subtract(hit_xyz, plane_center)
-    u_m = _dot(hit_from_center, _vector_tuple(monitor.right_camera))
-    v_m = _dot(hit_from_center, _vector_tuple(monitor.up_camera))
-    if not math.isfinite(u_m) or not math.isfinite(v_m):
-        return _invalid_monitor_hit(
-            reason_invalid=SceneInvalidReason.RAY_INTERSECTION_NON_FINITE,
-            denominator=denominator,
-            signed_distance_m=signed_distance,
-            t=ray_t,
-            source_reason_invalid="monitor plane coordinates are non-finite",
-        )
-
-    scene_center_camera = _monitor_scene_center_camera(monitor)
-    hit_camera = _camera_vector(x=hit_xyz[0], y=hit_xyz[1], z=hit_xyz[2])
-    return SceneMonitorHitRecord(
-        valid=True,
-        point_camera_m=hit_camera,
-        point_scene_m=_camera_point_to_scene_from_monitor(
-            hit_camera,
-            scene_center_camera,
-            monitor,
-        ),
-        plane_uv_m=(u_m, v_m),
-        ray_t_m=ray_t,
-        denominator=denominator,
-        signed_origin_distance_m=signed_distance,
-        within_physical_monitor=_within_rectangle(
-            u_m,
-            v_m,
-            width_m=monitor.width_m,
-            height_m=monitor.height_m,
-        ),
-        within_extended_plane=_within_rectangle(
-            u_m,
-            v_m,
-            width_m=monitor.extended_width_m,
-            height_m=monitor.extended_height_m,
-        ),
-        source_reason_invalid=None,
-        reason_invalid=None,
     )
 
 
@@ -975,76 +814,6 @@ def _scene_unit_vector(
 
 def _vector_tuple(vector: Vector3D | UnitVector3D) -> tuple[float, float, float]:
     return (vector.x, vector.y, vector.z)
-
-
-def _finite_or_none(value: float) -> float | None:
-    if math.isfinite(value):
-        return value
-    return None
-
-
-def _invalid_monitor_hit(
-    *,
-    reason_invalid: SceneInvalidReason,
-    denominator: float | None = None,
-    signed_distance_m: float | None = None,
-    t: float | None = None,
-    source_reason_invalid: str,
-) -> SceneMonitorHitRecord:
-    return SceneMonitorHitRecord(
-        valid=False,
-        point_camera_m=None,
-        point_scene_m=None,
-        plane_uv_m=None,
-        ray_t_m=_finite_or_none(t) if t is not None else None,
-        denominator=(_finite_or_none(denominator) if denominator is not None else None),
-        signed_origin_distance_m=(
-            _finite_or_none(signed_distance_m)
-            if signed_distance_m is not None
-            else None
-        ),
-        within_physical_monitor=None,
-        within_extended_plane=None,
-        source_reason_invalid=source_reason_invalid,
-        reason_invalid=reason_invalid,
-    )
-
-
-def _within_rectangle(
-    u_m: float,
-    v_m: float,
-    *,
-    width_m: float,
-    height_m: float,
-) -> bool:
-    return abs(u_m) <= (width_m / 2.0) and abs(v_m) <= (height_m / 2.0)
-
-
-def _monitor_scene_center_camera(
-    monitor: SceneMonitorPlaneRecord,
-) -> tuple[float, float, float]:
-    center_scene = _vector_tuple(monitor.center_scene_m)
-    scene_center_offset = _add(
-        _add(
-            _scale(_vector_tuple(monitor.right_camera), center_scene[0]),
-            _scale(_vector_tuple(monitor.up_camera), center_scene[1]),
-        ),
-        _scale(_vector_tuple(monitor.normal_camera), center_scene[2]),
-    )
-    return _subtract(_vector_tuple(monitor.center_camera_m), scene_center_offset)
-
-
-def _camera_point_to_scene_from_monitor(
-    point: Vector3D,
-    scene_center_camera: tuple[float, float, float],
-    monitor: SceneMonitorPlaneRecord,
-) -> Vector3D:
-    relative = _subtract(_vector_tuple(point), scene_center_camera)
-    return _scene_vector(
-        x=_dot(relative, _vector_tuple(monitor.right_camera)),
-        y=_dot(relative, _vector_tuple(monitor.up_camera)),
-        z=_dot(relative, _vector_tuple(monitor.normal_camera)),
-    )
 
 
 def _point_in_frame(

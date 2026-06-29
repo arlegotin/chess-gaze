@@ -10,13 +10,14 @@ from pydantic import ValidationError
 from chess_gaze.geometry import CoordinateSpace, Point2D
 from chess_gaze.scene_calibration import default_scene_assumptions
 from chess_gaze.scene_records import (
+    CoordinateFrame3D,
     SceneAxisBasisRecord,
     SceneEyeMidpointRecord,
     SceneEyeRecord,
     SceneFrameRecord,
     SceneInvalidReason,
     SceneManifest,
-    SceneMonitorHitRecord,
+    SceneSphereHitRecord,
     SceneSummary,
     SceneUniGazeRayRecord,
     UnitVector3D,
@@ -142,23 +143,19 @@ def _ray_payload(valid: bool = True) -> dict[str, Any]:
     }
 
 
-def _hit_payload(valid: bool = True) -> dict[str, Any]:
+def _scene_vector(x: float, y: float, z: float) -> dict[str, Any]:
+    return _vector_payload(x=x, y=y, z=z, space="scene_pseudo_m")
+
+
+def _sphere_hit_payload() -> dict[str, Any]:
     return {
-        "valid": valid,
-        "point_camera_m": _vector_payload(x=0.2, y=0.1, z=1.0),
-        "point_scene_m": _vector_payload(
-            x=0.2,
-            y=0.1,
-            z=0.3,
-            space="scene_pseudo_m",
-        ),
-        "u_m": 0.2,
-        "v_m": 0.1,
-        "t": 0.3,
-        "denominator": -0.6,
-        "signed_distance_m": 0.0,
-        "within_physical_monitor": True,
-        "within_extended_plane": True,
+        "valid": True,
+        "point_scene_m": _scene_vector(0.0, 0.0, -0.7),
+        "ray_t_m": 0.7,
+        "radius_m": 0.7,
+        "theta_radians": 0.0,
+        "phi_radians": 0.0,
+        "hemisphere": "front",
         "source_reason_invalid": None,
         "reason_invalid": None,
     }
@@ -176,24 +173,12 @@ def _axis_basis_payload() -> dict[str, Any]:
     }
 
 
-def _monitor_plane_payload() -> dict[str, Any]:
+def _gaze_sphere_payload() -> dict[str, Any]:
     return {
-        "center_camera_m": _vector_payload(x=0.0, y=0.0, z=1.35),
-        "center_scene_m": _vector_payload(
-            x=0.0,
-            y=0.0,
-            z=-0.7,
-            space="scene_pseudo_m",
-        ),
-        "normal_camera": _unit_vector_payload(x=0.0, y=0.0, z=1.0),
-        "right_camera": _unit_vector_payload(x=-1.0, y=0.0, z=0.0),
-        "up_camera": _unit_vector_payload(x=0.0, y=-1.0, z=0.0),
-        "width_m": 0.6,
-        "height_m": 0.34,
-        "extended_width_m": 1.8,
-        "extended_height_m": 1.02,
-        "distance_from_scene_center_m": 0.7,
-        "distance_source": "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
+        "center_scene_m": _scene_vector(0.0, 0.0, 0.0),
+        "radius_m": 0.7,
+        "radius_source": "DEFAULT_GAZE_SPHERE_RADIUS_M",
+        "center_source": "robust_scene_center",
     }
 
 
@@ -221,7 +206,7 @@ def _manifest_payload() -> dict[str, Any]:
         "coordinate_frames": {
             "math_frame": "camera_opencv_pseudo_m",
             "scene_frame": "scene_pseudo_m",
-            "monitor_frame": "monitor_plane_pseudo_m",
+            "projection_frame": "gaze_sphere_pseudo_m",
             "viewer_frame": "three_view",
         },
         "camera_model": {
@@ -276,7 +261,7 @@ def _manifest_payload() -> dict[str, Any]:
         },
         "scene_center_camera_m": _vector_payload(x=0.0, y=0.0, z=0.65),
         "scene_axes_camera": _axis_basis_payload(),
-        "main_monitor_plane": _monitor_plane_payload(),
+        "gaze_sphere": _gaze_sphere_payload(),
         "viewer": {
             "library": "three",
             "version": "0.185.0",
@@ -295,13 +280,16 @@ def _summary_payload() -> dict[str, Any]:
         "scene_frame_records": 20,
         "valid_eye_midpoint_frames": 10,
         "valid_unigaze_ray_frames": 8,
-        "valid_monitor_hit_frames": 6,
-        "invalid_monitor_hit_reasons": {"UNIGAZE_INVALID": 2},
-        "monitor_hit_bounds": {
-            "u_min_m": -0.42,
-            "u_max_m": 0.38,
-            "v_min_m": -0.21,
-            "v_max_m": 0.19,
+        "valid_sphere_hit_frames": 6,
+        "invalid_sphere_hit_reasons": {"UNIGAZE_INVALID": 2},
+        "sphere_hit_angle_bounds": {
+            "theta_min_radians": -0.42,
+            "theta_max_radians": 0.42,
+            "phi_min_radians": -0.2,
+            "phi_max_radians": 0.2,
+            "front_hemisphere_frames": 4,
+            "rear_hemisphere_frames": 1,
+            "equator_frames": 1,
         },
         "representative_scene_warning_frame_ids": ["frame-0002"],
         "artifact_validation": {
@@ -320,14 +308,14 @@ def _scene_frame_payload() -> dict[str, Any]:
         "timestamp_seconds": 0.1,
         "source_frame_status": "OK",
         "valid_for_scene_center": True,
-        "valid_for_main_monitor_direction": True,
+        "valid_for_sphere_projection": True,
         "camera": _frame_camera_payload(),
         "left_eye": _eye_payload(),
         "right_eye": _eye_payload(),
         "eye_midpoint": _midpoint_payload(),
         "head": _head_payload(),
         "unigaze_ray": _ray_payload(),
-        "main_monitor_hit": _hit_payload(),
+        "sphere_hit": _sphere_hit_payload(),
         "diagnostics": {
             "warnings": [],
             "source_error_codes": [],
@@ -414,9 +402,9 @@ def test_scene_records_enforce_semantic_coordinate_frames() -> None:
         SceneManifest.model_validate(
             {
                 **_manifest_payload(),
-                "main_monitor_plane": {
-                    **_monitor_plane_payload(),
-                    "normal_camera": _unit_vector_payload(space="scene_pseudo_m"),
+                "gaze_sphere": {
+                    **_gaze_sphere_payload(),
+                    "center_scene_m": _vector_payload(space="camera_opencv_pseudo_m"),
                 },
             }
         )
@@ -432,19 +420,14 @@ def test_scene_records_enforce_semantic_coordinate_frames() -> None:
                     {
                         "frame_id": "frame-0001",
                         "frame_index": 1,
-                        "point_scene_m": _vector_payload(
-                            x=0.2,
-                            y=0.1,
-                            z=0.3,
-                            space="camera_opencv_pseudo_m",
-                        ),
-                        "u_m": 0.2,
-                        "v_m": 0.1,
-                        "within_physical_monitor": True,
-                        "within_extended_plane": True,
+                        "point_scene_m": _vector_payload(x=0.2, y=0.1, z=0.3),
+                        "radius_m": 0.7,
+                        "theta_radians": 0.2,
+                        "phi_radians": 0.1,
+                        "hemisphere": "front",
                     }
                 ],
-                "monitor_plane": _monitor_plane_payload(),
+                "gaze_sphere": _gaze_sphere_payload(),
                 "axis_basis": _axis_basis_payload(),
                 "assumptions": [
                     record.model_dump()
@@ -456,8 +439,8 @@ def test_scene_records_enforce_semantic_coordinate_frames() -> None:
                     "scene_frame_records": 1,
                     "valid_eye_midpoint_frames": 1,
                     "valid_unigaze_ray_frames": 1,
-                    "valid_monitor_hit_frames": 1,
-                    "invalid_monitor_hit_reasons": {},
+                    "valid_sphere_hit_frames": 1,
+                    "invalid_sphere_hit_reasons": {},
                     "representative_scene_warning_frame_ids": [],
                 },
             }
@@ -594,7 +577,7 @@ def test_scene_frame_record_rejects_contradictory_estimator_eligibility_flags() 
         SceneFrameRecord.model_validate(
             {
                 **_scene_frame_payload(),
-                "valid_for_main_monitor_direction": True,
+                "valid_for_sphere_projection": True,
                 "unigaze_ray": {
                     **_ray_payload(valid=False),
                     "origin_camera_m": None,
@@ -659,48 +642,60 @@ def test_scene_head_radii_accept_json_style_lists_but_reject_bad_values() -> Non
         )
 
 
-def test_valid_monitor_hit_requires_valid_ray_and_finite_forward_intersection() -> None:
+def test_valid_sphere_hit_requires_point_angles_radius_and_forward_t() -> None:
+    hit = SceneSphereHitRecord.model_validate(_sphere_hit_payload())
+
+    assert hit.valid is True
+    assert hit.point_scene_m is not None
+    assert hit.ray_t_m == 0.7
+    assert hit.radius_m == 0.7
+    assert hit.theta_radians == 0.0
+    assert hit.phi_radians == 0.0
+    assert hit.hemisphere == "front"
+
     with pytest.raises(ValidationError):
-        SceneMonitorHitRecord.model_validate(
-            {
-                **_hit_payload(),
-                "u_m": math.nan,
-            }
+        SceneSphereHitRecord.model_validate(
+            {**_sphere_hit_payload(), "ray_t_m": -0.001}
         )
 
     with pytest.raises(ValidationError):
-        SceneMonitorHitRecord.model_validate(
-            {
-                **_hit_payload(),
-                "t": -0.001,
-            }
-        )
+        SceneSphereHitRecord.model_validate({**_sphere_hit_payload(), "radius_m": 0.0})
 
-    invalid_frame_payload = _scene_frame_payload()
-    invalid_frame_payload["unigaze_ray"] = {
-        **_ray_payload(valid=False),
-        "origin_camera_m": None,
-        "origin_scene_m": None,
-        "direction_camera": None,
-        "direction_scene": None,
-        "direction_source": None,
-        "pitch_radians": None,
-        "yaw_radians": None,
-        "source_reason_invalid": "GAZE_MODEL_FAILED",
-        "reason_invalid": "UNIGAZE_INVALID",
-    }
+
+def test_invalid_sphere_hit_requires_explicit_reason() -> None:
+    hit = SceneSphereHitRecord.model_validate(
+        {
+            "valid": False,
+            "point_scene_m": None,
+            "ray_t_m": None,
+            "radius_m": None,
+            "theta_radians": None,
+            "phi_radians": None,
+            "hemisphere": None,
+            "source_reason_invalid": "appearance gaze unavailable",
+            "reason_invalid": "UNIGAZE_INVALID",
+        }
+    )
+
+    assert hit.valid is False
+    assert hit.reason_invalid == SceneInvalidReason.UNIGAZE_INVALID
 
     with pytest.raises(ValidationError):
-        SceneFrameRecord.model_validate(invalid_frame_payload)
+        SceneSphereHitRecord.model_validate({"valid": False, "reason_invalid": None})
 
 
-def test_scene_monitor_hit_serializes_only_plane_uv_m() -> None:
-    hit = SceneMonitorHitRecord.model_validate(_hit_payload())
-    payload = hit.model_dump(by_alias=True)
+def test_frame_record_uses_sphere_hit_and_rejects_monitor_hit() -> None:
+    frame = SceneFrameRecord.model_validate(_scene_frame_payload())
 
-    assert payload["plane_uv_m"] == (0.2, 0.1)
-    assert "u_m" not in payload
-    assert "v_m" not in payload
+    assert frame.schema_version == "gaze-scene-frame-v2"
+    assert frame.sphere_hit.valid is True
+    assert frame.valid_for_sphere_projection is True
+    assert "main_monitor_hit" not in frame.model_dump()
+
+    with pytest.raises(ValidationError):
+        SceneFrameRecord.model_validate(
+            {**_scene_frame_payload(), "main_monitor_hit": _sphere_hit_payload()}
+        )
 
 
 def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
@@ -708,7 +703,7 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
         {
             **_scene_frame_payload(),
             "valid_for_scene_center": False,
-            "valid_for_main_monitor_direction": False,
+            "valid_for_sphere_projection": False,
             "left_eye": {
                 **_eye_payload(valid=False),
                 "image_px": None,
@@ -753,19 +748,16 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
                 "source_reason_invalid": "GAZE_MODEL_FAILED",
                 "reason_invalid": "UNIGAZE_INVALID",
             },
-            "main_monitor_hit": {
-                **_hit_payload(valid=False),
-                "point_camera_m": None,
+            "sphere_hit": {
+                "valid": False,
                 "point_scene_m": None,
-                "u_m": None,
-                "v_m": None,
-                "t": None,
-                "denominator": None,
-                "signed_distance_m": None,
-                "within_physical_monitor": None,
-                "within_extended_plane": None,
-                "source_reason_invalid": "RAY_PARALLEL_TO_MONITOR",
-                "reason_invalid": "RAY_PARALLEL_TO_MONITOR",
+                "ray_t_m": None,
+                "radius_m": None,
+                "theta_radians": None,
+                "phi_radians": None,
+                "hemisphere": None,
+                "source_reason_invalid": "appearance gaze unavailable",
+                "reason_invalid": "UNIGAZE_INVALID",
             },
         }
     )
@@ -774,29 +766,26 @@ def test_invalid_nested_records_retain_explicit_scene_invalid_reasons() -> None:
     assert frame.right_eye.reason_invalid == SceneInvalidReason.RIGHT_EYE_INVALID
     assert frame.eye_midpoint.reason_invalid == SceneInvalidReason.EYE_MIDPOINT_INVALID
     assert frame.unigaze_ray.reason_invalid == SceneInvalidReason.UNIGAZE_INVALID
-    assert (
-        frame.main_monitor_hit.reason_invalid
-        == SceneInvalidReason.RAY_PARALLEL_TO_MONITOR
-    )
+    assert frame.sphere_hit.reason_invalid == SceneInvalidReason.UNIGAZE_INVALID
     assert frame.eye_midpoint.source_reason_invalid == "RIGHT_EYE_INVALID"
     assert frame.head.source_reason_invalid == "HEAD_POSE_INVALID"
     assert frame.unigaze_ray.source_reason_invalid == "GAZE_MODEL_FAILED"
-    assert frame.main_monitor_hit.source_reason_invalid == "RAY_PARALLEL_TO_MONITOR"
+    assert frame.sphere_hit.source_reason_invalid == "appearance gaze unavailable"
 
 
 def test_scene_frame_record_serializes_spec_alias_fields() -> None:
     frame = SceneFrameRecord.model_validate(_scene_frame_payload())
     payload = frame.model_dump(by_alias=True)
 
-    assert payload["schema_version"] == "gaze-scene-frame-v1"
+    assert payload["schema_version"] == "gaze-scene-frame-v2"
     assert payload["source_frame_status"] == "OK"
     assert payload["valid_for_scene_center"] is True
-    assert payload["valid_for_main_monitor_direction"] is True
+    assert payload["valid_for_sphere_projection"] is True
     assert payload["camera"]["depth_source"] == "interpupillary_distance_assumption"
     assert payload["left_eye"]["camera_m"]["space"] == "camera_opencv_pseudo_m"
     assert payload["eye_midpoint"]["camera_m"]["z"] == 0.8
     assert payload["eye_midpoint"]["scene_m"]["space"] == "scene_pseudo_m"
-    assert payload["main_monitor_hit"]["ray_t_m"] == 0.3
+    assert payload["sphere_hit"]["ray_t_m"] == 0.7
     assert payload["diagnostics"] == {"warnings": [], "source_error_codes": []}
 
 
@@ -834,12 +823,13 @@ def test_scene_manifest_serializes_structured_spec_fields() -> None:
     manifest = SceneManifest.model_validate(_manifest_payload())
     payload = manifest.model_dump(by_alias=True)
 
-    assert payload["schema_version"] == "gaze-scene-manifest-v1"
+    assert payload["schema_version"] == "gaze-scene-manifest-v2"
     assert payload["camera_model"]["policy"] == "estimated_pinhole_from_image_size"
     assert (
         payload["source_artifacts"]["scene_frame_records"]
         == "records/scene_frames.jsonl"
     )
+    assert payload["coordinate_frames"]["projection_frame"] == "gaze_sphere_pseudo_m"
     assert payload["coordinate_frames"]["viewer_frame"] == "three_view"
     assert payload["scene_axes_camera"]["forward_camera"]["z"] == -1.0
     assert payload["robust_estimators"]["scene_center"]["thresholds_m"] == (
@@ -853,10 +843,7 @@ def test_scene_manifest_serializes_structured_spec_fields() -> None:
         ]["p95"]
         == 0.31
     )
-    assert (
-        payload["main_monitor_plane"]["distance_source"]
-        == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
-    )
+    assert payload["gaze_sphere"]["radius_m"] == 0.7
     assert payload["viewer"]["version"] == "0.185.0"
     assert payload["generated_at_utc"] == "2026-06-26T12:00:00Z"
 
@@ -878,6 +865,54 @@ def test_scene_manifest_accepts_remote_viewer_dependency_provenance() -> None:
     payload = manifest.model_dump(by_alias=True)
     assert payload["viewer"]["cdn_provider"] == "cdn.jsdelivr.net"
     assert payload["viewer"]["module_urls"] == EXPECTED_MODULE_URLS
+
+
+def test_manifest_and_viewer_data_use_gaze_sphere() -> None:
+    manifest = SceneManifest.model_validate(_manifest_payload())
+    viewer_data = ViewerSceneData.model_validate(
+        {
+            "run_id": "run-123",
+            "source_video_stem": "nakamura_short",
+            "frame_count": 1,
+            "frames": [_scene_frame_payload()],
+            "valid_hit_points": [
+                {
+                    "frame_id": "frame-0001",
+                    "frame_index": 1,
+                    "point_scene_m": _scene_vector(0.0, 0.0, -0.7),
+                    "radius_m": 0.7,
+                    "theta_radians": 0.0,
+                    "phi_radians": 0.0,
+                    "hemisphere": "front",
+                }
+            ],
+            "gaze_sphere": _gaze_sphere_payload(),
+            "axis_basis": _axis_basis_payload(),
+            "assumptions": [
+                record.model_dump() for record in default_scene_assumptions().records
+            ],
+            "summary": {
+                **_summary_payload(),
+                "decoded_frames": 1,
+                "scene_frame_records": 1,
+                "valid_eye_midpoint_frames": 1,
+                "valid_unigaze_ray_frames": 1,
+                "valid_sphere_hit_frames": 1,
+                "invalid_sphere_hit_reasons": {},
+                "representative_scene_warning_frame_ids": [],
+            },
+        }
+    )
+
+    assert manifest.schema_version == "gaze-scene-manifest-v2"
+    assert (
+        manifest.coordinate_frames.projection_frame
+        == CoordinateFrame3D.GAZE_SPHERE_PSEUDO_M
+    )
+    assert manifest.gaze_sphere.radius_m == 0.7
+    assert viewer_data.schema_version == "gaze-scene-viewer-data-v2"
+    assert viewer_data.gaze_sphere == manifest.gaze_sphere
+    assert "monitor_plane" not in viewer_data.model_dump()
 
 
 def test_structured_nested_models_reject_non_finite_values_and_unknown_keys() -> None:
@@ -959,11 +994,24 @@ def test_scene_summary_serializes_structured_breakdowns() -> None:
     summary = SceneSummary.model_validate(_summary_payload())
     payload = summary.model_dump()
 
-    assert payload["schema_version"] == "gaze-scene-summary-v1"
-    assert payload["invalid_monitor_hit_reasons"] == {"UNIGAZE_INVALID": 2}
-    assert payload["monitor_hit_bounds"]["u_min_m"] == -0.42
+    assert payload["schema_version"] == "gaze-scene-summary-v2"
+    assert payload["invalid_sphere_hit_reasons"] == {"UNIGAZE_INVALID": 2}
+    assert payload["sphere_hit_angle_bounds"]["theta_min_radians"] == -0.42
     assert payload["representative_scene_warning_frame_ids"] == ["frame-0002"]
     assert payload["artifact_validation"]["scene_manifest_valid"] is True
+
+
+def test_summary_reports_sphere_hit_bounds_and_reasons() -> None:
+    summary = SceneSummary.model_validate(_summary_payload())
+    payload = summary.model_dump()
+
+    assert summary.schema_version == "gaze-scene-summary-v2"
+    assert payload["valid_sphere_hit_frames"] == 6
+    assert payload["invalid_sphere_hit_reasons"] == {"UNIGAZE_INVALID": 2}
+    assert payload["sphere_hit_angle_bounds"]["theta_min_radians"] == -0.42
+    assert payload["sphere_hit_angle_bounds"]["theta_max_radians"] == 0.42
+    assert payload["sphere_hit_angle_bounds"]["phi_min_radians"] == -0.2
+    assert payload["sphere_hit_angle_bounds"]["phi_max_radians"] == 0.2
 
 
 def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> None:
@@ -977,19 +1025,14 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
                 {
                     "frame_id": "frame-0001",
                     "frame_index": 1,
-                    "point_scene_m": _vector_payload(
-                        x=0.2,
-                        y=0.1,
-                        z=0.3,
-                        space="scene_pseudo_m",
-                    ),
-                    "u_m": 0.2,
-                    "v_m": 0.1,
-                    "within_physical_monitor": True,
-                    "within_extended_plane": True,
+                    "point_scene_m": _scene_vector(0.0, 0.0, -0.7),
+                    "radius_m": 0.7,
+                    "theta_radians": 0.0,
+                    "phi_radians": 0.0,
+                    "hemisphere": "front",
                 }
             ],
-            "monitor_plane": _monitor_plane_payload(),
+            "gaze_sphere": _gaze_sphere_payload(),
             "axis_basis": _axis_basis_payload(),
             "assumptions": [
                 record.model_dump() for record in default_scene_assumptions().records
@@ -1000,8 +1043,8 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
                 "scene_frame_records": 1,
                 "valid_eye_midpoint_frames": 1,
                 "valid_unigaze_ray_frames": 1,
-                "valid_monitor_hit_frames": 1,
-                "invalid_monitor_hit_reasons": {},
+                "valid_sphere_hit_frames": 1,
+                "invalid_sphere_hit_reasons": {},
                 "representative_scene_warning_frame_ids": [],
             },
         }
@@ -1009,7 +1052,7 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
 
     payload = viewer_data.model_dump()
 
-    assert payload["schema_version"] == "gaze-scene-viewer-data-v1"
+    assert payload["schema_version"] == "gaze-scene-viewer-data-v2"
     assert len(payload["frames"]) == 1
     assert payload["valid_hit_points"] == [
         {
@@ -1017,13 +1060,13 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
             "frame_index": 1,
             "point_scene_m": {
                 "space": "scene_pseudo_m",
-                "x": 0.2,
-                "y": 0.1,
-                "z": 0.3,
+                "x": 0.0,
+                "y": 0.0,
+                "z": -0.7,
             },
-            "u_m": 0.2,
-            "v_m": 0.1,
-            "within_physical_monitor": True,
-            "within_extended_plane": True,
+            "radius_m": 0.7,
+            "theta_radians": 0.0,
+            "phi_radians": 0.0,
+            "hemisphere": "front",
         }
     ]
