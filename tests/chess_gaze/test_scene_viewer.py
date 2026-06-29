@@ -287,7 +287,7 @@ def test_build_scene_viewer_writes_embedded_index_and_served_entrypoint(
     assert (layout.viewer_dir / "index.html").is_file()
     assert (layout.viewer_dir / "served.html").is_file()
     assert (layout.viewer_dir / "scene-data.json").is_file()
-    assert viewer_data.schema_version == "gaze-scene-viewer-data-v1"
+    assert viewer_data.schema_version == "gaze-scene-viewer-data-v2"
 
 
 def test_build_scene_viewer_writes_app_assets_without_local_vendor_modules(
@@ -332,8 +332,11 @@ def test_scene_data_is_strict_schema_versioned_viewer_scene_data(
     layout, viewer_data = built_viewer
     payload = json.loads((layout.viewer_dir / "scene-data.json").read_text("utf-8"))
 
-    assert payload["schema_version"] == "gaze-scene-viewer-data-v1"
+    assert payload["schema_version"] == "gaze-scene-viewer-data-v2"
     assert viewer_data.run_id == "20260626T120000Z-scene"
+    assert payload["gaze_sphere"]["radius_m"] == pytest.approx(
+        viewer_data.gaze_sphere.radius_m
+    )
 
     with pytest.raises(ValidationError):
         ViewerSceneData.model_validate(payload | {"unknown_field": True})
@@ -346,30 +349,35 @@ def test_scene_data_includes_all_frames_in_slider_order(
 
     assert viewer_data.frame_count == 7
     assert [frame.frame_index for frame in viewer_data.frames] == list(range(7))
-    assert viewer_data.frames[-1].main_monitor_hit.valid is False
+    assert viewer_data.frames[-1].sphere_hit.valid is False
 
 
-def test_scene_data_keeps_one_hit_identity_per_valid_monitor_hit_frame(
+def test_scene_data_keeps_one_hit_identity_per_valid_sphere_hit_frame(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     _layout, viewer_data = built_viewer
-    valid_frame_count = sum(
-        1 for frame in viewer_data.frames if frame.main_monitor_hit.valid
-    )
+    valid_frame_count = sum(1 for frame in viewer_data.frames if frame.sphere_hit.valid)
 
     assert len(viewer_data.valid_hit_points) == valid_frame_count
     assert [point.frame_index for point in viewer_data.valid_hit_points] == [
         frame.frame_index
         for frame in viewer_data.frames
-        if frame.main_monitor_hit.valid
+        if frame.sphere_hit.valid
     ]
 
     duplicate_points = [
         point for point in viewer_data.valid_hit_points if point.frame_index in (2, 3)
     ]
     assert len(duplicate_points) == 2
-    assert duplicate_points[0].u_m == duplicate_points[1].u_m
-    assert duplicate_points[0].v_m == duplicate_points[1].v_m
+    assert duplicate_points[0].point_scene_m == duplicate_points[1].point_scene_m
+    assert duplicate_points[0].radius_m == pytest.approx(duplicate_points[1].radius_m)
+    assert duplicate_points[0].theta_radians == pytest.approx(
+        duplicate_points[1].theta_radians
+    )
+    assert duplicate_points[0].phi_radians == pytest.approx(
+        duplicate_points[1].phi_radians
+    )
+    assert duplicate_points[0].hemisphere == duplicate_points[1].hemisphere
     assert duplicate_points[0].frame_id != duplicate_points[1].frame_id
 
 
@@ -392,9 +400,9 @@ def test_generated_html_includes_required_selectors(
         'data-testid="toggle-head"',
         'data-testid="toggle-eyes"',
         'data-testid="toggle-ray"',
-        'data-testid="toggle-monitor-plane"',
-        'data-testid="toggle-monitor-rectangle"',
-        'data-testid="toggle-extended-plane"',
+        'data-testid="toggle-gaze-sphere"',
+        'data-testid="sphere-radius-m"',
+        'data-testid="sphere-radius-label"',
         'data-testid="toggle-axes"',
         'data-testid="toggle-hit-points"',
         'data-testid="toggle-hit-area"',
@@ -405,6 +413,12 @@ def test_generated_html_includes_required_selectors(
         'data-testid="status-panel"',
     ):
         assert selector in html
+
+    assert "Sphere Radius" in html
+    assert "Monitor Plane" not in html
+    assert "Monitor Rectangle" not in html
+    assert "Extended Plane" not in html
+    assert "Monitor Hit" not in html
 
 
 def test_generated_viewer_exposes_hit_area_controls_and_math(
@@ -442,18 +456,40 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
         html,
         flags=re.DOTALL,
     )
+    assert re.search(
+        r'id="sphere-radius-m"[^>]*data-testid="sphere-radius-m"'
+        r'[^>]*type="range"[^>]*min="0.35"[^>]*max="1.20"[^>]*value="0.70"'
+        r'[^>]*step="0.01"',
+        html,
+        flags=re.DOTALL,
+    )
     assert 'max="12"' in html
     assert 'step="0.5"' in html
     assert 'value="8"' in html
     assert "DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8" in js
     assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0" in js
     assert "HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12" in js
+    assert "DEFAULT_SPHERE_RADIUS_M = 0.7" in js
+    assert "SPHERE_MIN_RADIUS_M = 0.35" in js
+    assert "SPHERE_MAX_RADIUS_M = 1.2" in js
+    assert "SPHERE_RADIUS_STEP_M = 0.01" in js
+    assert "SPHERE_SURFACE_OFFSET_M = 0.002" in js
     assert 'mode: "accumulated"' in js
     assert "DEFAULT_HIT_AREA_OPACITY = 0.24" in js
     assert "HIT_AREA_MIN_OPACITY = 0" in js
     assert "HIT_AREA_MAX_OPACITY = 1" in js
     assert "updateHitAreaOpacityLabel" in js
     assert "materials.hitArea.opacity = hitAreaOpacity()" in js
+    assert "function intersectRayWithSphere" in js
+    assert "function sphereHitForFrame" in js
+    assert "function surfaceOffsetPoint" in js
+    assert "function writeSphereHitAreaPatchPositions" in js
+    assert "new THREE.SphereGeometry(1, 48, 24)" in js
+    assert "frame?.sphere_hit" in js
+    assert 'data-testid="toggle-monitor-plane"' not in html
+    assert "main_monitor_hit" not in js
+    assert "monitor_plane" not in js
+    assert "plane_uv_m" not in js
     opacity_handler_body = js.split(
         'elements.hitAreaOpacity.addEventListener("input", () => {', 1
     )[1].split("  });", 1)[0]
@@ -461,13 +497,10 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "renderCurrentFrame()" not in opacity_handler_body
     assert "renderAccumulatedHits()" not in opacity_handler_body
     assert "Math.tan(alphaRadians)" in js
-    assert "const minorScale = rayT" in js
-    assert "const majorScale = rayT / normalDirectionDot" in js
-    assert "minorX: minorAxis.x * minorScale" in js
-    assert "majorX: orientedMajorAxis.x * majorScale" in js
-    assert "direction.clone().sub(" in js
+    assert "intersectRayWithSphere(origin, direction, radius)" in js
+    assert "surfaceOffsetPoint(sphereHitForFrame(frame))" in js
+    assert 'elements.controls.sphereRadius?.addEventListener("input", () => {' in js
     assert "frame?.unigaze_ray?.valid" in js
-    assert "projectedDirection" in js
     assert "renderCurrentHitArea" in js
     assert "updateAccumulatedHitAreasForAngularError" in js
     assert "--color-hit-area:" in css
@@ -497,6 +530,8 @@ def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
     assert "upperBoundFrameIndex" in js
     assert "computeVertexNormals()" not in js
     assert "for (const hit of state.sceneData.valid_hit_points)" not in js
+    assert "for (const frame of state.sceneData?.frames || [])" in js
+    assert "sphereHitForFrame(frame)" in js
     assert "state.sceneData.frames.slice(0, state.frameIndex + 1)" not in js
 
 
@@ -659,10 +694,11 @@ def test_generated_css_uses_light_theme_and_semantic_color_roles(
         "--color-unigaze-ray:",
         "--color-current-hit:",
         "--color-accumulated-hit:",
-        "--color-monitor-plane:",
+        "--color-gaze-sphere:",
         "--color-warning:",
     ):
         assert role in css
+    assert "--color-monitor-plane:" not in css
 
 
 def test_generated_js_contains_mode_names(

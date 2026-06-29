@@ -13,7 +13,7 @@
   --color-current-hit: #4c1d95;
   --color-accumulated-hit: #b7791f;
   --color-hit-area: #c43d7a;
-  --color-monitor-plane: #d8dde5;
+  --color-gaze-sphere: #d8dde5;
   --color-warning: #b5532f;
   --shadow-panel: 0 14px 34px rgb(20 31 49 / 12%);
   font-family:
@@ -266,7 +266,8 @@ input:disabled {
 }
 
 .hit-area-error-row,
-.hit-area-opacity-row {
+.hit-area-opacity-row,
+.toggle-grid label.range-control {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(96px, 1.15fr) 54px;
   align-items: center;
@@ -274,7 +275,8 @@ input:disabled {
 }
 
 .hit-area-error-row label,
-.hit-area-opacity-row label {
+.hit-area-opacity-row label,
+.toggle-grid label.range-control span:first-child {
   min-width: 0;
   color: var(--color-muted);
   font-size: 0.78rem;
@@ -284,7 +286,8 @@ input:disabled {
 }
 
 .hit-area-error-row output,
-.hit-area-opacity-row output {
+.hit-area-opacity-row output,
+.toggle-grid label.range-control span:last-child {
   min-width: 0;
   color: var(--color-text);
   font-size: 0.88rem;

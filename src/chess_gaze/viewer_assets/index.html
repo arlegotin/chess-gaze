@@ -102,9 +102,20 @@
           <label><input data-testid="toggle-head" type="checkbox" checked> Head</label>
           <label><input data-testid="toggle-eyes" type="checkbox" checked> Eyes</label>
           <label><input data-testid="toggle-ray" type="checkbox" checked> UniGaze Ray</label>
-          <label><input data-testid="toggle-monitor-plane" type="checkbox" checked> Monitor Plane</label>
-          <label><input data-testid="toggle-monitor-rectangle" type="checkbox" checked> Monitor Rectangle</label>
-          <label><input data-testid="toggle-extended-plane" type="checkbox" checked> Extended Plane</label>
+          <label><input data-testid="toggle-gaze-sphere" type="checkbox" checked> Gaze Sphere</label>
+          <label class="range-control" for="sphere-radius-m">
+            <span>Sphere Radius</span>
+            <input
+              id="sphere-radius-m"
+              data-testid="sphere-radius-m"
+              type="range"
+              min="0.35"
+              max="1.20"
+              value="0.70"
+              step="0.01"
+            >
+            <span data-testid="sphere-radius-label">0.70 m</span>
+          </label>
           <label><input data-testid="toggle-axes" type="checkbox" checked> Axes</label>
           <label><input data-testid="toggle-hit-points" type="checkbox" checked> Hit Points</label>
           <label><input data-testid="toggle-hit-area" type="checkbox" checked> Hit Area</label>
@@ -152,7 +163,7 @@
               <dd data-testid="ray-status">-</dd>
             </div>
             <div>
-              <dt>Monitor Hit</dt>
+              <dt>Sphere Hit</dt>
               <dd data-testid="hit-status">-</dd>
             </div>
             <div>
