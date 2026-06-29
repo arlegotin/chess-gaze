@@ -3,8 +3,8 @@
 Local Python pipeline for per-frame video evidence and 3D scene artifacts used
 by chess gaze analysis.
 
-The implemented pipeline decodes video, writes strict run artifacts, keeps raw
-and processed frame images only when explicitly requested, and revalidates
+The implemented pipeline decodes video, writes strict run artifacts, keeps raw,
+processed, and crop debug images only when explicitly requested, and revalidates
 artifacts into `qa_summary.json`.
 The default CLI path validates local model checksums, runs MediaPipe face
 landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
@@ -49,6 +49,7 @@ uv run chess-gaze analyze artifacts/input/test_1.mp4 --output-root artifacts/out
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --models-root models
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --config analysis.json
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --save-frames
+uv run chess-gaze analyze artifacts/input/test_1.mp4 --save-crops
 ```
 
 By default, UniGaze runs on Apple Silicon MPS with batch size 7:
@@ -99,11 +100,12 @@ exists:
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --no-resume
 ```
 
-By default, completed runs do not retain decoded raw PNGs or processed overlay
-JPEGs. The analyzer keeps decoded frames in memory only as long as needed for
-observation and visualization data generation. Use `--save-frames` when a run
-must retain `raw_frames/*.png` and `processed_frames/*.jpg` for visual debugging
-or external QA.
+By default, completed runs do not retain decoded raw PNGs, processed overlay
+JPEGs, or eye crop PNGs. The analyzer keeps decoded frames and crop geometry in
+memory only as long as needed for observation and visualization data generation.
+Use `--save-frames` when a run must retain `raw_frames/*.png` and
+`processed_frames/*.jpg`; use `--save-crops` when a run must retain
+`crops/**/*.png` for visual debugging or external QA.
 
 Each completed run contains:
 
@@ -113,6 +115,7 @@ Each completed run contains:
 - `analysis_state.json`
 - `raw_frames/` (empty by default; populated by `--save-frames`)
 - `processed_frames/` (empty by default; populated by `--save-frames`)
+- `crops/` (empty by default; populated by `--save-crops`)
 - `records/frames.jsonl`
 - `records/errors.jsonl`
 - `records/scene_frames.jsonl`
@@ -146,9 +149,10 @@ The viewer keeps run artifacts local, but it loads Three.js `0.185.0` from
 pinned jsDelivr module URLs when the page renders. Expected remote module
 requests are `three.module.js`, its transitive `three.core.js`, and
 `OrbitControls.js` for the same pinned version. Project viewer code does not
-upload scene JSON, frames, crops, or model data, but the remote modules execute
-in the same page as embedded scene data and must be trusted. Offline viewing
-requires those pinned modules to already be present in the browser cache.
+upload scene JSON, frames, retained crops, or model data, but the remote modules
+execute in the same page as embedded scene data and must be trusted. Offline
+viewing requires those pinned modules to already be present in the browser
+cache.
 
 The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
 estimate and overlays translucent angular-error patches on the monitor plane.

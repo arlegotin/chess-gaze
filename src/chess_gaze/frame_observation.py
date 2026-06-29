@@ -39,6 +39,7 @@ FRAME_WARNING_ERROR_CODES = frozenset(
     }
 )
 
+
 class EyeObserver(Protocol):
     def __call__(
         self,

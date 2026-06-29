@@ -11,22 +11,24 @@ package instead of accidentally importing Python files from the repository root.
   the behavior they own:
   - `artifact_runs.py` owns run directory layout and artifact-relative paths.
   - `calibration.py` and `configuration.py` own analysis configuration records.
-  - `video_decode.py`, `image_io.py`, and `visualization.py` own frame IO and
-    processed-frame rendering.
+  - `video_decode.py`, `image_io.py`, and `visualization.py` own frame IO,
+    optional debug-image writes, and processed-frame rendering.
   - `model_assets.py` and `model_registry.json` own local model trust and
     checksum validation.
   - `face_landmark_indices.py` owns named MediaPipe face landmark indices that
     encode anatomical left/right semantics.
   - `face_observation.py`, `eye_observation.py`, `head_pose.py`,
     `gaze_observation.py`, and `frame_observation.py` own per-frame evidence
-    extraction.
+    extraction, including in-memory crop geometry and optional retained eye
+    crop debug artifacts.
   - `unigaze_runtime.py` owns UniGaze device/batch runtime validation, MPS
     preflight, synchronization, and inference metadata assembly.
   - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record,
-    frame-image retention policy, and primitive geometry contracts.
+    frame/crop image retention policies, and primitive geometry contracts.
   - `analysis_resume.py` owns interrupted-run discovery, compatible-run
-    validation, committed frame-journal repair, checkpoint state, and cleanup of
-    uncommitted or derived artifacts before resumed analysis rebuilds them.
+    validation, retention-policy matching, committed frame-journal repair,
+    checkpoint state, and cleanup of uncommitted or derived artifacts before
+    resumed analysis rebuilds them.
   - `scene_calibration.py` owns persisted adult-male, monitor, and robust
     estimator assumptions.
   - `scene_records.py` owns strict scene, viewer, and summary schemas.
@@ -42,6 +44,16 @@ package instead of accidentally importing Python files from the repository root.
     benchmark harness and selected-batch report schema.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration,
     policy-aware artifact validation, and command-line entry points.
+
+Source-layout review, 2026-06-29: `pipeline.py` is intentionally deep at 839
+lines after adding crop image retention plumbing. It still owns one cohesive
+analysis orchestration boundary: request resolution, model/runtime preparation,
+run creation/resume matching, frame processing, scene/viewer generation, and QA
+closeout all coordinate the same completed-run contract. The crop-retention
+change only threads an existing kind of artifact policy through this boundary.
+If the file grows toward 1,500 lines or adds a second independent workflow,
+split request resolution, observer construction, and artifact closeout into
+named modules with explicit interface tests.
 
 Source-layout review, 2026-06-29: `face_observation.py` is intentionally deep
 at 1,203 lines, still below the 1,500-line split-plan trigger. It owns one

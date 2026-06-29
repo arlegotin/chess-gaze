@@ -37,6 +37,10 @@ Frame image retention is opt-in:
 - Programmatic request: `AnalyzeRequest(save_frame_images=True)`
 - JSON config: `"save_frame_images": true`
 
+Crop image retention is governed separately by
+[ADR-0005](0005-default-crop-image-retention.md). `--save-frames` does not
+retain crop PNGs.
+
 Every new run manifest persists:
 
 ```json

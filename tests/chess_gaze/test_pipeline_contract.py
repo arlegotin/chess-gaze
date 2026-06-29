@@ -1175,16 +1175,16 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
             self,
             *,
             face_observer: object,
-                gaze_model: object,
-                calibration: object,
-                run_layout: object,
-                save_crop_images: bool,
-            ) -> None:
-                captured["face_observer"] = face_observer
-                captured["gaze_model"] = gaze_model
-                captured["calibration"] = calibration
-                captured["run_layout"] = run_layout
-                captured["save_crop_images"] = save_crop_images
+            gaze_model: object,
+            calibration: object,
+            run_layout: object,
+            save_crop_images: bool,
+        ) -> None:
+            captured["face_observer"] = face_observer
+            captured["gaze_model"] = gaze_model
+            captured["calibration"] = calibration
+            captured["run_layout"] = run_layout
+            captured["save_crop_images"] = save_crop_images
 
         def __call__(self, frame: ObserverFrame) -> FrameRecord:
             return _fake_record(frame)

@@ -95,14 +95,8 @@ def test_eye_observation_matches_real_video_evidence(tmp_path: Path) -> None:
                 ):
                     if eye.present:
                         video_eye_counts[side_name] += 1
-                        assert eye.eye_crop_path is not None
-                        assert not eye.eye_crop_path.is_absolute()
-                        assert eye.eye_crop_path.parts[:3] == (
-                            "crops",
-                            "eyes",
-                            side_name,
-                        )
-                        assert (run_layout.run_dir / eye.eye_crop_path).is_file()
+                        assert eye.eye_crop_path is None
+                        assert eye.eye_crop_sha256 is None
                         assert eye.crop_bbox_image_px is not None
                         assert eye.eye_crop_transform_to_image_px is not None
                         _assert_crop_transform_maps_to_image_px(
@@ -140,13 +134,11 @@ def test_eye_observation_matches_real_video_evidence(tmp_path: Path) -> None:
                 if eye_observation.left.present and eye_observation.right.present:
                     video_independent_pair_count += 1
                     assert (
-                        eye_observation.left.eye_crop_path
-                        != eye_observation.right.eye_crop_path
-                    )
-                    assert (
                         eye_observation.left.eye_landmarks_image_px
                         != eye_observation.right.eye_landmarks_image_px
                     )
+
+            assert list(run_layout.crops_dir.rglob("*.png")) == []
 
             eye_present_counts[str(video_path)] = video_eye_counts
             iris_present_counts[str(video_path)] = video_iris_counts

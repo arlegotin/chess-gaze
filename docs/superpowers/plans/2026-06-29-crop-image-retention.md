@@ -60,7 +60,7 @@
 - Produces: `_ResolvedRequest.save_crop_images: bool`
 - Produces: CLI flag `--save-crops`
 
-- [ ] **Step 1: Write failing configuration, CLI, manifest, and resume tests**
+- [x] **Step 1: Write failing configuration, CLI, manifest, and resume tests**
 
 Add these assertions/tests:
 
@@ -116,7 +116,7 @@ Add a resume compatibility test that creates an interrupted run with
 `crop_image_retention.save_crop_images=True`, then reruns with the default
 request and asserts a new run is created instead of resuming the old one.
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -127,7 +127,7 @@ uv run pytest tests/chess_gaze/test_configuration.py::test_load_config_accepts_s
 Expected: FAIL because the config field, request field, and CLI flag do not
 exist.
 
-- [ ] **Step 3: Implement schema/config/request/CLI policy**
+- [x] **Step 3: Implement schema/config/request/CLI policy**
 
 Add `CropImageRetentionPolicy` to `src/chess_gaze/frame_records.py`:
 
@@ -183,7 +183,7 @@ analyze.add_argument(
 
 Pass `save_crop_images=args.save_crop_images` into `AnalyzeRequest`.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -210,7 +210,7 @@ Expected: PASS.
 - Produces: no crop files by default while keeping `crop_bbox_image_px` and `eye_crop_transform_to_image_px`
 - Produces: retained crop paths and hashes when `save_crop_images=True`
 
-- [ ] **Step 1: Write failing eye-observation tests**
+- [x] **Step 1: Write failing eye-observation tests**
 
 Change the existing default eye-observation test to assert no crop file paths or
 files by default:
@@ -243,7 +243,7 @@ def test_observe_eyes_retains_crop_files_when_requested(tmp_path: Path) -> None:
     assert (run_layout.run_dir / observation.left.eye_crop_path).is_file()
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -254,7 +254,7 @@ uv run pytest tests/chess_gaze/test_eye_observation.py -q
 Expected: FAIL because crop files are currently written by default and
 `save_crop_images` is not accepted.
 
-- [ ] **Step 3: Implement optional crop write**
+- [x] **Step 3: Implement optional crop write**
 
 Add `save_crop_images: bool = False` to `observe_eyes()` and `_observe_eye()`.
 
@@ -284,7 +284,7 @@ Pass it to `self.eye_observer(..., save_crop_images=self.save_crop_images)`.
 In `pipeline._default_observer_bundle_factory()`, accept `save_crop_images` and
 construct `ModelBackedFrameObserver(save_crop_images=save_crop_images, ...)`.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -308,7 +308,7 @@ Expected: PASS.
 - Produces: failed QA validation when `save_crop_images=false` and crop files exist
 - Produces: complete QA validation when `save_crop_images=false` and crop files are absent
 
-- [ ] **Step 1: Write failing QA policy tests**
+- [x] **Step 1: Write failing QA policy tests**
 
 Extend fixture helper with `save_crop_images: bool = True` and
 `write_crop_images: bool = True`.
@@ -362,7 +362,7 @@ def test_validate_run_artifacts_rejects_stray_crop_images_when_policy_disables_s
     ]
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -372,7 +372,7 @@ uv run pytest tests/chess_gaze/test_qa_summary.py -k 'crop_images or crop_files'
 
 Expected: FAIL because QA does not validate crop policy.
 
-- [ ] **Step 3: Implement crop policy validation**
+- [x] **Step 3: Implement crop policy validation**
 
 Pass `loaded.run_manifest.crop_image_retention` into `_count_validation_errors()`.
 
@@ -388,7 +388,7 @@ if not crop_image_retention.save_crop_images and counts.crop_files != 0:
 
 Do not enforce an exact count when saving is enabled.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -414,7 +414,7 @@ Expected: PASS.
 - Produces: default real-video analysis with zero crop files
 - Produces: explicit crop-retaining real-video analysis with crop files
 
-- [ ] **Step 1: Write or update real-video contract tests**
+- [x] **Step 1: Write or update real-video contract tests**
 
 In `test_real_video_model_free_pipeline_writes_complete_artifact_contract()`,
 assert `crop_count == 0` for the default external-observer path if no model
@@ -451,7 +451,7 @@ If this test is too slow for the default suite, mark it consistently with the
 repo's existing real-video/native-test marker policy and still run the command
 manually during verification.
 
-- [ ] **Step 2: Run real-video test to verify RED**
+- [x] **Step 2: Run real-video test to verify RED**
 
 Run:
 
@@ -462,7 +462,7 @@ uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py -k 'crop or 
 Expected before Task 2 implementation: FAIL because default model-backed runs
 write crop files.
 
-- [ ] **Step 3: Update docs and closeout**
+- [x] **Step 3: Update docs and closeout**
 
 Document:
 
@@ -475,7 +475,7 @@ Document:
 - closeout with root cause, durable surface, real-video evidence, tests run,
   and residual limitations.
 
-- [ ] **Step 4: Run focused real-video verification**
+- [x] **Step 4: Run focused real-video verification**
 
 Run:
 
@@ -492,7 +492,7 @@ jq '.counts.crop_files, .byte_counts.crops_bytes, .final_status, .artifact_valid
 
 Expected: `0`, `0`, `"complete"`, and `true`.
 
-- [ ] **Step 5: Run broad gates**
+- [x] **Step 5: Run broad gates**
 
 Run:
 
