@@ -29,13 +29,15 @@ package instead of accidentally importing Python files from the repository root.
     validation, retention-policy matching, committed frame-journal repair,
     checkpoint state, and cleanup of uncommitted or derived artifacts before
     resumed analysis rebuilds them.
-  - `scene_calibration.py` owns persisted adult-male, monitor, and robust
+  - `scene_calibration.py` owns persisted adult-male, gaze-sphere, and robust
     estimator assumptions.
   - `scene_records.py` owns strict scene, viewer, and summary schemas.
   - `scene_geometry.py` owns pseudo-metric back-projection, robust estimators,
-    scene axes, monitor-plane construction, transforms, and ray intersections.
+    scene axes, and camera/scene transforms.
+  - `sphere_projection.py` owns ray-to-gaze-sphere projection math, angular
+    hit coordinates, and invalid sphere-intersection reasons.
   - `scene_artifacts.py` owns reading validated frame artifacts and writing
-    scene JSON/JSONL artifacts.
+    scene JSON/JSONL artifacts, including sphere hit summaries.
   - `scene_viewer.py` owns viewer-data generation, packaged static asset
     copying, and localhost-only static serving.
   - `run_equivalence.py` owns strict run-to-run artifact equivalence checks for

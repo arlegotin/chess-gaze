@@ -48,9 +48,9 @@ from chess_gaze.scene_records import (
     SceneManifest,
     SceneOrientationEstimatorRecord,
     SceneRobustEstimatorsRecord,
+    SceneSourceArtifactsRecord,
     SceneSphereHitAngleBoundsRecord,
     SceneSphereHitRecord,
-    SceneSourceArtifactsRecord,
     SceneSummary,
     SceneUniGazeRayRecord,
     SceneViewerDependencyRecord,
@@ -649,7 +649,9 @@ def _sphere_hit_angle_bounds(
             rear_hemisphere_frames=0,
             equator_frames=0,
         )
-    theta_values = [hit.theta_radians for hit in valid_hits if hit.theta_radians is not None]
+    theta_values = [
+        hit.theta_radians for hit in valid_hits if hit.theta_radians is not None
+    ]
     phi_values = [hit.phi_radians for hit in valid_hits if hit.phi_radians is not None]
     hemispheres = [hit.hemisphere for hit in valid_hits]
     return SceneSphereHitAngleBoundsRecord(
@@ -663,9 +665,7 @@ def _sphere_hit_angle_bounds(
         rear_hemisphere_frames=sum(
             1 for hemisphere in hemispheres if hemisphere == "rear"
         ),
-        equator_frames=sum(
-            1 for hemisphere in hemispheres if hemisphere == "equator"
-        ),
+        equator_frames=sum(1 for hemisphere in hemispheres if hemisphere == "equator"),
     )
 
 

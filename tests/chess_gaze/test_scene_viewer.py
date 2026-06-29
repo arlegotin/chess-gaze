@@ -360,9 +360,7 @@ def test_scene_data_keeps_one_hit_identity_per_valid_sphere_hit_frame(
 
     assert len(viewer_data.valid_hit_points) == valid_frame_count
     assert [point.frame_index for point in viewer_data.valid_hit_points] == [
-        frame.frame_index
-        for frame in viewer_data.frames
-        if frame.sphere_hit.valid
+        frame.frame_index for frame in viewer_data.frames if frame.sphere_hit.valid
     ]
 
     duplicate_points = [

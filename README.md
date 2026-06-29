@@ -155,12 +155,18 @@ viewing requires those pinned modules to already be present in the browser
 cache.
 
 The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
-estimate and overlays translucent angular-error patches on the monitor plane.
-In `Accumulated` mode, hit-area patches accumulate like hit points but remain
+estimate and overlays translucent angular-error patches on the gaze sphere. In
+`Accumulated` mode, hit-area patches accumulate like hit points but remain
 controlled by the separate `Hit Area` toggle. The default typical angular error
 is 8 degrees and can be adjusted from 0 to 12 degrees in the viewer. Hit-area
 opacity defaults to 24% and is adjustable in the same control group. This is a
 display assumption, not per-frame UniGaze confidence.
+
+The persisted artifacts use a default gaze-sphere radius of `0.700 m`, matching
+the previous plausible desktop display distance assumption. The viewer exposes a
+`Sphere Radius` control from `0.350 m` to `1.200 m`; changing it reprojects
+current and accumulated hit points and hit areas from the saved gaze rays onto
+the selected sphere radius without rewriting run artifacts.
 
 ## Scene Artifacts
 
@@ -178,16 +184,15 @@ scene X. Monitor-directed gaze points toward negative scene Z.
 Persisted scene assumptions include:
 
 - adult-male interpupillary distance: `0.063 m`
-- main-monitor distance from the robust eye-midpoint scene center: `0.700 m`
-- physical monitor size: `0.600 m x 0.340 m`
-- extended monitor plane scale: `3.0`
+- gaze sphere radius from the robust eye-midpoint scene center: `0.700 m`
 - head ellipsoid radii: `0.090 m, 0.120 m, 0.100 m`
 - eye sphere radius: `0.012 m`
 
 Every decoded frame produces one `records/scene_frames.jsonl` record. Every
-valid forward ray-plane intersection produces one persisted gaze hit point.
-Hit points are not merged, sampled, smoothed, clamped to the physical monitor,
-clustered, or replaced by a heatmap.
+valid forward ray-sphere intersection produces one persisted gaze hit point on
+the gaze sphere centered at the robust eye-midpoint scene center. Hit points are
+not merged, sampled, smoothed, clamped to a display rectangle, clustered, or
+replaced by a heatmap.
 
 ## Model Policy
 
