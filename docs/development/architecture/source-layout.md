@@ -22,8 +22,8 @@ package instead of accidentally importing Python files from the repository root.
     extraction.
   - `unigaze_runtime.py` owns UniGaze device/batch runtime validation, MPS
     preflight, synchronization, and inference metadata assembly.
-  - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record
-    and primitive geometry contracts.
+  - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record,
+    frame-image retention policy, and primitive geometry contracts.
   - `analysis_resume.py` owns interrupted-run discovery, compatible-run
     validation, committed frame-journal repair, checkpoint state, and cleanup of
     uncommitted or derived artifacts before resumed analysis rebuilds them.
@@ -40,8 +40,8 @@ package instead of accidentally importing Python files from the repository root.
     CPU/MPS optimization validation.
   - `unigaze_batch_benchmark.py` owns the Nakamura UniGaze device/batch
     benchmark harness and selected-batch report schema.
-  - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration, validation,
-    and command-line entry points.
+  - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration,
+    policy-aware artifact validation, and command-line entry points.
 
 Source-layout review, 2026-06-27: `unigaze_batch_benchmark.py` is intentionally
 deep despite crossing the 800-line review trigger. The module is a finite

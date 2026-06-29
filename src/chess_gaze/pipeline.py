@@ -33,6 +33,7 @@ from chess_gaze.frame_records import (
     CalibrationRecord,
     ErrorRecord,
     FrameErrorRecord,
+    FrameImageRetentionPolicy,
     FrameRecord,
 )
 from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
@@ -116,6 +117,7 @@ class AnalyzeRequest:
     config_path: Path | None = None
     unigaze_device: str | None = None
     unigaze_batch_size: int | None = None
+    save_frame_images: bool | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
     resume: bool = True
@@ -159,6 +161,7 @@ class _ResolvedRequest:
     raw_frame_image_format: str
     processed_frame_image_format: str
     processed_frame_jpeg_quality: int
+    save_frame_images: bool
     unigaze_device: str
     unigaze_batch_size: int
 
@@ -185,6 +188,9 @@ def analyze_video(
     resolved_model_assets: list[ResolvedModelAsset] | None = None
     prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
     inference = external_observer_inference_record()
+    frame_image_retention = FrameImageRetentionPolicy(
+        save_frame_images=resolved.save_frame_images
+    )
     if observers is None:
         resolved_model_assets = _validate_model_assets(
             request.model_registry_path, resolved
@@ -212,6 +218,7 @@ def analyze_video(
             inspection.video_manifest,
             calibration,
             inference,
+            frame_image_retention,
         )
         if request.resume
         else None
@@ -233,6 +240,7 @@ def analyze_video(
             video_manifest=inspection.video_manifest,
             calibration=calibration,
             inference=inference,
+            frame_image_retention=frame_image_retention,
         )
         analysis_state = new_analysis_state(
             layout,
@@ -452,6 +460,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
             models_root=request.models_root,
             unigaze_device=request.unigaze_device,
             unigaze_batch_size=request.unigaze_batch_size,
+            save_frame_images=request.save_frame_images,
         )
     except ValidationError as exc:
         raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
@@ -463,6 +472,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         raw_frame_image_format=resolved_config.raw_frame_image_format,
         processed_frame_image_format=resolved_config.processed_frame_image_format,
         processed_frame_jpeg_quality=resolved_config.processed_frame_jpeg_quality,
+        save_frame_images=resolved_config.save_frame_images,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
     )
@@ -580,17 +590,18 @@ def _prepare_decoded_frame(
     layout: RunLayout,
 ) -> _PreparedDecodedFrame:
     frame_errors: list[ErrorRecord] = []
-    raw_path = layout.raw_frames_dir / f"{decoded_frame.frame_id}.png"
-    try:
-        _validate_image_format(resolved.raw_frame_image_format, "png")
-        raw_frame_writer(raw_path, decoded_frame.rgb)
-    except Exception as exc:
-        frame_errors.append(
-            ErrorRecord(
-                code=ErrorCode.RAW_FRAME_WRITE_FAILED,
-                message=f"Raw frame write failed: {exc}",
+    if resolved.save_frame_images:
+        raw_path = layout.raw_frames_dir / f"{decoded_frame.frame_id}.png"
+        try:
+            _validate_image_format(resolved.raw_frame_image_format, "png")
+            raw_frame_writer(raw_path, decoded_frame.rgb)
+        except Exception as exc:
+            frame_errors.append(
+                ErrorRecord(
+                    code=ErrorCode.RAW_FRAME_WRITE_FAILED,
+                    message=f"Raw frame write failed: {exc}",
+                )
             )
-        )
     observer_frame = ObserverFrame(
         frame_id=decoded_frame.frame_id,
         frame_index=decoded_frame.frame_index,
@@ -613,6 +624,9 @@ def _render_processed_frame_and_collect_errors(
     resolved: _ResolvedRequest,
     layout: RunLayout,
 ) -> tuple[FrameRecord, list[ErrorRecord]]:
+    if not resolved.save_frame_images:
+        return record, []
+
     frame_errors: list[ErrorRecord] = []
     processed_path = layout.processed_frames_dir / f"{decoded_frame.frame_id}.jpg"
     try:

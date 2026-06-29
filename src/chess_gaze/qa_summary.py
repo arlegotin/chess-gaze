@@ -16,6 +16,7 @@ from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
     CalibrationRecord,
     FrameErrorRecord,
+    FrameImageRetentionPolicy,
     FrameRecord,
     RunManifest,
     VideoManifest,
@@ -328,7 +329,10 @@ def _validate_loaded_run_artifacts(
     counts = _artifact_counts(loaded)
     byte_counts = _byte_counts(run_layout, loaded)
     count_validation_errors = _count_validation_errors(
-        counts, loaded.frame_records, loaded.scene_frame_records
+        counts,
+        loaded.frame_records,
+        loaded.scene_frame_records,
+        loaded.run_manifest.frame_image_retention,
     )
     validation_errors = loaded.schema_validation_errors + count_validation_errors
     final_status: Literal["complete", "failed"] = (
@@ -449,6 +453,7 @@ def _count_validation_errors(
     counts: ArtifactCounts,
     frame_records: list[FrameRecord],
     scene_frame_records: list[SceneFrameRecord],
+    frame_image_retention: FrameImageRetentionPolicy,
 ) -> list[str]:
     errors: list[str] = []
     if counts.frame_records != counts.decoded_frames:
@@ -456,16 +461,17 @@ def _count_validation_errors(
             "frame record count does not match decoded frame count: "
             f"{counts.frame_records} != {counts.decoded_frames}"
         )
-    if counts.raw_frames != counts.decoded_frames:
-        errors.append(
-            "raw frame count does not match decoded frame count: "
-            f"{counts.raw_frames} != {counts.decoded_frames}"
+    expected_frame_images = (
+        counts.decoded_frames if frame_image_retention.save_frame_images else 0
+    )
+    errors.extend(
+        _frame_image_count_validation_errors(
+            raw_frames=counts.raw_frames,
+            processed_frames=counts.processed_frames,
+            expected_frame_images=expected_frame_images,
+            save_frame_images=frame_image_retention.save_frame_images,
         )
-    if counts.processed_frames != counts.decoded_frames:
-        errors.append(
-            "processed frame count does not match decoded frame count: "
-            f"{counts.processed_frames} != {counts.decoded_frames}"
-        )
+    )
     if counts.scene_frame_records != counts.decoded_frames:
         errors.append(
             "scene frame record count does not match decoded frame count: "
@@ -481,6 +487,53 @@ def _count_validation_errors(
     if observed_scene_indices != list(range(counts.decoded_frames)):
         errors.append("scene frame records are not contiguous from decoded frame zero")
     return errors
+
+
+def _frame_image_count_validation_errors(
+    *,
+    raw_frames: int,
+    processed_frames: int,
+    expected_frame_images: int,
+    save_frame_images: bool,
+) -> list[str]:
+    errors: list[str] = []
+    if raw_frames != expected_frame_images:
+        errors.append(
+            _frame_image_count_error(
+                "raw",
+                observed=raw_frames,
+                expected=expected_frame_images,
+                save_frame_images=save_frame_images,
+            )
+        )
+    if processed_frames != expected_frame_images:
+        errors.append(
+            _frame_image_count_error(
+                "processed",
+                observed=processed_frames,
+                expected=expected_frame_images,
+                save_frame_images=save_frame_images,
+            )
+        )
+    return errors
+
+
+def _frame_image_count_error(
+    frame_kind: str,
+    *,
+    observed: int,
+    expected: int,
+    save_frame_images: bool,
+) -> str:
+    if save_frame_images:
+        return (
+            f"{frame_kind} frame count does not match decoded frame count: "
+            f"{observed} != {expected}"
+        )
+    return (
+        f"{frame_kind} frame count does not match frame image retention policy: "
+        f"{observed} != {expected}"
+    )
 
 
 def _detection_rates(frame_records: list[FrameRecord]) -> DetectionRates:

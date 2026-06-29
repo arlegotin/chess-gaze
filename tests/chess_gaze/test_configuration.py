@@ -15,6 +15,7 @@ def test_load_config_uses_task_4_defaults(tmp_path: Path) -> None:
     assert config.raw_frame_image_format == "png"
     assert config.processed_frame_image_format == "jpg"
     assert config.processed_frame_jpeg_quality == 95
+    assert config.save_frame_images is False
 
 
 def test_load_config_uses_unigaze_runtime_defaults() -> None:
@@ -22,6 +23,15 @@ def test_load_config_uses_unigaze_runtime_defaults() -> None:
 
     assert config.unigaze_device == "mps"
     assert config.unigaze_batch_size == 7
+
+
+def test_load_config_accepts_save_frame_images(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"save_frame_images": true}', encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.save_frame_images is True
 
 
 def test_load_config_accepts_explicit_cpu_batch_one_runtime(

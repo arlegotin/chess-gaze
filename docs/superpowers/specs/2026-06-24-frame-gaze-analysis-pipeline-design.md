@@ -4,6 +4,12 @@ Date: 2026-06-24
 
 Updated: 2026-06-25
 
+Supersession note, 2026-06-29: this historical design's raw/processed frame
+image retention requirements are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs do not retain raw or processed frame image files
+unless `--save-frames` or `save_frame_images=True` is used.
+
 ## Status
 
 This is the active design spec for the first real runtime feature in

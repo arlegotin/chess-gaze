@@ -15,6 +15,12 @@ superseded by `2026-06-27-unigaze-mps7-default-design.md`. The current
 no-override default is MPS batch size 7. CPU/1 remains the explicit
 compatibility and benchmark-baseline profile.
 
+Supersession note, 2026-06-29: this historical design's raw/processed frame
+image retention assumptions are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs do not retain raw or processed frame image files
+unless `--save-frames` or `save_frame_images=True` is used.
+
 ## Goal
 
 Make the existing UniGaze inference path run correctly on Apple Silicon MPS and

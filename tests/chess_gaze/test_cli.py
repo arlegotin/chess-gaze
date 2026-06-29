@@ -119,6 +119,7 @@ def test_analyze_prints_run_dir_and_viewer_path(
     [request] = captured_requests
     assert request.unigaze_device is None
     assert request.unigaze_batch_size is None
+    assert request.save_frame_images is None
 
 
 def test_analyze_enables_resume_by_default(
@@ -165,6 +166,29 @@ def test_analyze_no_resume_forces_fresh_run_request(
 
     [request] = captured_requests
     assert request.resume is False
+
+
+def test_analyze_save_frames_flag_requests_frame_image_retention(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    run_dir = tmp_path / "runs" / "run-1"
+    make_tiny_video(video_path)
+    captured_requests: list[AnalyzeRequest] = []
+
+    def fake_analyze_video(request: AnalyzeRequest) -> object:
+        captured_requests.append(request)
+        return SimpleNamespace(
+            layout=SimpleNamespace(run_dir=run_dir),
+            viewer_index_path=run_dir / "viewer" / "index.html",
+        )
+
+    monkeypatch.setattr(cli, "analyze_video", fake_analyze_video)
+
+    assert main(["analyze", str(video_path), "--save-frames"]) == 0
+
+    [request] = captured_requests
+    assert request.save_frame_images is True
 
 
 def test_analyze_passes_unigaze_cli_overrides(

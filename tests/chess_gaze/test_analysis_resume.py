@@ -21,6 +21,7 @@ from chess_gaze.frame_records import (
     ErrorRecord,
     EyeRecord,
     FaceRecord,
+    FrameImageRetentionPolicy,
     FrameRecord,
     GazeAngles,
     HeadPoseRecord,
@@ -110,6 +111,7 @@ def test_find_latest_resumable_run_ignores_complete_and_incompatible_runs(
         _video_manifest(frame_count=4),
         default_calibration(),
         external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
     )
 
     assert result == compatible
@@ -130,6 +132,7 @@ def test_find_latest_resumable_run_ignores_symlinked_run_directories(
         _video_manifest(frame_count=4),
         default_calibration(),
         external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
     )
 
     assert result is None
@@ -150,6 +153,7 @@ def test_find_latest_resumable_run_skips_malformed_newest_run(
         _video_manifest(frame_count=4),
         default_calibration(),
         external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
     )
 
     assert result == compatible
@@ -175,9 +179,31 @@ def test_find_latest_resumable_run_skips_cleanup_invalid_newest_run(
         _video_manifest(frame_count=4),
         default_calibration(),
         external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
     )
 
     assert result == compatible
+
+
+def test_find_latest_resumable_run_requires_matching_frame_image_retention(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    _make_compatible_run(
+        runs_root / "20260628T100000Z-save-frames",
+        save_frame_images=True,
+    )
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=False),
+    )
+
+    assert result is None
 
 
 def test_prepare_resume_run_refuses_to_delete_frame_artifacts_outside_run_root(
@@ -376,7 +402,12 @@ def _make_resume_layout(tmp_path: Path, *, frame_count: int) -> RunLayout:
     return layout
 
 
-def _make_compatible_run(run_dir: Path, *, source_sha256: str = "a" * 64) -> RunLayout:
+def _make_compatible_run(
+    run_dir: Path,
+    *,
+    source_sha256: str = "a" * 64,
+    save_frame_images: bool = True,
+) -> RunLayout:
     run_dir.mkdir(parents=True)
     layout = RunLayout(
         run_dir=run_dir,
@@ -406,6 +437,7 @@ def _make_compatible_run(run_dir: Path, *, source_sha256: str = "a" * 64) -> Run
         source_path=Path("artifacts/input/clip.mp4"),
         frame_count=4,
         source_sha256=source_sha256,
+        save_frame_images=save_frame_images,
     )
     return layout
 
@@ -416,6 +448,7 @@ def _write_run_metadata(
     source_path: Path,
     frame_count: int,
     source_sha256: str = "a" * 64,
+    save_frame_images: bool = True,
 ) -> None:
     video_manifest = _video_manifest(
         frame_count=frame_count,
@@ -428,6 +461,9 @@ def _write_run_metadata(
         input_path=str(source_path),
         video=video_manifest,
         inference=external_observer_inference_record(),
+        frame_image_retention=FrameImageRetentionPolicy(
+            save_frame_images=save_frame_images
+        ),
     )
     (layout.run_dir / "run_manifest.json").write_text(
         run_manifest.model_dump_json(),

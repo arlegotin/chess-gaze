@@ -7,6 +7,12 @@ Date: 2026-06-28
 Approved for implementation by the user's 2026-06-28 task request. The
 executable plan is `docs/superpowers/plans/2026-06-28-resumable-analysis.md`.
 
+Supersession note, 2026-06-29: this design's raw/processed frame image count
+examples are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs validate zero raw and processed frame image
+files; explicit save-frame runs validate decoded-frame-count image files.
+
 ## Goal
 
 Make `uv run chess-gaze analyze <video>` resume the latest compatible

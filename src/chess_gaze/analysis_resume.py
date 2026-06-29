@@ -15,6 +15,7 @@ from chess_gaze.frame_records import (
     CalibrationRecord,
     ErrorRecord,
     FrameErrorRecord,
+    FrameImageRetentionPolicy,
     FrameRecord,
     InferenceRuntimeRecord,
     RunManifest,
@@ -50,6 +51,7 @@ def find_latest_resumable_run(
     video_manifest: VideoManifest,
     calibration: CalibrationRecord,
     inference: InferenceRuntimeRecord,
+    frame_image_retention: FrameImageRetentionPolicy,
 ) -> RunLayout | None:
     if not runs_root.exists():
         return None
@@ -70,6 +72,7 @@ def find_latest_resumable_run(
             video_manifest=video_manifest,
             calibration=calibration,
             inference=inference,
+            frame_image_retention=frame_image_retention,
         ):
             continue
         if _run_is_complete(run_dir):
@@ -123,6 +126,7 @@ def write_initial_run_artifacts(
     video_manifest: VideoManifest,
     calibration: CalibrationRecord,
     inference: InferenceRuntimeRecord,
+    frame_image_retention: FrameImageRetentionPolicy,
 ) -> None:
     _write_json(
         layout.run_dir / "run_manifest.json",
@@ -132,6 +136,7 @@ def write_initial_run_artifacts(
             input_path=str(input_path),
             video=video_manifest,
             inference=inference,
+            frame_image_retention=frame_image_retention,
         ).model_dump(mode="json"),
     )
     _write_json(
@@ -245,6 +250,7 @@ def _run_matches(
     video_manifest: VideoManifest,
     calibration: CalibrationRecord,
     inference: InferenceRuntimeRecord,
+    frame_image_retention: FrameImageRetentionPolicy,
 ) -> bool:
     try:
         run_manifest = read_run_manifest_artifact_json(
@@ -264,6 +270,7 @@ def _run_matches(
         and run_manifest.video == video_manifest
         and persisted_video_manifest == video_manifest
         and run_manifest.inference == inference
+        and run_manifest.frame_image_retention == frame_image_retention
         and persisted_calibration == calibration
     )
 

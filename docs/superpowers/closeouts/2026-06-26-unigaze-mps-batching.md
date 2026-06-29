@@ -17,6 +17,12 @@ closeout were superseded by
 no-override default is MPS batch size 7; CPU/1 remains an explicit compatibility
 profile and benchmark baseline.
 
+Supersession note, 2026-06-29: this historical closeout's raw/processed frame
+write assumptions are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs do not retain raw or processed frame image files
+unless `--save-frames` or `save_frame_images=True` is used.
+
 The corrected full Nakamura benchmark selected `mps` batch size `7` on the
 Apple M3 Max: `667.389 s` wall time for 1973 frames (`2.956 fps`), versus the
 current CPU/1 flow at `1089.510 s` (`1.811 fps`). That is a `1.63x` full-analysis

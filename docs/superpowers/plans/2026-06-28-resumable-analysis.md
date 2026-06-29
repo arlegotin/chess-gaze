@@ -1,5 +1,11 @@
 # Resumable Analysis Implementation Plan
 
+Supersession note, 2026-06-29: this plan's raw/processed frame image count
+examples are superseded by
+`docs/superpowers/specs/2026-06-29-frame-image-retention-design.md` and
+ADR-0004. Current default runs validate zero raw and processed frame image
+files; explicit save-frame runs validate decoded-frame-count image files.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `chess-gaze analyze <video>` resume the latest compatible interrupted run by default, while preserving fresh-run behavior for completed runs and `--no-resume`.

@@ -49,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--unigaze-device", choices=("cpu", "mps"), default=None)
     analyze.add_argument("--unigaze-batch-size", type=int, default=None)
     analyze.add_argument(
+        "--save-frames",
+        action="store_true",
+        default=None,
+        dest="save_frame_images",
+        help="retain raw decoded PNGs and processed overlay JPEGs",
+    )
+    analyze.add_argument(
         "--no-resume",
         action="store_false",
         dest="resume",
@@ -93,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                 config_path=Path(args.config) if args.config is not None else None,
                 unigaze_device=args.unigaze_device,
                 unigaze_batch_size=args.unigaze_batch_size,
+                save_frame_images=args.save_frame_images,
                 resume=args.resume,
             )
         )

@@ -3,8 +3,9 @@
 Local Python pipeline for per-frame video evidence and 3D scene artifacts used
 by chess gaze analysis.
 
-The implemented pipeline decodes video, writes strict run artifacts, preserves raw
-and processed frame evidence, and revalidates artifacts into `qa_summary.json`.
+The implemented pipeline decodes video, writes strict run artifacts, keeps raw
+and processed frame images only when explicitly requested, and revalidates
+artifacts into `qa_summary.json`.
 The default CLI path validates local model checksums, runs MediaPipe face
 landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
 checkpoint, records strict per-frame gaze outputs, builds pseudo-metric 3D scene
@@ -47,6 +48,7 @@ Useful options:
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --output-root artifacts/output
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --models-root models
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --config analysis.json
+uv run chess-gaze analyze artifacts/input/test_1.mp4 --save-frames
 ```
 
 By default, UniGaze runs on Apple Silicon MPS with batch size 7:
@@ -97,14 +99,20 @@ exists:
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --no-resume
 ```
 
+By default, completed runs do not retain decoded raw PNGs or processed overlay
+JPEGs. The analyzer keeps decoded frames in memory only as long as needed for
+observation and visualization data generation. Use `--save-frames` when a run
+must retain `raw_frames/*.png` and `processed_frames/*.jpg` for visual debugging
+or external QA.
+
 Each completed run contains:
 
 - `run_manifest.json`
 - `calibration.json`
 - `video_manifest.json`
 - `analysis_state.json`
-- `raw_frames/`
-- `processed_frames/`
+- `raw_frames/` (empty by default; populated by `--save-frames`)
+- `processed_frames/` (empty by default; populated by `--save-frames`)
 - `records/frames.jsonl`
 - `records/errors.jsonl`
 - `records/scene_frames.jsonl`
