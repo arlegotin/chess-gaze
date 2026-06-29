@@ -34,6 +34,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 
 
 def save_rgb_png(path: Path, image: np.ndarray) -> str:
+    image = _validate_rgb_image(image)
     buffer = BytesIO()
     Image.fromarray(image, mode="RGB").save(buffer, format="PNG")
     data = buffer.getvalue()
@@ -44,6 +45,7 @@ def save_rgb_png(path: Path, image: np.ndarray) -> str:
 def save_bgr_jpeg(path: Path, image: np.ndarray, quality: int) -> str:
     """Persist an RGB image as JPEG, converting to BGR only at the OpenCV boundary."""
 
+    image = _validate_rgb_image(image)
     bgr_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     success, encoded = cv2.imencode(
         ".jpg", bgr_image, [cv2.IMWRITE_JPEG_QUALITY, quality]
@@ -54,3 +56,13 @@ def save_bgr_jpeg(path: Path, image: np.ndarray, quality: int) -> str:
     data = encoded.tobytes()
     atomic_write_bytes(path, data)
     return sha256(data).hexdigest()
+
+
+def _validate_rgb_image(image: np.ndarray) -> np.ndarray:
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("image must have shape (height, width, 3)")
+    if image.dtype != np.uint8:
+        raise ValueError("image must have dtype uint8")
+    if image.shape[0] <= 0 or image.shape[1] <= 0:
+        raise ValueError("image must have positive height and width")
+    return np.ascontiguousarray(image)

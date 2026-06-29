@@ -247,6 +247,107 @@ def test_observe_eyes_retains_crop_files_when_requested(tmp_path: Path) -> None:
     assert (run_layout.run_dir / observation.right.eye_crop_path).is_file()
 
 
+@pytest.mark.parametrize("save_crop_images", [False, True])
+@pytest.mark.parametrize(
+    ("left_eye_bbox", "left_iris_center"),
+    [
+        ((240.0, 32.0, 280.0, 56.0), (260.0, 42.0)),
+        ((125.0, 140.0, 170.0, 170.0), (149.0, 155.0)),
+    ],
+)
+def test_fully_off_frame_eye_is_missing_without_empty_crop_write(
+    tmp_path: Path,
+    save_crop_images: bool,
+    left_eye_bbox: tuple[float, float, float, float],
+    left_iris_center: tuple[float, float],
+) -> None:
+    run_layout = make_run_layout(tmp_path)
+    face = make_face_candidate(
+        left_eye=EyeFixture(
+            bbox=left_eye_bbox,
+            iris_center=left_iris_center,
+            iris_radius_x=7.0,
+            iris_radius_y=5.0,
+        ),
+        right_eye=EyeFixture(
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
+        ),
+    )
+
+    observation = observe_eyes(
+        face,
+        gradient_rgb_frame(),
+        run_layout,
+        frame_id="f000000048",
+        save_crop_images=save_crop_images,
+    )
+
+    assert observation.left.present is False
+    assert observation.left.reason_missing == ErrorCode.LEFT_EYE_NOT_FOUND
+    assert observation.left.bounding_box_image_px is not None
+    assert observation.left.crop_bbox_image_px is None
+    assert observation.left.eye_crop_transform_to_image_px is None
+    assert observation.left.eye_crop_path is None
+    assert observation.left.eye_crop_sha256 is None
+    assert observation.left.occlusion == "severe"
+
+    assert observation.right.present is True
+    assert observation.right.reason_missing is None
+    if save_crop_images:
+        assert observation.right.eye_crop_path == Path(
+            "crops/eyes/right/f000000048.png"
+        )
+        assert (run_layout.run_dir / observation.right.eye_crop_path).is_file()
+        assert not list(run_layout.left_eye_crops_dir.glob("*.png"))
+    else:
+        assert observation.right.eye_crop_path is None
+        assert not run_layout.crops_dir.exists()
+
+
+def test_partially_off_frame_eye_keeps_clipped_positive_crop(
+    tmp_path: Path,
+) -> None:
+    run_layout = make_run_layout(tmp_path)
+    face = make_face_candidate(
+        left_eye=EyeFixture(
+            bbox=(180.0, 32.0, 220.0, 56.0),
+            iris_center=(192.0, 42.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
+        ),
+        right_eye=EyeFixture(
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
+        ),
+    )
+
+    observation = observe_eyes(
+        face,
+        gradient_rgb_frame(),
+        run_layout,
+        frame_id="f000000049",
+        save_crop_images=True,
+    )
+
+    assert observation.left.present is True
+    assert observation.left.reason_missing is None
+    assert observation.left.crop_bbox_image_px is not None
+    assert observation.left.crop_bbox_image_px.x_min == pytest.approx(170.0)
+    assert observation.left.crop_bbox_image_px.x_max == pytest.approx(
+        float(IMAGE_WIDTH_PX)
+    )
+    assert observation.left.crop_bbox_image_px.x_max > (
+        observation.left.crop_bbox_image_px.x_min
+    )
+    assert observation.left.eye_crop_path == Path("crops/eyes/left/f000000049.png")
+    assert (run_layout.run_dir / observation.left.eye_crop_path).is_file()
+
+
 def test_crop_transform_maps_crop_coordinates_back_to_image_px(
     tmp_path: Path,
 ) -> None:

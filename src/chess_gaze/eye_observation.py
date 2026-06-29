@@ -193,6 +193,17 @@ def _observe_eye(
         frame_id=frame_id,
         save_crop_images=save_crop_images,
     )
+    if crop_record is None:
+        return _missing_eye(
+            reason_missing=eye_missing_code,
+            eye_landmarks_image_px=eye_px,
+            eye_landmarks_image_norm=eye_norm,
+            eye_open_metric=eye_open_metric,
+            bounding_box_image_px=eye_bbox_px,
+            bounding_box_image_norm=eye_bbox_norm,
+            occlusion="severe",
+        )
+
     iris_pairs = _landmarks_at_indices(face, iris_indices)
     iris_px = tuple(pair.image_px for pair in iris_pairs)
     iris_norm = tuple(pair.image_norm for pair in iris_pairs)
@@ -366,13 +377,16 @@ def _eye_crop_record(
     run_layout: RunLayout,
     frame_id: str,
     save_crop_images: bool,
-) -> _CropRecord:
+) -> _CropRecord | None:
     frame_height, frame_width, _channels = rgb_frame.shape
     crop_bounds = _crop_bounds(
         bbox,
         image_width_px=int(frame_width),
         image_height_px=int(frame_height),
     )
+    if crop_bounds is None:
+        return None
+
     x_min, y_min, x_max, y_max = crop_bounds
     relative_path: Path | None = None
     crop_sha256: str | None = None
@@ -419,22 +433,24 @@ def _crop_bounds(
     *,
     image_width_px: int,
     image_height_px: int,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int] | None:
     width = bbox.x_max - bbox.x_min
     height = bbox.y_max - bbox.y_min
     padding_x = width * EYE_CROP_PADDING_FRACTION
     padding_y = height * EYE_CROP_PADDING_FRACTION
 
-    x_min = max(0, floor(bbox.x_min - padding_x))
-    y_min = max(0, floor(bbox.y_min - padding_y))
-    x_max = min(image_width_px, ceil(bbox.x_max + padding_x))
-    y_max = min(image_height_px, ceil(bbox.y_max + padding_y))
-    if x_max <= x_min:
-        x_max = min(image_width_px, x_min + 1)
-    if y_max <= y_min:
-        y_max = min(image_height_px, y_min + 1)
+    x_min = _clamp_int(floor(bbox.x_min - padding_x), 0, image_width_px)
+    y_min = _clamp_int(floor(bbox.y_min - padding_y), 0, image_height_px)
+    x_max = _clamp_int(ceil(bbox.x_max + padding_x), 0, image_width_px)
+    y_max = _clamp_int(ceil(bbox.y_max + padding_y), 0, image_height_px)
+    if x_max <= x_min or y_max <= y_min:
+        return None
 
     return x_min, y_min, x_max, y_max
+
+
+def _clamp_int(value: int, lower: int, upper: int) -> int:
+    return min(max(value, lower), upper)
 
 
 def _center_point(

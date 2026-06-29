@@ -18,6 +18,8 @@ MODELS_ROOT = REPO_ROOT / "models"
 MEDIAPIPE_MODEL_ID = "mediapipe-face-landmarker"
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
 NAKAMURA_SHORT_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
+NEPO_VIDEO = Path("artifacts/input/nepo_2.mp4")
+NEPO_EMPTY_CROP_WINDOW_FRAME_INDICES = tuple(range(25921, 25928))
 SAMPLED_FRAME_INDICES = {
     NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
@@ -168,6 +170,97 @@ def test_eye_observation_matches_real_video_evidence(tmp_path: Path) -> None:
     print(f"eye_present_counts={eye_present_counts}")
     print(f"iris_present_counts={iris_present_counts}")
     print(f"representative_eye_failures={representative_failures}")
+
+
+def test_nepo_edge_window_marks_off_frame_eye_missing_without_empty_crop(
+    tmp_path: Path,
+) -> None:
+    absolute_video_path = REPO_ROOT / NEPO_VIDEO
+    if not absolute_video_path.is_file():
+        pytest.skip(
+            f"missing optional edge-case real-data video: {absolute_video_path}"
+        )
+
+    model_path = _mediapipe_model_path()
+    observer = MediaPipeFaceObserver(
+        model_asset_path=model_path,
+        calibration=default_calibration(),
+    )
+    missing_left_by_mode: dict[bool, list[int]] = {}
+    try:
+        sampled_frames = _sample_frames(
+            absolute_video_path,
+            NEPO_EMPTY_CROP_WINDOW_FRAME_INDICES,
+        )
+        for save_crop_images in (False, True):
+            run_layout = create_run_layout(
+                input_path=absolute_video_path,
+                output_root=tmp_path / f"save-crops-{save_crop_images}",
+                clock=lambda: datetime(2026, 6, 29, 12, 0, 0, tzinfo=UTC),
+                run_suffix="abcdef12",
+            )
+            missing_left_indices: list[int] = []
+            for frame in sampled_frames:
+                face_observation = observer.observe(frame.rgb, frame_id=frame.frame_id)
+                assert face_observation.selection.present, (
+                    f"{NEPO_VIDEO} frame {frame.frame_id} lost the selected face "
+                    "needed to guard the edge-window regression"
+                )
+                selected_face = _selected_face(face_observation.selection.candidates)
+
+                eye_observation = observe_eyes(
+                    selected_face,
+                    frame.rgb,
+                    run_layout,
+                    frame_id=frame.frame_id,
+                    save_crop_images=save_crop_images,
+                )
+
+                if frame.frame_index in {25921, 25922, 25923}:
+                    assert eye_observation.left.present is True
+                    assert eye_observation.left.crop_bbox_image_px is not None
+                    assert (
+                        eye_observation.left.crop_bbox_image_px.x_max
+                        > eye_observation.left.crop_bbox_image_px.x_min
+                    )
+                    continue
+
+                assert eye_observation.left.present is False
+                assert eye_observation.left.reason_missing is not None
+                assert eye_observation.left.reason_missing.value == "LEFT_EYE_NOT_FOUND"
+                assert eye_observation.left.crop_bbox_image_px is None
+                assert eye_observation.left.eye_crop_path is None
+                assert eye_observation.left.eye_crop_sha256 is None
+                missing_left_indices.append(frame.frame_index)
+                if save_crop_images:
+                    assert not (
+                        run_layout.left_eye_crops_dir / f"{frame.frame_id}.png"
+                    ).exists()
+
+            missing_left_by_mode[save_crop_images] = missing_left_indices
+            if not save_crop_images:
+                assert not run_layout.crops_dir.exists()
+
+        assert missing_left_by_mode == {
+            False: [25924, 25925, 25926, 25927],
+            True: [25924, 25925, 25926, 25927],
+        }
+    finally:
+        observer.close()
+
+
+def _mediapipe_model_path() -> Path:
+    registry = load_model_registry(MODEL_REGISTRY_PATH)
+    model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
+    model_path = MODELS_ROOT / model_entry.expected_relative_path
+    if not model_path.is_file():
+        pytest.skip(
+            "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
+            f"{model_path}"
+        )
+    assert model_entry.checksum_sha256 is not None
+    assert sha256_file(model_path) == model_entry.checksum_sha256
+    return model_path
 
 
 def _selected_face(candidates: tuple[FaceCandidate, ...]) -> FaceCandidate:

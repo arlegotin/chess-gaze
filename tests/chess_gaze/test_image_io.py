@@ -32,6 +32,18 @@ def test_save_rgb_png_returns_sha256(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.tmp"))
 
 
+@pytest.mark.parametrize("shape", [(0, 3, 3), (3, 0, 3)])
+def test_save_rgb_png_rejects_empty_image_dimensions(
+    tmp_path: Path, shape: tuple[int, int, int]
+) -> None:
+    image = np.zeros(shape, dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="image must have positive height and width"):
+        save_rgb_png(tmp_path / "frame.png", image)
+
+    assert not (tmp_path / "frame.png").exists()
+
+
 def test_save_bgr_jpeg_returns_sha256_of_written_bytes(tmp_path: Path) -> None:
     image = np.zeros((2, 2, 3), dtype=np.uint8)
     image[0, 0] = np.array([255, 0, 0], dtype=np.uint8)
@@ -56,6 +68,18 @@ def test_save_bgr_jpeg_converts_rgb_input_before_encoding(tmp_path: Path) -> Non
     assert pixel[0] >= 200
     assert pixel[1] <= 40
     assert pixel[2] <= 40
+
+
+@pytest.mark.parametrize("shape", [(0, 3, 3), (3, 0, 3)])
+def test_save_bgr_jpeg_rejects_empty_image_dimensions(
+    tmp_path: Path, shape: tuple[int, int, int]
+) -> None:
+    image = np.zeros(shape, dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="image must have positive height and width"):
+        save_bgr_jpeg(tmp_path / "frame.jpg", image, quality=90)
+
+    assert not (tmp_path / "frame.jpg").exists()
 
 
 def test_atomic_write_bytes_removes_temp_file_when_flush_fails(
