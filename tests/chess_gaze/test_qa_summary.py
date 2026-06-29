@@ -11,6 +11,7 @@ from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
+    CropImageRetentionPolicy,
     FrameImageRetentionPolicy,
     FrameRecord,
     InferenceRuntimeRecord,
@@ -169,6 +170,8 @@ def _write_fixture_run(
     *,
     save_frame_images: bool = True,
     write_frame_images: bool = True,
+    save_crop_images: bool = True,
+    write_crop_images: bool = True,
 ) -> RunLayout:
     layout = _make_layout(tmp_path)
     video_path = tmp_path / "source.mp4"
@@ -188,6 +191,9 @@ def _write_fixture_run(
         inference=_external_observer_inference_record(),
         frame_image_retention=FrameImageRetentionPolicy(
             save_frame_images=save_frame_images
+        ),
+        crop_image_retention=CropImageRetentionPolicy(
+            save_crop_images=save_crop_images
         ),
     )
     (layout.run_dir / "run_manifest.json").write_text(
@@ -212,9 +218,10 @@ def _write_fixture_run(
             (layout.processed_frames_dir / f"{record.frame_id}.jpg").write_bytes(
                 b"processed" + bytes([frame_index])
             )
-    (layout.face_crops_dir / "f000000000.png").write_bytes(b"face-crop")
-    (layout.left_eye_crops_dir / "f000000000.png").write_bytes(b"left-crop")
-    (layout.right_eye_crops_dir / "f000000000.png").write_bytes(b"right-crop")
+    if write_crop_images:
+        (layout.face_crops_dir / "f000000000.png").write_bytes(b"face-crop")
+        (layout.left_eye_crops_dir / "f000000000.png").write_bytes(b"left-crop")
+        (layout.right_eye_crops_dir / "f000000000.png").write_bytes(b"right-crop")
 
     (layout.records_dir / "frames.jsonl").write_text(
         "".join(record.model_dump_json() + "\n" for record in frame_records),
@@ -636,6 +643,49 @@ def test_validate_run_artifacts_rejects_stray_frame_images_when_policy_disables_
     assert result.final_status == "failed"
     assert result.validation_errors == [
         "raw frame count does not match frame image retention policy: 1 != 0"
+    ]
+
+
+def test_validate_run_artifacts_accepts_unretained_crop_images_when_disabled(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(
+        tmp_path,
+        frame_count=3,
+        save_frame_images=False,
+        write_frame_images=False,
+        save_crop_images=False,
+        write_crop_images=False,
+    )
+
+    result = validate_run_artifacts(layout)
+    summary = build_qa_summary(layout)
+
+    assert result.counts.crop_files == 0
+    assert result.counts_match is True
+    assert summary.byte_counts.crops_bytes == 0
+    assert summary.final_status == "complete"
+
+
+def test_validate_run_artifacts_rejects_stray_crop_images_when_policy_disables_saving(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(
+        tmp_path,
+        frame_count=2,
+        save_frame_images=False,
+        write_frame_images=False,
+        save_crop_images=False,
+        write_crop_images=False,
+    )
+    (layout.left_eye_crops_dir / "f000000000.png").write_bytes(b"stray")
+
+    result = validate_run_artifacts(layout)
+
+    assert result.counts_match is False
+    assert result.final_status == "failed"
+    assert result.validation_errors == [
+        "crop file count does not match crop image retention policy: 1 != 0"
     ]
 
 

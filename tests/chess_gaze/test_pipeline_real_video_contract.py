@@ -13,6 +13,7 @@ from chess_gaze.pipeline import (
     ObserverFrame,
     analyze_video,
 )
+from chess_gaze.qa_summary import QASummary
 
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
 NAKAMURA_SHORT_FRAME_COUNT = 180
@@ -153,9 +154,14 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     records = _records(result.frames_jsonl_path)
     raw_count = len(list(result.layout.raw_frames_dir.glob("*.png")))
     processed_count = len(list(result.layout.processed_frames_dir.glob("*.jpg")))
+    crop_count = len(list(result.layout.crops_dir.rglob("*.png")))
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
     print(
         f"{video_path}: decoded={result.decoded_frame_count} "
-        f"raw={raw_count} processed={processed_count} records={len(records)}"
+        f"raw={raw_count} processed={processed_count} crops={crop_count} "
+        f"records={len(records)}"
     )
 
     assert result.decoded_frame_count == expected_count, (
@@ -164,6 +170,9 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     )
     assert raw_count == 0
     assert processed_count == 0
+    assert crop_count == 0
+    assert summary.counts.crop_files == 0
+    assert summary.byte_counts.crops_bytes == 0
     assert len(records) == expected_count
     assert records[0].frame_id == "f000000000"
     assert records[-1].frame_index == expected_count - 1

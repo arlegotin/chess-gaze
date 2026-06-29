@@ -15,6 +15,7 @@ from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
     CalibrationRecord,
+    CropImageRetentionPolicy,
     FrameErrorRecord,
     FrameImageRetentionPolicy,
     FrameRecord,
@@ -333,6 +334,7 @@ def _validate_loaded_run_artifacts(
         loaded.frame_records,
         loaded.scene_frame_records,
         loaded.run_manifest.frame_image_retention,
+        loaded.run_manifest.crop_image_retention,
     )
     validation_errors = loaded.schema_validation_errors + count_validation_errors
     final_status: Literal["complete", "failed"] = (
@@ -454,6 +456,7 @@ def _count_validation_errors(
     frame_records: list[FrameRecord],
     scene_frame_records: list[SceneFrameRecord],
     frame_image_retention: FrameImageRetentionPolicy,
+    crop_image_retention: CropImageRetentionPolicy,
 ) -> list[str]:
     errors: list[str] = []
     if counts.frame_records != counts.decoded_frames:
@@ -472,6 +475,11 @@ def _count_validation_errors(
             save_frame_images=frame_image_retention.save_frame_images,
         )
     )
+    if not crop_image_retention.save_crop_images and counts.crop_files != 0:
+        errors.append(
+            "crop file count does not match crop image retention policy: "
+            f"{counts.crop_files} != 0"
+        )
     if counts.scene_frame_records != counts.decoded_frames:
         errors.append(
             "scene frame record count does not match decoded frame count: "
