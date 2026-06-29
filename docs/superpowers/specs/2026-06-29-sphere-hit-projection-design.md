@@ -103,11 +103,15 @@ as the gaze landing surface:
 {
   "center_scene_m": {"space": "scene_pseudo_m", "x": 0.0, "y": 0.0, "z": 0.0},
   "radius_m": 0.7,
-  "radius_source": "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
+  "radius_source": "DEFAULT_GAZE_SPHERE_RADIUS_M",
   "center_source": "robust_scene_center",
   "surface_frame": "gaze_sphere_pseudo_m"
 }
 ```
+
+Because old run compatibility is explicitly out of scope, persisted assumptions
+should use the sphere-specific `DEFAULT_GAZE_SPHERE_RADIUS_M` name rather than
+the previous monitor-distance name.
 
 The manifest should still preserve the robust scene center in camera
 coordinates, scene axes, camera model, assumptions, and robust estimator
@@ -399,8 +403,8 @@ Required browser verification:
 
 1. New completed runs project gaze hits onto the sphere, not onto a plane.
 2. The sphere center is the robust scene center in scene coordinates.
-3. The default sphere radius is the existing plausible screen distance
-   assumption, `0.700m`.
+3. The default sphere radius is the sphere-specific plausible screen-distance
+   assumption, `DEFAULT_GAZE_SPHERE_RADIUS_M = 0.700m`.
 4. The viewer exposes a live sphere radius slider over a plausible range unless
    an implementation blocker is recorded.
 5. `records/scene_frames.jsonl` contains `sphere_hit` and no
