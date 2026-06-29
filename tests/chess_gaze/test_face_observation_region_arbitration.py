@@ -62,6 +62,7 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -88,6 +89,7 @@ def test_mediapipe_observer_prefers_compact_left_half_over_overexpanded_full_fra
         (540, 960, 3),
         (486, 960, 3),
         (480, 720, 3),
+        (450, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
@@ -140,6 +142,7 @@ def test_mediapipe_observer_rejects_larger_focused_overexpanded_candidate(
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
+            empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
@@ -221,6 +224,7 @@ def test_mediapipe_observer_rejects_top_shift_candidate_without_compact_geometry
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -284,6 +288,7 @@ def test_mediapipe_observer_rejects_large_full_frame_refinement_without_compact_
                 ],
                 facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
             ),
+            empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
@@ -377,6 +382,7 @@ def test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_re
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -403,6 +409,7 @@ def test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_re
         (540, 960, 3),
         (486, 960, 3),
         (480, 720, 3),
+        (450, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
@@ -481,6 +488,7 @@ def test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger
             empty_detection_result(),
             empty_detection_result(),
             empty_detection_result(),
+            empty_detection_result(),
         ],
     )
 
@@ -507,6 +515,7 @@ def test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger
         (540, 960, 3),
         (486, 960, 3),
         (480, 720, 3),
+        (450, 720, 3),
         (486, 960, 3),
         (525, 960, 3),
     ]
@@ -524,3 +533,128 @@ def test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger
     assert candidate.bounding_box_image_px.y_min == pytest.approx(200.0)
     assert candidate.bounding_box_image_px.x_max == pytest.approx(450.0)
     assert candidate.bounding_box_image_px.y_max == pytest.approx(262.0)
+
+
+def test_mediapipe_observer_prefers_inner_consensus_over_broad_upper_false_positive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"imports": [], "detect_shapes": []}
+    fake_mediapipe = build_sequence_fake_mediapipe(
+        captured,
+        results=[
+            empty_detection_result(),
+            empty_detection_result(),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.20, z=0.0),
+                        SimpleNamespace(x=0.875, y=0.4592592593, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="broad_upper_false_positive", score=0.40
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64)],
+            ),
+            empty_detection_result(),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.2222222222, z=0.0),
+                        SimpleNamespace(x=0.875, y=0.5102880658, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="broad_upper_false_positive", score=0.40
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 2.0],
+            ),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.50625, z=0.0),
+                        SimpleNamespace(x=0.95, y=0.7875, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="paired_inner_consensus_real_face",
+                            score=0.80,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 3.0],
+            ),
+            fake_detection_result(
+                face_landmarks=[
+                    [
+                        SimpleNamespace(x=0.75, y=0.54, z=0.0),
+                        SimpleNamespace(x=0.95, y=0.84, z=0.0),
+                    ]
+                ],
+                face_blendshapes=[
+                    [
+                        SimpleNamespace(
+                            category_name="paired_inner_consensus_real_face",
+                            score=0.80,
+                        )
+                    ]
+                ],
+                facial_transformation_matrixes=[np.eye(4, dtype=np.float64) * 4.0],
+            ),
+            empty_detection_result(),
+            empty_detection_result(),
+        ],
+    )
+
+    def fake_import() -> object:
+        captured["imports"].append("mediapipe")
+        return fake_mediapipe
+
+    monkeypatch.setattr("chess_gaze.face_observation._import_mediapipe", fake_import)
+    observer = MediaPipeFaceObserver(
+        model_asset_path=Path("models/mediapipe/face_landmarker.task"),
+        calibration=default_calibration(),
+    )
+
+    observation = observer.observe(
+        np.zeros((1080, 1920, 3), dtype=np.uint8),
+        frame_id="f000002042",
+    )
+
+    assert observation.selection.present is True
+    assert observation.selection.primary_candidate_id is not None
+    candidate = next(
+        candidate
+        for candidate in observation.selection.candidates
+        if candidate.candidate_id == observation.selection.primary_candidate_id
+    )
+    assert candidate.blendshapes[0].category_name == (
+        "paired_inner_consensus_real_face"
+    )
+    assert candidate.bounding_box_image_px.x_min == pytest.approx(540.0)
+    assert candidate.bounding_box_image_px.y_min == pytest.approx(243.0)
+    assert candidate.bounding_box_image_px.x_max == pytest.approx(684.0)
+    assert candidate.bounding_box_image_px.y_max == pytest.approx(378.0)
+    assert captured["detect_shapes"] == [
+        (1080, 1920, 3),
+        (1080, 960, 3),
+        (1080, 960, 3),
+        (540, 960, 3),
+        (540, 960, 3),
+        (486, 960, 3),
+        (480, 720, 3),
+        (450, 720, 3),
+        (486, 960, 3),
+        (525, 960, 3),
+    ]

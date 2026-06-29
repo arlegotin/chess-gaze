@@ -140,6 +140,70 @@ git add src/chess_gaze/face_observation.py tests/chess_gaze/test_face_observatio
 git commit -m "fix: add left upper inner face recovery region"
 ```
 
+### Task 3B: Lock Inner-Region Consensus Regression
+
+**Context:** Real Carlsen probing after Task 3 showed that `left_upper_inner`
+recovers the visible person face on previously missing frames, but some early
+frames still select the background/plaque because two broader upper-left crops
+agree on the distractor while only one inner crop sees the person face. The
+durable fix must give the inner player-camera crop its own deterministic
+cross-region evidence without weakening the consensus precedence rule globally.
+
+**Files:**
+- Modify: `src/chess_gaze/face_observation.py`
+- Modify: `tests/chess_gaze/test_face_observation.py`
+- Modify: `tests/chess_gaze/test_face_observation_region_arbitration.py`
+- Modify: `.superpowers/sdd/task-3-report.md`
+
+**Interfaces:**
+- Consumes: deterministic detection region list from `_detection_regions(...)`.
+- Produces: finite paired upper-left inner crops that allow the visible person
+  face to form overlap consensus inside the player-camera pane without
+  frame-specific coordinates.
+
+- [x] **Step 1: Write failing unit regression**
+
+Add a fake MediaPipe sequence where full frame misses, broad `left_top` and
+`left_upper_band` agree on a larger false positive, `left_upper_inner` detects
+the real face, and a second nearby upper-left inner crop also detects the same
+real face. The expected selected candidate is the inner consensus face, not the
+broad-crop false positive.
+
+- [x] **Step 2: Run RED**
+
+Run:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_prefers_inner_consensus_over_broad_upper_false_positive -q
+```
+
+Expected before implementation: FAIL because the second inner consensus crop
+does not exist, so the broad upper-left false-positive cluster still wins.
+
+- [x] **Step 3: Add paired deterministic inner crop**
+
+Add a second upper-left inner crop using frame fractions rather than video-
+specific coordinates. Keep all existing regions and preserve crop-to-full-frame
+coordinate conversion.
+
+- [x] **Step 4: Run focused tests and real probe**
+
+Run:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py -q
+```
+
+Then rerun the bounded Carlsen probe on the reported frames and record whether
+all selected boxes are on the visible person face.
+
+- [x] **Step 5: Commit inner consensus fix**
+
+```sh
+git add src/chess_gaze/face_observation.py tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py .superpowers/sdd/task-3-report.md docs/superpowers/plans/2026-06-29-carlsen-face-arbitration-repair.md
+git commit -m "fix: add paired inner face consensus region"
+```
+
 ### Task 4: Real-Video Verification And Closeout
 
 **Files:**
