@@ -1,5 +1,10 @@
 # Nakamura Short Test Inputs Implementation Plan
 
+> Fixture note, 2026-06-29: `artifacts/input/nakamura_short.mp4` was replaced
+> after this plan was completed. Current fixture expectations and digest are in
+> [2026-06-29-nakamura-short-video-refresh.md](../closeouts/2026-06-29-nakamura-short-video-refresh.md).
+> Historical values below describe the prior clip.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace every test that consumes a real video from `artifacts/input/` with `artifacts/input/nakamura_short.mp4`, preserving useful real-video coverage while removing dependencies on removed or slower clips.
