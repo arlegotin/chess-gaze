@@ -73,3 +73,56 @@ Result:
 
 - Only the required focused suites were run, not the entire repository test suite.
 - `src/chess_gaze/face_observation.py` is already over the source-layout review threshold, but this task's write scope did not allow a split or documentation change.
+
+## Review Fix: Consensus Fallback Precedence
+
+Reviewer issue: the initial fix used cross-region overlap only as a soft multiplier. Because all candidates remained eligible whenever any consensus existed, a stronger single-region false positive could still beat a consensus-backed candidate.
+
+Fix: added a focused regression for that case and changed `_select_fallback_face()` so consensus is an eligibility boundary. When any fallback candidate has `max_iou >= REGION_CONSENSUS_MIN_IOU`, only candidates meeting that threshold are eligible. When no consensus evidence exists, fallback remains primary-candidate-only as before.
+
+### RED Evidence
+
+Command:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger_single_region_candidate -q
+```
+
+Result before the precedence fix:
+
+```text
+F                                                                        [100%]
+FAILED tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger_single_region_candidate
+AssertionError: assert 'stronger_single_region_false_positive' == 'cross_region_supported_small_face'
+1 failed in 0.19s
+```
+
+### GREEN Evidence
+
+Command:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_requires_consensus_fallback_precedence_over_stronger_single_region_candidate -q
+```
+
+Result after the precedence fix:
+
+```text
+.                                                                        [100%]
+1 passed in 0.14s
+```
+
+### Focused Suite Evidence
+
+Command:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py -q
+```
+
+Result:
+
+```text
+..............................                                           [100%]
+30 passed in 0.15s
+```

@@ -565,7 +565,11 @@ def _select_fallback_face(
         for _score, max_iou, _candidate, _selection in scored_fallbacks
     )
     fallback_pool = (
-        scored_fallbacks
+        [
+            item
+            for item in scored_fallbacks
+            if item[1] >= REGION_CONSENSUS_MIN_IOU
+        ]
         if has_consensus_evidence
         else [
             item
