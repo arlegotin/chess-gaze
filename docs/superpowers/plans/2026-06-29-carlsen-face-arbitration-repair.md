@@ -258,7 +258,7 @@ git commit -m "docs: close out carlsen face arbitration repair"
 
 Dispatch a reviewer subagent over the branch diff and fix Critical/Important findings.
 
-- [ ] **Step 2: Run broad gates**
+- [x] **Step 2: Run broad gates**
 
 Run:
 

@@ -10,6 +10,7 @@ This closeout verifies the Carlsen face-arbitration repair already committed in:
 - `d7121b6` `fix: require consensus fallback precedence`
 - `d6a6753` `fix: add left upper inner face recovery region`
 - `23afa61` `fix: add paired inner face consensus region`
+- `ce7305b` `fix: filter large face consensus evidence`
 
 Task 4 added a bounded real-video regression in
 `tests/chess_gaze/test_face_observation_real_video.py`, reran real MediaPipe
@@ -32,7 +33,7 @@ arbitration:
   exposed the visible upper-left player-camera face when the full-frame pass was
   weak or distracted by the nearby plaque/background.
 
-The four committed fixes repaired that durable surface by scoring every valid
+The committed fixes repaired that durable surface by scoring every valid
 focused candidate, preserving consensus as the fallback boundary, and adding the
 `left_upper_inner` and `left_upper_inner_nearby` crops.
 
@@ -259,6 +260,60 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run chess-gaze an
 
 Outcome: exit `0`; run `20260629T140320Z-eefca250` completed.
 
+## Final Review Fix
+
+The final branch review found one remaining Important issue: large full-frame
+refinement used overlap with seam-clipped focused candidates as consensus
+evidence. That could allow a region-edge false positive to refine a larger
+full-frame candidate, even though the normal fallback path rejects those clipped
+candidates.
+
+Commit `ce7305b` changed the large-full-frame refinement score to use only
+valid, non-seam candidates from other deterministic regions and added
+`test_mediapipe_observer_ignores_seam_clipped_consensus_for_large_full_frame_refinement`.
+That keeps the same validity boundary for fallback arbitration and full-frame
+refinement.
+
+## Final Gates
+
+Fresh gates after the final review fix:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run ruff check .
+```
+
+Outcome: `All checks passed!`
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run ruff format --check .
+```
+
+Outcome: `67 files already formatted`
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run mypy
+```
+
+Outcome: `Success: no issues found in 67 source files`
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py -q
+```
+
+Outcome: `33 passed in 0.20s`
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_real_video.py -q
+```
+
+Outcome: `4 passed in 21.32s`
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py tests/chess_gaze/test_face_observation_real_video.py tests/chess_gaze/test_frame_observation.py tests/chess_gaze/test_qa_summary.py -q
+```
+
+Outcome: `58 passed in 22.76s`
+
 ## Remaining Limitations
 
 - Real MediaPipe verification requires host runtime access. The same Carlsen
@@ -275,13 +330,13 @@ Outcome: exit `0`; run `20260629T140320Z-eefca250` completed.
 
 ## Source-Layout Review Note
 
-`src/chess_gaze/face_observation.py` is currently `1207` lines, which is above
+`src/chess_gaze/face_observation.py` is currently `1,203` lines, which is above
 the repository's 800-line source-layout review trigger and below the 1,500-line
 split-plan trigger.
 
-This closeout did not change that file. The current size is still defensible
-because one module owns a cohesive boundary: MediaPipe result normalization,
-crop-region probing, candidate arbitration, and final face-observation assembly.
-Before the next behavior expansion in this module, the project should plan a
-split that preserves that cohesive surface while extracting internal arbitration
-helpers or crop-region policy into named submodules with explicit tests.
+The current size is still defensible because one module owns a cohesive
+boundary: MediaPipe result normalization, crop-region probing, candidate
+arbitration, and final face-observation assembly. Before the next behavior
+expansion in this module, the project should plan a split that preserves that
+cohesive surface while extracting internal arbitration helpers or crop-region
+policy into named submodules with explicit tests.
