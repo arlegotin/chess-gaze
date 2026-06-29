@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from chess_gaze.artifact_runs import RunLayout, frame_id, run_layout_from_dir
 from chess_gaze.frame_records import (
     CalibrationRecord,
+    CropImageRetentionPolicy,
     ErrorRecord,
     FrameErrorRecord,
     FrameImageRetentionPolicy,
@@ -52,6 +53,7 @@ def find_latest_resumable_run(
     calibration: CalibrationRecord,
     inference: InferenceRuntimeRecord,
     frame_image_retention: FrameImageRetentionPolicy,
+    crop_image_retention: CropImageRetentionPolicy,
 ) -> RunLayout | None:
     if not runs_root.exists():
         return None
@@ -73,6 +75,7 @@ def find_latest_resumable_run(
             calibration=calibration,
             inference=inference,
             frame_image_retention=frame_image_retention,
+            crop_image_retention=crop_image_retention,
         ):
             continue
         if _run_is_complete(run_dir):
@@ -127,6 +130,7 @@ def write_initial_run_artifacts(
     calibration: CalibrationRecord,
     inference: InferenceRuntimeRecord,
     frame_image_retention: FrameImageRetentionPolicy,
+    crop_image_retention: CropImageRetentionPolicy,
 ) -> None:
     _write_json(
         layout.run_dir / "run_manifest.json",
@@ -137,6 +141,7 @@ def write_initial_run_artifacts(
             video=video_manifest,
             inference=inference,
             frame_image_retention=frame_image_retention,
+            crop_image_retention=crop_image_retention,
         ).model_dump(mode="json"),
     )
     _write_json(
@@ -251,6 +256,7 @@ def _run_matches(
     calibration: CalibrationRecord,
     inference: InferenceRuntimeRecord,
     frame_image_retention: FrameImageRetentionPolicy,
+    crop_image_retention: CropImageRetentionPolicy,
 ) -> bool:
     try:
         run_manifest = read_run_manifest_artifact_json(
@@ -271,6 +277,7 @@ def _run_matches(
         and persisted_video_manifest == video_manifest
         and run_manifest.inference == inference
         and run_manifest.frame_image_retention == frame_image_retention
+        and run_manifest.crop_image_retention == crop_image_retention
         and persisted_calibration == calibration
     )
 

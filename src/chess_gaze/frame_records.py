@@ -305,6 +305,11 @@ class FrameImageRetentionPolicy(StrictSchemaModel):
     save_frame_images: bool
 
 
+class CropImageRetentionPolicy(StrictSchemaModel):
+    schema_version: Literal["crop-image-retention-v1"] = "crop-image-retention-v1"
+    save_crop_images: bool
+
+
 class RunManifest(StrictSchemaModel):
     run_id: str
     created_at_utc: str
@@ -313,6 +318,9 @@ class RunManifest(StrictSchemaModel):
     inference: InferenceRuntimeRecord
     frame_image_retention: FrameImageRetentionPolicy = Field(
         default_factory=lambda: FrameImageRetentionPolicy(save_frame_images=True)
+    )
+    crop_image_retention: CropImageRetentionPolicy = Field(
+        default_factory=lambda: CropImageRetentionPolicy(save_crop_images=True)
     )
 
 

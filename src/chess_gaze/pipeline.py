@@ -31,6 +31,7 @@ from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import (
     CalibrationRecord,
+    CropImageRetentionPolicy,
     ErrorRecord,
     FrameErrorRecord,
     FrameImageRetentionPolicy,
@@ -128,6 +129,7 @@ class AnalyzeRequest:
     unigaze_device: str | None = None
     unigaze_batch_size: int | None = None
     save_frame_images: bool | None = None
+    save_crop_images: bool | None = None
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
     resume: bool = True
@@ -173,6 +175,7 @@ class _ResolvedRequest:
     processed_frame_image_format: str
     processed_frame_jpeg_quality: int
     save_frame_images: bool
+    save_crop_images: bool
     unigaze_device: str
     unigaze_batch_size: int
 
@@ -202,6 +205,9 @@ def analyze_video(
     frame_image_retention = FrameImageRetentionPolicy(
         save_frame_images=resolved.save_frame_images
     )
+    crop_image_retention = CropImageRetentionPolicy(
+        save_crop_images=resolved.save_crop_images
+    )
     if observers is None:
         resolved_model_assets = _validate_model_assets(
             request.model_registry_path, resolved
@@ -230,6 +236,7 @@ def analyze_video(
             calibration,
             inference,
             frame_image_retention,
+            crop_image_retention,
         )
         if request.resume
         else None
@@ -252,6 +259,7 @@ def analyze_video(
             calibration=calibration,
             inference=inference,
             frame_image_retention=frame_image_retention,
+            crop_image_retention=crop_image_retention,
         )
         analysis_state = new_analysis_state(
             layout,
@@ -496,6 +504,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
             unigaze_device=request.unigaze_device,
             unigaze_batch_size=request.unigaze_batch_size,
             save_frame_images=request.save_frame_images,
+            save_crop_images=request.save_crop_images,
         )
     except ValidationError as exc:
         raise PipelineError(CliErrorCode.USAGE, str(exc)) from exc
@@ -508,6 +517,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         processed_frame_image_format=resolved_config.processed_frame_image_format,
         processed_frame_jpeg_quality=resolved_config.processed_frame_jpeg_quality,
         save_frame_images=resolved_config.save_frame_images,
+        save_crop_images=resolved_config.save_crop_images,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
     )

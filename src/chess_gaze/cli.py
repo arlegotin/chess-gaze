@@ -69,6 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="retain raw decoded PNGs and processed overlay JPEGs",
     )
     analyze.add_argument(
+        "--save-crops",
+        action="store_true",
+        default=None,
+        dest="save_crop_images",
+        help="retain eye crop PNGs under crops/",
+    )
+    analyze.add_argument(
         "--no-resume",
         action="store_false",
         dest="resume",
@@ -121,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
                     unigaze_device=args.unigaze_device,
                     unigaze_batch_size=args.unigaze_batch_size,
                     save_frame_images=args.save_frame_images,
+                    save_crop_images=args.save_crop_images,
                     resume=args.resume,
                     progress_callback=(progress.callback if progress.enabled else None),
                 )

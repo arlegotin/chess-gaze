@@ -22,6 +22,7 @@ class AnalysisConfig(BaseModel):
     processed_frame_image_format: str = "jpg"
     processed_frame_jpeg_quality: int = 95
     save_frame_images: bool = False
+    save_crop_images: bool = False
     unigaze_device: Literal["cpu", "mps"] = "mps"
     unigaze_batch_size: int = 7
 
@@ -41,6 +42,7 @@ def apply_analysis_overrides(
     unigaze_device: str | None = None,
     unigaze_batch_size: int | None = None,
     save_frame_images: bool | None = None,
+    save_crop_images: bool | None = None,
 ) -> AnalysisConfig:
     payload = config.model_dump(mode="python")
 
@@ -54,6 +56,8 @@ def apply_analysis_overrides(
         payload["unigaze_batch_size"] = unigaze_batch_size
     if save_frame_images is not None:
         payload["save_frame_images"] = save_frame_images
+    if save_crop_images is not None:
+        payload["save_crop_images"] = save_crop_images
 
     return AnalysisConfig.model_validate(payload)
 

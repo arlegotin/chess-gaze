@@ -322,6 +322,10 @@ def test_analyze_video_does_not_retain_raw_or_processed_frame_images_by_default(
         "schema_version": "frame-image-retention-v1",
         "save_frame_images": False,
     }
+    assert manifest["crop_image_retention"] == {
+        "schema_version": "crop-image-retention-v1",
+        "save_crop_images": False,
+    }
     assert result.qa_summary_path.is_file()
     summary = QASummary.model_validate_json(
         result.qa_summary_path.read_text(encoding="utf-8")
@@ -359,6 +363,10 @@ def test_analyze_video_retains_raw_and_processed_frame_images_when_requested(
     assert manifest["frame_image_retention"] == {
         "schema_version": "frame-image-retention-v1",
         "save_frame_images": True,
+    }
+    assert manifest["crop_image_retention"] == {
+        "schema_version": "crop-image-retention-v1",
+        "save_crop_images": False,
     }
     summary = QASummary.model_validate_json(
         result.qa_summary_path.read_text(encoding="utf-8")
