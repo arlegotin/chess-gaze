@@ -20,6 +20,15 @@ package instead of accidentally importing Python files from the repository root.
   - `face_observation.py`, `eye_observation.py`, `head_pose.py`,
     `gaze_observation.py`, and `frame_observation.py` own per-frame evidence
     extraction.
+
+Source-layout review, 2026-06-29: `face_observation.py` is intentionally deep
+at 1,203 lines, still below the 1,500-line split-plan trigger. It owns one
+cohesive MediaPipe face-observation boundary: region definition, crop-to-full-
+frame coordinate remapping, candidate arbitration, and observer result assembly
+all change together and protect the same per-frame selection invariants. Before
+further behavior expansion, the first split candidate is the arbitration and
+crop-region policy helpers into separate named modules with explicit interface
+tests.
   - `unigaze_runtime.py` owns UniGaze device/batch runtime validation, MPS
     preflight, synchronization, and inference metadata assembly.
   - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record,

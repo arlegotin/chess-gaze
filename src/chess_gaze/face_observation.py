@@ -679,7 +679,7 @@ def _large_full_frame_refinement_score(
     if not _candidate_area_is_plausible(fallback):
         return None
     if (
-        _max_iou_with_other_region_candidates(fallback, region, region_selections)
+        _max_iou_with_valid_other_region_candidates(fallback, region, region_selections)
         < REGION_CONSENSUS_MIN_IOU
     ):
         return None

@@ -33,11 +33,11 @@
 - Consumes: `MediaPipeFaceObserver.observe(rgb_frame, frame_id=...)`.
 - Produces: selected `FaceCandidate` with full-image pixel coordinates.
 
-- [ ] **Step 1: Write failing unit regression**
+- [x] **Step 1: Write failing unit regression**
 
 Add a fake MediaPipe sequence where full frame misses, a broad left-half region detects the real face, and a focused upper-band region returns both the real face and a larger false positive. The expected selected candidate is the cross-region-supported real face, not the larger single-region false positive.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -47,7 +47,7 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected before implementation: FAIL because current fallback selection returns the upper-band selection whose primary candidate is the larger false positive.
 
-- [ ] **Step 3: Commit failing regression**
+- [x] **Step 3: Commit failing regression**
 
 ```sh
 git add tests/chess_gaze/test_face_observation_region_arbitration.py docs/superpowers/plans/2026-06-29-carlsen-face-arbitration-repair.md
@@ -64,11 +64,11 @@ git commit -m "test: reproduce carlsen fallback face jumps"
 - Consumes: all non-full-frame `FaceSelection.candidates`.
 - Produces: a fallback `FaceSelection` whose primary candidate can be any valid non-seam candidate, not only a region's area-selected primary.
 
-- [ ] **Step 1: Implement minimal fix**
+- [x] **Step 1: Implement minimal fix**
 
 Update `_select_fallback_face()` so it scores every valid, non-seam focused-region candidate. Add an overlap-consensus multiplier using matching candidates from other deterministic regions. Preserve existing single-region fallback behavior when no overlap evidence exists.
 
-- [ ] **Step 2: Run GREEN**
+- [x] **Step 2: Run GREEN**
 
 Run:
 
@@ -78,7 +78,7 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected after implementation: PASS.
 
-- [ ] **Step 3: Run focused arbitration suite**
+- [x] **Step 3: Run focused arbitration suite**
 
 Run:
 
@@ -88,7 +88,7 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected: all tests pass.
 
-- [ ] **Step 4: Commit arbitration fix**
+- [x] **Step 4: Commit arbitration fix**
 
 ```sh
 git add src/chess_gaze/face_observation.py tests/chess_gaze/test_face_observation_region_arbitration.py
@@ -105,11 +105,11 @@ git commit -m "fix: prefer consensus face candidates"
 - Consumes: deterministic detection region list from `_detection_regions(...)`.
 - Produces: finite focused regions that include the upper-left player-camera pane without assuming a specific video or frame ID.
 
-- [ ] **Step 1: Write failing unit regression**
+- [x] **Step 1: Write failing unit regression**
 
 Add a fake MediaPipe sequence where full frame, left half, left top, and left upper band miss, but a narrower upper-left inner region detects a visible face. The expected selected candidate is that recovered face in full-frame coordinates.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -119,11 +119,11 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected before implementation: FAIL because the region list has no left upper-inner crop.
 
-- [ ] **Step 3: Add deterministic region**
+- [x] **Step 3: Add deterministic region**
 
 Add a left upper-inner focused crop to `_detection_regions()`, using frame fractions rather than video-specific coordinates. Keep the existing full-frame, half-frame, top, upper-band, and right-upper-middle regions.
 
-- [ ] **Step 4: Run GREEN**
+- [x] **Step 4: Run GREEN**
 
 Run:
 
@@ -133,7 +133,7 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected after implementation: PASS.
 
-- [ ] **Step 5: Commit region fix**
+- [x] **Step 5: Commit region fix**
 
 ```sh
 git add src/chess_gaze/face_observation.py tests/chess_gaze/test_face_observation.py
@@ -214,15 +214,15 @@ git commit -m "fix: add paired inner face consensus region"
 - Consumes: `artifacts/input/carlsen_1.mp4`, `artifacts/input/nakamura_short.mp4`, local model assets under `models/`.
 - Produces: fresh verification evidence for reported frames and Nakamura short.
 
-- [ ] **Step 1: Add bounded real-video regression**
+- [x] **Step 1: Add bounded real-video regression**
 
 Add a real-video test that samples the reported Carlsen frames and adjacent controls, asserts visible-face frames select the person face region rather than the plaque/background region, and asserts the previously missing visible frames recover a face.
 
-- [ ] **Step 2: Run RED/GREEN evidence as applicable**
+- [x] **Step 2: Run RED/GREEN evidence as applicable**
 
 Run the new test before and after the production fix if it was not added before implementation. If the test is added after the minimal unit fix because the local MediaPipe sandbox was blocked, record that exception in the closeout.
 
-- [ ] **Step 3: Run real Nakamura short verification**
+- [x] **Step 3: Run real Nakamura short verification**
 
 Run:
 
@@ -232,11 +232,11 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected: both pass with current `NAKAMURA_SHORT_EXPECTED_FACE_BOXES` or a justified fixture update if the source video checksum changed.
 
-- [ ] **Step 4: Regenerate and inspect artifacts**
+- [x] **Step 4: Regenerate and inspect artifacts**
 
 Run `chess-gaze analyze artifacts/input/nakamura_short.mp4` and a bounded Carlsen verification path. If full `carlsen_1.mp4` regeneration is too expensive for this turn, run direct observer probes on all reported frames and create contact sheets from generated/available processed frames. Record the exact command and reason.
 
-- [ ] **Step 5: Write closeout and commit**
+- [x] **Step 5: Write closeout and commit**
 
 Record root cause, durable surface changed, regression coverage, real-video evidence, third-party docs checked, commands run, and remaining limitations.
 
@@ -254,7 +254,7 @@ git commit -m "docs: close out carlsen face arbitration repair"
 - Consumes: committed task diffs.
 - Produces: review evidence and final gate output.
 
-- [ ] **Step 1: Request code review**
+- [x] **Step 1: Request code review**
 
 Dispatch a reviewer subagent over the branch diff and fix Critical/Important findings.
 
@@ -271,6 +271,6 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Expected: all pass, or exact failures are recorded in the closeout.
 
-- [ ] **Step 3: Commit final fixes if needed**
+- [x] **Step 3: Commit final fixes if needed**
 
 Commit any review or gate fixes with a narrow subject line.
