@@ -103,7 +103,6 @@ const state = {
     hitAreaPositionAttribute: null,
     hitAreaRadiusScale: null,
     hitAreaSphereRadius: null,
-    hitAreaVisiblePrefixTriangleCounts: [0],
   },
   renderRequested: false,
   animationFrameRequested: false,
@@ -433,12 +432,25 @@ function intersectRayWithSphere(origin, direction, radius, center = sphereCenter
 }
 
 function sphereHitForFrame(frame) {
-  const persisted = finiteVector(frame?.sphere_hit?.point_scene_m);
+  if (!frame?.sphere_hit?.valid) {
+    return {
+      valid: false,
+      point: null,
+      reason: frame?.sphere_hit?.reason_invalid || "invalid sphere hit",
+    };
+  }
   const radius = sphereRadiusMeters();
   const origin = finiteVector(frame?.unigaze_ray?.origin_scene_m || frame?.unigaze_ray?.scene_m);
   const direction = rayDirectionScene(frame);
   const projected = intersectRayWithSphere(origin, direction, radius);
-  return projected || persisted;
+  if (!projected) {
+    return {
+      valid: false,
+      point: null,
+      reason: "no sphere intersection at selected radius",
+    };
+  }
+  return { valid: true, point: projected, reason: null };
 }
 
 function surfaceOffsetPoint(point) {
@@ -467,8 +479,7 @@ function sphereHitAreaPatchBasis(frame) {
   }
   const origin = finiteVector(frame?.unigaze_ray?.origin_scene_m || frame?.unigaze_ray?.scene_m);
   const direction = rayDirectionScene(frame);
-  const persistedCenter = finiteVector(frame?.sphere_hit?.point_scene_m);
-  if (!origin || !direction || !persistedCenter) {
+  if (!origin || !direction) {
     return null;
   }
 
@@ -483,16 +494,17 @@ function sphereHitAreaPatchBasis(frame) {
     direction: direction.clone().normalize(),
     tangent,
     bitangent,
-    persistedCenter,
   };
 }
 
 function writeSphereHitAreaPatchPositions(positions, offset, basis, radiusScale) {
-  const centerHit =
-    intersectRayWithSphere(basis.origin, basis.direction, sphereRadiusMeters()) ||
-    basis.persistedCenter;
+  const centerHit = intersectRayWithSphere(
+    basis.origin,
+    basis.direction,
+    sphereRadiusMeters(),
+  );
   if (!centerHit) {
-    return 0;
+    return false;
   }
 
   const centerPoint = surfaceOffsetPoint(centerHit);
@@ -500,7 +512,6 @@ function writeSphereHitAreaPatchPositions(positions, offset, basis, radiusScale)
   positions[offset + 1] = centerPoint.y;
   positions[offset + 2] = centerPoint.z;
 
-  let finiteBoundaryCount = 0;
   for (let index = 0; index < HIT_AREA_SEGMENTS; index += 1) {
     const unit = HIT_AREA_UNIT_CIRCLE[index];
     const boundaryDirection = basis.direction
@@ -513,16 +524,16 @@ function writeSphereHitAreaPatchPositions(positions, offset, basis, radiusScale)
       boundaryDirection,
       sphereRadiusMeters(),
     );
+    if (!boundaryHit) {
+      return false;
+    }
     const writeOffset = offset + (index + 1) * 3;
-    const boundaryPoint = boundaryHit ? surfaceOffsetPoint(boundaryHit) : centerPoint;
+    const boundaryPoint = surfaceOffsetPoint(boundaryHit);
     positions[writeOffset] = boundaryPoint.x;
     positions[writeOffset + 1] = boundaryPoint.y;
     positions[writeOffset + 2] = boundaryPoint.z;
-    if (boundaryHit) {
-      finiteBoundaryCount += 1;
-    }
   }
-  return finiteBoundaryCount;
+  return true;
 }
 
 function hitAreaGeometry(frame, angularErrorDegreesValue) {
@@ -533,8 +544,8 @@ function hitAreaGeometry(frame, angularErrorDegreesValue) {
   }
 
   const vertices = new Float32Array(HIT_AREA_VERTEX_COUNT * 3);
-  const finiteBoundaryCount = writeSphereHitAreaPatchPositions(vertices, 0, basis, radiusScale);
-  if (finiteBoundaryCount < 3) {
+  const wrotePatch = writeSphereHitAreaPatchPositions(vertices, 0, basis, radiusScale);
+  if (!wrotePatch) {
     return null;
   }
 
@@ -604,17 +615,14 @@ function buildAccumulatedHitAreaMesh() {
   state.renderCache.hitAreaPositionAttribute = null;
   state.renderCache.hitAreaRadiusScale = null;
   state.renderCache.hitAreaSphereRadius = null;
-  state.renderCache.hitAreaVisiblePrefixTriangleCounts = [0];
 
   const patchBases = [];
-  const patchFrameIndices = [];
   for (const frame of state.sceneData?.frames || []) {
     const patchBasis = sphereHitAreaPatchBasis(frame);
     if (!patchBasis || !Number.isInteger(frame.frame_index)) {
       continue;
     }
-    patchBases.push(patchBasis);
-    patchFrameIndices.push(frame.frame_index);
+    patchBases.push({ frameIndex: frame.frame_index, basis: patchBasis });
   }
 
   const positions = new Float32Array(patchBases.length * HIT_AREA_VERTEX_COUNT * 3);
@@ -644,7 +652,6 @@ function buildAccumulatedHitAreaMesh() {
   groups.accumulated.add(mesh);
 
   state.renderCache.hitAreas = mesh;
-  state.renderCache.hitAreaPatchFrameIndices = patchFrameIndices;
   state.renderCache.hitAreaPatchBases = patchBases;
   state.renderCache.hitAreaPositionAttribute = positionAttribute;
   updateAccumulatedHitAreaPositions();
@@ -665,7 +672,7 @@ function visibleHitAreaTriangleIndexCount() {
     state.renderCache.hitAreaPatchFrameIndices,
     state.frameIndex,
   );
-  return state.renderCache.hitAreaVisiblePrefixTriangleCounts[visiblePatchCount] || 0;
+  return visiblePatchCount * HIT_AREA_INDEX_COUNT;
 }
 
 function updateAccumulatedVisibility() {
@@ -708,23 +715,21 @@ function updateAccumulatedHitPoints() {
 
   const positions = attribute.array;
   let index = 0;
+  const validFrameIndices = [];
   for (const frame of state.renderCache.hitPointRecords) {
-    const hitPoint = frame?.sphere_hit?.valid
-      ? surfaceOffsetPoint(sphereHitForFrame(frame))
-      : null;
-    if (!hitPoint) {
-      positions[index] = 0;
-      positions[index + 1] = 0;
-      positions[index + 2] = 0;
-      index += 3;
+    const hitResult = sphereHitForFrame(frame);
+    const hitPoint = hitResult.valid ? surfaceOffsetPoint(hitResult.point) : null;
+    if (!hitPoint || !Number.isInteger(frame.frame_index)) {
       continue;
     }
     positions[index] = hitPoint.x;
     positions[index + 1] = hitPoint.y;
     positions[index + 2] = hitPoint.z;
+    validFrameIndices.push(frame.frame_index);
     index += 3;
   }
   attribute.needsUpdate = true;
+  state.renderCache.hitPointFrameIndices = validFrameIndices;
   state.renderCache.hitPointRadius = radius;
 }
 
@@ -743,28 +748,29 @@ function updateAccumulatedHitAreaPositions() {
   }
 
   const positions = attribute.array;
-  const prefixTriangleCounts = [0];
-  let visibleTriangleCount = 0;
+  const validFrameIndices = [];
+  let validPatchIndex = 0;
   for (
     let patchIndex = 0;
     patchIndex < state.renderCache.hitAreaPatchBases.length;
     patchIndex += 1
   ) {
-    const finiteBoundaryCount = writeSphereHitAreaPatchPositions(
+    const patch = state.renderCache.hitAreaPatchBases[patchIndex];
+    const wrotePatch = writeSphereHitAreaPatchPositions(
       positions,
-      patchIndex * HIT_AREA_VERTEX_COUNT * 3,
-      state.renderCache.hitAreaPatchBases[patchIndex],
+      validPatchIndex * HIT_AREA_VERTEX_COUNT * 3,
+      patch.basis,
       radiusScale,
     );
-    if (finiteBoundaryCount >= 3) {
-      visibleTriangleCount += HIT_AREA_INDEX_COUNT;
+    if (wrotePatch) {
+      validFrameIndices.push(patch.frameIndex);
+      validPatchIndex += 1;
     }
-    prefixTriangleCounts.push(visibleTriangleCount);
   }
   attribute.needsUpdate = true;
+  state.renderCache.hitAreaPatchFrameIndices = validFrameIndices;
   state.renderCache.hitAreaRadiusScale = radiusScale;
   state.renderCache.hitAreaSphereRadius = radius;
-  state.renderCache.hitAreaVisiblePrefixTriangleCounts = prefixTriangleCounts;
 }
 
 function updateAccumulatedHitAreasForAngularError() {
@@ -869,9 +875,8 @@ function renderCurrentFrame() {
   }
 
   const ray = frame.unigaze_ray;
-  const hitPoint = frame?.sphere_hit?.valid
-    ? surfaceOffsetPoint(sphereHitForFrame(frame))
-    : null;
+  const hitResult = sphereHitForFrame(frame);
+  const hitPoint = hitResult.valid ? surfaceOffsetPoint(hitResult.point) : null;
   if (elements.toggles.ray.checked && ray?.valid) {
     const origin = vector(ray.origin_scene_m || ray.scene_m);
     const direction = rayDirectionScene(frame);
@@ -908,7 +913,7 @@ function updateStatusPanel() {
     validHitsToFrame = visibleHitPointCount();
   }
   const totalValidHits =
-    state.sceneData?.frames?.filter((frame) => frame?.sphere_hit?.valid).length || 0;
+    state.renderCache.hitPointFrameIndices.length || 0;
 
   elements.frameLabel.textContent =
     total > 0 ? `${state.frameIndex + 1} / ${total}` : "0 / 0";
@@ -918,17 +923,16 @@ function updateStatusPanel() {
   elements.rayStatus.textContent = frame?.unigaze_ray?.valid
     ? "valid appearance_gaze ray"
     : frame?.unigaze_ray?.reason_invalid || "invalid";
-  elements.hitStatus.textContent = frame?.sphere_hit?.valid
+  const hitResult = sphereHitForFrame(frame);
+  elements.hitStatus.textContent = hitResult.valid
     ? "valid sphere hit"
-    : frame?.sphere_hit?.reason_invalid || "invalid";
+    : hitResult.reason || "invalid";
   elements.accumulatedStatus.textContent = `${validHitsToFrame} of ${totalValidHits}`;
-  elements.hitCount.textContent = String(
-    state.sceneData?.frames?.filter((frame) => frame?.sphere_hit?.valid).length || 0,
-  );
+  elements.hitCount.textContent = String(totalValidHits);
 
-  const reason = frame?.sphere_hit?.valid
+  const reason = hitResult.valid
     ? "sphere hit is valid"
-    : frame?.sphere_hit?.reason_invalid || "sphere hit is invalid";
+    : hitResult.reason || "sphere hit is invalid";
   setStatus(
     `${MODE_NAMES[state.mode]} mode. Frame ${state.frameIndex + 1} of ${total}: ${reason}.`,
     false,

@@ -35,7 +35,7 @@ together.
 Required real-video verification used:
 
 - input: `artifacts/input/nakamura_short.mp4`
-- fresh run: `artifacts/output/nakamura_short/runs/20260629T205811Z-adc9f4be`
+- fresh run: `artifacts/output/nakamura_short/runs/20260629T212751Z-141e1baa`
 - final status: complete
 - decoded frames: 180
 - scene frame records: 180
@@ -48,10 +48,10 @@ Required real-video verification used:
 
 Visual browser evidence:
 
-- full page screenshot: `/private/tmp/chess-gaze-sphere-viewer-smoke.png`
-- canvas-only screenshot: `/private/tmp/chess-gaze-sphere-canvas-smoke.png`
-- canvas screenshot histogram: `(2100, 3082)` pixels, `2227` unique RGBA
-  colors, `653146` non-background pixels
+- full page screenshot: `/private/tmp/chess-gaze-sphere-viewer-smoke-fixed.png`
+- canvas-only screenshot: `/private/tmp/chess-gaze-sphere-canvas-smoke-fixed.png`
+- canvas screenshot histogram: `(2100, 3082)` pixels, `2698` unique RGBA
+  colors, `1718347` non-background pixels
 - visual inspection confirmed the sphere, hit-area patch, axes, head, eyes, and
   sphere hit marker render in the canvas.
 
@@ -89,8 +89,12 @@ Verified on 2026-06-29:
 - `run_equivalence.py` compares sphere-hit angular deltas instead of monitor
   plane hit coordinates.
 - `viewer_assets/scene_viewer.js` reprojects current and accumulated hits from
-  gaze rays when the sphere radius slider changes, including hit-area patch
-  vertices.
+  gaze rays when the sphere radius slider changes. Selected-radius misses no
+  longer fall back to persisted default-radius hit points.
+- Hit-area patches are all-or-nothing cone/sphere intersections: if the center
+  ray or any boundary ray misses the selected sphere, the patch is omitted.
+  Accumulated hit points and hit-area patches are compacted to the current
+  radius before draw ranges are applied.
 - Active schema leftovers for `SceneMonitorPlaneRecord`,
   `RAY_PARALLEL_TO_MONITOR`, `RAY_COPLANAR_WITH_MONITOR`,
   `MONITOR_PLANE_DEGENERATE`, and old generic ray-intersection invalid reasons
@@ -101,10 +105,12 @@ Verified on 2026-06-29:
 Passed:
 
 - `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_sphere_projection.py tests/chess_gaze/test_scene_records.py tests/chess_gaze/test_scene_geometry.py tests/chess_gaze/test_scene_artifacts.py tests/chess_gaze/test_scene_artifacts_real_video_contract.py tests/chess_gaze/test_scene_viewer.py tests/test_package_metadata.py -q`
-  - 112 passed
+  - 116 passed
 - `UV_CACHE_DIR=.uv-cache uv run pytest -q`
-  - 413 passed
+  - 417 passed
   - 18 existing torch `jit.script` deprecation warnings
+- `node --check src/chess_gaze/viewer_assets/scene_viewer.js`
+  - passed
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
   - all checks passed
 - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
@@ -112,7 +118,7 @@ Passed:
 - `UV_CACHE_DIR=.uv-cache uv run mypy`
   - success, 71 source files
 - `UV_CACHE_DIR=.uv-cache uv run chess-gaze analyze artifacts/input/nakamura_short.mp4 --output-root artifacts/output --no-resume`
-  - produced `artifacts/output/nakamura_short/runs/20260629T205811Z-adc9f4be`
+  - produced `artifacts/output/nakamura_short/runs/20260629T212751Z-141e1baa`
 - Fresh artifact contract script:
   - validated 180 v2 `SceneFrameRecord` records
   - validated v2 scene manifest and v2 viewer data
@@ -126,7 +132,7 @@ Passed:
 
 Browser checks:
 
-- Served viewer URL: `http://127.0.0.1:61582/`
+- Served viewer URL: `http://127.0.0.1:62474/`
 - Expected network requests returned 200:
   - `/`
   - `styles.css`
@@ -138,7 +144,9 @@ Browser checks:
   - frame status: `Accumulated mode. Frame 1 of 180: sphere hit is valid.`
   - hit status: `valid sphere hit`
   - accumulated status: `1 of 180`
+  - hit count: `180`
   - sphere radius value/label: `0.7` / `0.70 m`
+  - after moving the sphere radius slider: value/label `1.2` / `1.20 m`
   - sphere radius min/max/step: `0.35` / `1.20` / `0.01`
   - gaze sphere and hit area toggles checked
 

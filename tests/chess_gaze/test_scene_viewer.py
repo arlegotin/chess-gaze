@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -54,6 +55,173 @@ EXTERNAL_URL_RE = re.compile(r"https?://[^\s\"'<>`]+")
 PROTOCOL_RELATIVE_URL_RE = re.compile(
     r"(?<!:)//[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^\s\"'<>`]*"
 )
+VIEWER_ASSET_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "chess_gaze"
+    / "viewer_assets"
+    / "scene_viewer.js"
+)
+
+
+def _extract_js_function(source: str, name: str) -> str:
+    start = source.index(f"function {name}(")
+    brace_start = source.index("{", start)
+    depth = 0
+    for index in range(brace_start, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"could not extract JS function {name}")
+
+
+def _run_viewer_math_probe(body: str) -> dict[str, object]:
+    source = VIEWER_ASSET_PATH.read_text(encoding="utf-8")
+    functions = "\n\n".join(
+        _extract_js_function(source, name)
+        for name in [
+            "vector",
+            "finiteVector",
+            "normalizedVector",
+            "cameraDirectionToScene",
+            "rayDirectionScene",
+            "sphereCenterScene",
+            "sphereRadiusMeters",
+            "angularErrorDegrees",
+            "unitOrthogonalVector",
+            "intersectRayWithSphere",
+            "sphereHitForFrame",
+            "surfaceOffsetPoint",
+            "hitAreaRadiusScale",
+            "sphereHitAreaPatchBasis",
+            "writeSphereHitAreaPatchPositions",
+            "hitAreaGeometry",
+            "updateAccumulatedHitPoints",
+            "updateAccumulatedHitAreaPositions",
+        ]
+    )
+    script = f"""
+class Vector3 {{
+  constructor(x = 0, y = 0, z = 0) {{
+    this.x = x;
+    this.y = y;
+    this.z = z;
+  }}
+  clone() {{ return new Vector3(this.x, this.y, this.z); }}
+  add(other) {{
+    this.x += other.x;
+    this.y += other.y;
+    this.z += other.z;
+    return this;
+  }}
+  sub(other) {{
+    this.x -= other.x;
+    this.y -= other.y;
+    this.z -= other.z;
+    return this;
+  }}
+  multiplyScalar(value) {{
+    this.x *= value;
+    this.y *= value;
+    this.z *= value;
+    return this;
+  }}
+  dot(other) {{
+    return (this.x * other.x) + (this.y * other.y) + (this.z * other.z);
+  }}
+  lengthSq() {{ return this.dot(this); }}
+  normalize() {{
+    const length = Math.sqrt(this.lengthSq());
+    if (length > 0) {{
+      this.multiplyScalar(1 / length);
+    }}
+    return this;
+  }}
+  crossVectors(a, b) {{
+    this.x = (a.y * b.z) - (a.z * b.y);
+    this.y = (a.z * b.x) - (a.x * b.z);
+    this.z = (a.x * b.y) - (a.y * b.x);
+    return this;
+  }}
+}}
+class BufferAttribute {{
+  constructor(array, itemSize) {{
+    this.array = array;
+    this.itemSize = itemSize;
+    this.needsUpdate = false;
+  }}
+}}
+class BufferGeometry {{
+  constructor() {{
+    this.attributes = {{}};
+    this.index = null;
+  }}
+  setAttribute(name, attribute) {{
+    this.attributes[name] = attribute;
+    return this;
+  }}
+  setIndex(index) {{
+    this.index = index;
+    return this;
+  }}
+}}
+const THREE = {{ Vector3, BufferAttribute, BufferGeometry }};
+const DEFAULT_SPHERE_RADIUS_M = 0.7;
+const SPHERE_MIN_RADIUS_M = 0.35;
+const SPHERE_MAX_RADIUS_M = 1.2;
+const SPHERE_SURFACE_OFFSET_M = 0.002;
+const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8;
+const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0;
+const HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12;
+const HIT_AREA_SEGMENTS = 72;
+const HIT_AREA_VERTEX_COUNT = HIT_AREA_SEGMENTS + 1;
+const HIT_AREA_INDEX_COUNT = HIT_AREA_SEGMENTS * 3;
+const HIT_AREA_VECTOR_EPSILON = 1e-8;
+const HIT_AREA_UNIT_CIRCLE = Array.from(
+  {{ length: HIT_AREA_SEGMENTS }},
+  (_, index) => {{
+    const theta = (index / HIT_AREA_SEGMENTS) * Math.PI * 2;
+    return {{ cos: Math.cos(theta), sin: Math.sin(theta) }};
+  }},
+);
+const elements = {{
+  controls: {{ sphereRadius: {{ value: "0.35" }} }},
+  hitAreaErrorDegrees: {{ value: "8" }},
+}};
+const state = {{
+  sceneData: {{
+    gaze_sphere: {{
+      center_scene_m: {{ x: 0, y: 0, z: 0 }},
+      radius_m: 0.7,
+    }},
+  }},
+  renderCache: {{
+    hitPointFrameIndices: [],
+    hitPointRecords: [],
+    hitPointPositionAttribute: null,
+    hitPointRadius: null,
+    hitAreaPatchFrameIndices: [],
+    hitAreaPatchBases: [],
+    hitAreaPositionAttribute: null,
+    hitAreaRadiusScale: null,
+    hitAreaSphereRadius: null,
+  }},
+}};
+{functions}
+{body}
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return cast(dict[str, object], json.loads(result.stdout))
 
 
 def _layout(run_dir: Path) -> RunLayout:
@@ -496,7 +664,8 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "renderAccumulatedHits()" not in opacity_handler_body
     assert "Math.tan(alphaRadians)" in js
     assert "intersectRayWithSphere(origin, direction, radius)" in js
-    assert "surfaceOffsetPoint(sphereHitForFrame(frame))" in js
+    assert "const hitResult = sphereHitForFrame(frame)" in js
+    assert "hitResult.valid ? surfaceOffsetPoint(hitResult.point) : null" in js
     assert 'elements.controls.sphereRadius?.addEventListener("input", () => {' in js
     assert "frame?.unigaze_ray?.valid" in js
     assert "renderCurrentHitArea" in js
@@ -504,6 +673,155 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
     assert ".hit-area-opacity-row" in css
+
+
+def test_viewer_live_radius_hit_omits_persisted_fallback() -> None:
+    result = _run_viewer_math_probe(
+        """
+const frame = {
+  sphere_hit: {
+    valid: true,
+    point_scene_m: { x: 0.5, y: 0, z: 0.4898979485566356 },
+  },
+  unigaze_ray: {
+    valid: true,
+    origin_scene_m: { x: 0.5, y: 0, z: 1 },
+    direction_scene: { x: 0, y: 0, z: -1 },
+  },
+};
+const hit = sphereHitForFrame(frame);
+if (hit.valid !== false || hit.point !== null) {
+  throw new Error(`expected selected-radius miss, got ${JSON.stringify(hit)}`);
+}
+console.log(JSON.stringify({ valid: hit.valid, point: hit.point }));
+"""
+    )
+
+    assert result == {"valid": False, "point": None}
+
+
+def test_viewer_hit_area_patch_is_omitted_when_any_boundary_ray_misses() -> None:
+    result = _run_viewer_math_probe(
+        """
+const frame = {
+  frame_index: 0,
+  sphere_hit: {
+    valid: true,
+    point_scene_m: { x: 0.3, y: 0, z: 0.6324555320336759 },
+  },
+  unigaze_ray: {
+    valid: true,
+    origin_scene_m: { x: 0.3, y: 0, z: 1 },
+    direction_scene: { x: 0, y: 0, z: -1 },
+  },
+};
+const geometry = hitAreaGeometry(frame, 8);
+if (geometry !== null) {
+  throw new Error("expected partial cone/sphere intersection to omit patch");
+}
+console.log(JSON.stringify({ omitted: geometry === null }));
+"""
+    )
+
+    assert result == {"omitted": True}
+
+
+def test_viewer_accumulated_hit_points_use_live_radius_valid_hits() -> None:
+    result = _run_viewer_math_probe(
+        """
+const missedAtSelectedRadius = {
+  frame_index: 0,
+  sphere_hit: {
+    valid: true,
+    point_scene_m: { x: 0.5, y: 0, z: 0.4898979485566356 },
+  },
+  unigaze_ray: {
+    valid: true,
+    origin_scene_m: { x: 0.5, y: 0, z: 1 },
+    direction_scene: { x: 0, y: 0, z: -1 },
+  },
+};
+const validAtSelectedRadius = {
+  frame_index: 1,
+  sphere_hit: {
+    valid: true,
+    point_scene_m: { x: 0, y: 0, z: 0.7 },
+  },
+  unigaze_ray: {
+    valid: true,
+    origin_scene_m: { x: 0, y: 0, z: 1 },
+    direction_scene: { x: 0, y: 0, z: -1 },
+  },
+};
+state.renderCache.hitPointRecords = [
+  missedAtSelectedRadius,
+  validAtSelectedRadius,
+];
+state.renderCache.hitPointPositionAttribute = {
+  array: new Float32Array(6),
+  needsUpdate: false,
+};
+updateAccumulatedHitPoints();
+console.log(JSON.stringify({
+  frameIndices: state.renderCache.hitPointFrameIndices,
+  firstPoint: Array.from(
+    state.renderCache.hitPointPositionAttribute.array.slice(0, 3),
+  ),
+}));
+"""
+    )
+
+    assert result["frameIndices"] == [1]
+    assert result["firstPoint"] == [0, 0, pytest.approx(0.352)]
+
+
+def test_viewer_accumulated_hit_areas_use_complete_live_radius_patches() -> None:
+    result = _run_viewer_math_probe(
+        """
+const partialPatchFrame = {
+  frame_index: 0,
+  sphere_hit: {
+    valid: true,
+    point_scene_m: { x: 0.3, y: 0, z: 0.6324555320336759 },
+  },
+  unigaze_ray: {
+    valid: true,
+    origin_scene_m: { x: 0.3, y: 0, z: 1 },
+    direction_scene: { x: 0, y: 0, z: -1 },
+  },
+};
+const completePatchFrame = {
+  frame_index: 1,
+  sphere_hit: {
+    valid: true,
+    point_scene_m: { x: 0, y: 0, z: 0.7 },
+  },
+  unigaze_ray: {
+    valid: true,
+    origin_scene_m: { x: 0, y: 0, z: 1 },
+    direction_scene: { x: 0, y: 0, z: -1 },
+  },
+};
+state.renderCache.hitAreaPatchBases = [
+  { frameIndex: 0, basis: sphereHitAreaPatchBasis(partialPatchFrame) },
+  { frameIndex: 1, basis: sphereHitAreaPatchBasis(completePatchFrame) },
+];
+state.renderCache.hitAreaPositionAttribute = {
+  array: new Float32Array(2 * HIT_AREA_VERTEX_COUNT * 3),
+  needsUpdate: false,
+};
+updateAccumulatedHitAreaPositions();
+console.log(JSON.stringify({
+  frameIndices: state.renderCache.hitAreaPatchFrameIndices,
+  firstPatchCenter: Array.from(
+    state.renderCache.hitAreaPositionAttribute.array.slice(0, 3),
+  ),
+}));
+"""
+    )
+
+    assert result["frameIndices"] == [1]
+    assert result["firstPatchCenter"] == [0, 0, pytest.approx(0.352)]
 
 
 def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
