@@ -545,19 +545,42 @@ def _select_fallback_face(
     full_frame_selection: FaceSelection,
 ) -> FaceSelection:
     scored_fallbacks = [
-        (score, region_selection.selection)
+        (score, max_iou, candidate, region_selection.selection)
         for region_selection in region_selections
         if region_selection.region.name != DETECTION_REGION_FULL_FRAME
-        for score in (_fallback_selection_score(region_selection),)
-        if score is not None
+        for candidate in region_selection.selection.candidates
+        for fallback_score in (
+            _fallback_candidate_score(
+                candidate, region_selection.region, region_selections
+            ),
+        )
+        if fallback_score is not None
+        for score, max_iou in (fallback_score,)
     ]
     if not scored_fallbacks:
         return full_frame_selection
 
-    return max(
-        scored_fallbacks,
-        key=lambda item: (item[0], _primary_selection_area(item[1])),
-    )[1]
+    has_consensus_evidence = any(
+        max_iou >= REGION_CONSENSUS_MIN_IOU
+        for _score, max_iou, _candidate, _selection in scored_fallbacks
+    )
+    fallback_pool = (
+        scored_fallbacks
+        if has_consensus_evidence
+        else [
+            item
+            for item in scored_fallbacks
+            if item[2].candidate_id == item[3].primary_candidate_id
+        ]
+    )
+    if not fallback_pool:
+        return full_frame_selection
+
+    _score, _max_iou, candidate, selection = max(
+        fallback_pool,
+        key=lambda item: (item[0], _bbox_area(item[2].bounding_box_image_px)),
+    )
+    return replace(selection, primary_candidate_id=candidate.candidate_id)
 
 
 def _region_refinement_score(
@@ -616,13 +639,23 @@ def _region_refinement_score(
     return area * max_iou
 
 
-def _fallback_selection_score(region_selection: _RegionSelection) -> float | None:
-    candidate = _primary_candidate(region_selection.selection)
-    if candidate is None:
+def _fallback_candidate_score(
+    candidate: FaceCandidate,
+    region: _DetectionRegion,
+    region_selections: Sequence[_RegionSelection],
+) -> tuple[float, float] | None:
+    if not candidate.has_valid_landmarks:
         return None
-    if _candidate_is_near_region_seam(candidate, region_selection.region):
+    if _candidate_is_near_region_seam(candidate, region):
         return None
-    return _candidate_geometry_score(candidate, region_selection.region)
+
+    score = _candidate_geometry_score(candidate, region)
+    max_iou = _max_iou_with_valid_other_region_candidates(
+        candidate, region, region_selections
+    )
+    if max_iou < REGION_CONSENSUS_MIN_IOU:
+        return score, max_iou
+    return score * (1.0 + max_iou), max_iou
 
 
 def _large_full_frame_refinement_score(
@@ -764,6 +797,33 @@ def _max_iou_with_other_region_candidates(
                 region.name,
             }
             for other_candidate in region_selection.selection.candidates
+        ),
+        default=0.0,
+    )
+
+
+def _max_iou_with_valid_other_region_candidates(
+    candidate: FaceCandidate,
+    region: _DetectionRegion,
+    region_selections: Sequence[_RegionSelection],
+) -> float:
+    return max(
+        (
+            _bbox_iou(
+                candidate.bounding_box_image_px,
+                other_candidate.bounding_box_image_px,
+            )
+            for region_selection in region_selections
+            if region_selection.region.name
+            not in {
+                DETECTION_REGION_FULL_FRAME,
+                region.name,
+            }
+            for other_candidate in region_selection.selection.candidates
+            if other_candidate.has_valid_landmarks
+            and not _candidate_is_near_region_seam(
+                other_candidate, region_selection.region
+            )
         ),
         default=0.0,
     )
