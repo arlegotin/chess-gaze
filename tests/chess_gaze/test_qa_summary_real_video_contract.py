@@ -14,6 +14,7 @@ from chess_gaze.pipeline import (
     analyze_video,
 )
 from chess_gaze.qa_summary import QASummary
+from chess_gaze.scene_records import SceneSummary
 
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
 NAKAMURA_SHORT_FRAME_COUNT = 180
@@ -145,9 +146,13 @@ def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
         observers=ObserverBundle(frame_observer=_deterministic_real_video_record),
     )
     qa_summary_path = result.layout.run_dir / "qa_summary.json"
+    scene_summary_path = result.layout.run_dir / "scene" / "scene_summary.json"
     assert qa_summary_path.is_file()
+    assert scene_summary_path.is_file()
 
     summary = QASummary.model_validate_json(qa_summary_path.read_text(encoding="utf-8"))
+    scene_summary_json = scene_summary_path.read_text(encoding="utf-8")
+    scene_summary = SceneSummary.model_validate_json(scene_summary_json)
 
     assert summary.source_artifacts == {
         "run_manifest": "run_manifest.json",
@@ -172,6 +177,9 @@ def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
     assert summary.counts.frame_records == expected_count
     assert summary.artifact_validation.schema_validation_passed is True
     assert summary.artifact_validation.counts_match is True
+    assert scene_summary.valid_sphere_hit_frames >= 0
+    assert "valid_sphere_hit_frames" in scene_summary_json
+    assert "valid_monitor_hit_frames" not in scene_summary_json
     assert len(summary.qa_sample_frame_ids) == 30
     assert summary.qa_sample_frame_ids == sorted(summary.qa_sample_frame_ids)
     assert summary.byte_counts.raw_frames_bytes == 0

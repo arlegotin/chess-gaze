@@ -73,7 +73,7 @@ def test_benchmark_report_ignores_failed_mps_candidates() -> None:
                 equivalence_report_path=None,
                 max_appearance_pitch_yaw_delta_radians=None,
                 max_scene_ray_component_delta=None,
-                max_monitor_uv_delta_m=None,
+                max_sphere_hit_angle_delta_radians=None,
                 error_code="OOM",
                 error_message="simulated",
             )
@@ -247,7 +247,7 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
                 else (
                     tolerances.appearance_pitch_yaw_radians,
                     tolerances.scene_ray_component,
-                    tolerances.monitor_uv_m,
+                    tolerances.sphere_hit_angle_radians,
                 ),
             )
         )
@@ -261,7 +261,7 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
             mismatches=[],
             max_appearance_pitch_yaw_delta_radians=0.0,
             max_scene_ray_component_delta=0.0,
-            max_monitor_uv_delta_m=0.0,
+            max_sphere_hit_angle_delta_radians=0.0,
         )
 
     monkeypatch.setattr("chess_gaze.unigaze_batch_benchmark.subprocess.run", fake_run)
@@ -458,7 +458,7 @@ def test_preflight_failure_skips_full_candidate_run(
             mismatches=[],
             max_appearance_pitch_yaw_delta_radians=0.0,
             max_scene_ray_component_delta=0.0,
-            max_monitor_uv_delta_m=0.0,
+            max_sphere_hit_angle_delta_radians=0.0,
         )
 
     monkeypatch.setattr("chess_gaze.unigaze_batch_benchmark.subprocess.run", fake_run)
@@ -609,7 +609,7 @@ def test_forward_timing_failure_does_not_skip_full_candidate_run(
             mismatches=[],
             max_appearance_pitch_yaw_delta_radians=0.0,
             max_scene_ray_component_delta=0.0,
-            max_monitor_uv_delta_m=0.0,
+            max_sphere_hit_angle_delta_radians=0.0,
         )
 
     monkeypatch.setattr("chess_gaze.unigaze_batch_benchmark.subprocess.run", fake_run)
@@ -768,7 +768,7 @@ def test_benchmark_cli_does_not_select_mps_when_cpu1_baseline_fails(
             mismatches=["cpu1 drifted"] if cpu1_equivalence else [],
             max_appearance_pitch_yaw_delta_radians=0.0,
             max_scene_ray_component_delta=0.0,
-            max_monitor_uv_delta_m=0.0,
+            max_sphere_hit_angle_delta_radians=0.0,
         )
 
     monkeypatch.setattr("chess_gaze.unigaze_batch_benchmark.subprocess.run", fake_run)
@@ -858,7 +858,7 @@ def test_benchmark_cli_does_not_select_mps_without_current_flow_baseline(
             mismatches=[],
             max_appearance_pitch_yaw_delta_radians=0.0,
             max_scene_ray_component_delta=0.0,
-            max_monitor_uv_delta_m=0.0,
+            max_sphere_hit_angle_delta_radians=0.0,
         )
 
     monkeypatch.setattr("chess_gaze.unigaze_batch_benchmark.subprocess.run", fake_run)
@@ -939,7 +939,7 @@ def _candidate(
     equivalence_report_path: str | None = "equivalence.json",
     max_appearance_pitch_yaw_delta_radians: float | None = 0.0,
     max_scene_ray_component_delta: float | None = 0.0,
-    max_monitor_uv_delta_m: float | None = 0.0,
+    max_sphere_hit_angle_delta_radians: float | None = 0.0,
     peak_mps_memory_bytes: int | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
@@ -971,7 +971,7 @@ def _candidate(
         equivalence_report_path=equivalence_report_path,
         max_appearance_pitch_yaw_delta_radians=(max_appearance_pitch_yaw_delta_radians),
         max_scene_ray_component_delta=max_scene_ray_component_delta,
-        max_monitor_uv_delta_m=max_monitor_uv_delta_m,
+        max_sphere_hit_angle_delta_radians=max_sphere_hit_angle_delta_radians,
         peak_mps_memory_bytes=peak_mps_memory_bytes,
         error_code=error_code,
         error_message=error_message,

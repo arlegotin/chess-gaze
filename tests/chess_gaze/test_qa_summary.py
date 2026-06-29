@@ -26,7 +26,7 @@ from chess_gaze.qa_summary import (
     validate_run_artifacts,
 )
 from chess_gaze.scene_artifacts import build_scene_artifacts, build_viewer_scene_data
-from chess_gaze.scene_records import ViewerSceneData
+from chess_gaze.scene_records import SceneSummary, ViewerSceneData
 
 
 def _point(x: float, y: float) -> Point2D:
@@ -445,9 +445,13 @@ def test_qa_summary_validates_scene_artifacts_and_counts_scene_bytes(
 
     validation = validate_run_artifacts(layout)
     summary = build_qa_summary(layout)
+    scene_summary_json = (layout.scene_dir / "scene_summary.json").read_text(
+        encoding="utf-8"
+    )
     viewer_data = ViewerSceneData.model_validate_json(
         (layout.viewer_dir / "scene-data.json").read_text(encoding="utf-8")
     )
+    scene_summary = SceneSummary.model_validate_json(scene_summary_json)
 
     assert summary.source_artifacts == validation.source_artifacts
     assert summary.source_artifacts == summary.artifact_validation.source_artifacts
@@ -463,6 +467,9 @@ def test_qa_summary_validates_scene_artifacts_and_counts_scene_bytes(
     assert summary.counts.scene_frame_records == 5
     assert validation.counts.scene_frame_records == 5
     assert viewer_data.frame_count == 5
+    assert scene_summary.valid_sphere_hit_frames >= 0
+    assert "valid_sphere_hit_frames" in scene_summary_json
+    assert "valid_monitor_hit_frames" not in scene_summary_json
     scene_frame_lines = (
         (layout.records_dir / "scene_frames.jsonl")
         .read_text(encoding="utf-8")

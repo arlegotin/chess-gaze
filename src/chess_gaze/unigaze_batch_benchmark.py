@@ -61,7 +61,7 @@ MPS_ENV_VARS = (
 MPS_EQUIVALENCE_TOLERANCES = EquivalenceTolerances(
     appearance_pitch_yaw_radians=1e-3,
     scene_ray_component=1e-3,
-    monitor_uv_m=2e-3,
+    sphere_hit_angle_radians=2e-3,
 )
 
 
@@ -95,7 +95,7 @@ class BenchmarkCandidateResult(StrictSchemaModel):
     equivalence_report_path: str | None
     max_appearance_pitch_yaw_delta_radians: float | None
     max_scene_ray_component_delta: float | None
-    max_monitor_uv_delta_m: float | None
+    max_sphere_hit_angle_delta_radians: float | None
     peak_mps_memory_bytes: int | None
     error_code: str | None
     error_message: str | None
@@ -501,7 +501,9 @@ def _run_candidate(
         "max_scene_ray_component_delta": (
             equivalence_report.max_scene_ray_component_delta
         ),
-        "max_monitor_uv_delta_m": equivalence_report.max_monitor_uv_delta_m,
+        "max_sphere_hit_angle_delta_radians": (
+            equivalence_report.max_sphere_hit_angle_delta_radians
+        ),
     }
     if not equivalence_report.passed:
         updates.update(
@@ -619,7 +621,7 @@ def _candidate_result(
         equivalence_report_path=None,
         max_appearance_pitch_yaw_delta_radians=None,
         max_scene_ray_component_delta=None,
-        max_monitor_uv_delta_m=None,
+        max_sphere_hit_angle_delta_radians=None,
         peak_mps_memory_bytes=(
             None if forward_timing is None else forward_timing.peak_mps_memory_bytes
         ),

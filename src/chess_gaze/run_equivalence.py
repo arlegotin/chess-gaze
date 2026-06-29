@@ -14,7 +14,7 @@ from chess_gaze.geometry import StrictSchemaModel
 class EquivalenceTolerances(StrictSchemaModel):
     appearance_pitch_yaw_radians: float = 1e-6
     scene_ray_component: float = 1e-6
-    monitor_uv_m: float = 1e-6
+    sphere_hit_angle_radians: float = 1e-6
 
 
 class EquivalenceReport(StrictSchemaModel):
@@ -28,7 +28,7 @@ class EquivalenceReport(StrictSchemaModel):
     mismatches: list[str] = Field(default_factory=list)
     max_appearance_pitch_yaw_delta_radians: float
     max_scene_ray_component_delta: float
-    max_monitor_uv_delta_m: float
+    max_sphere_hit_angle_delta_radians: float
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class _Comparison:
     numeric_mismatches: list[str] = field(default_factory=list)
     max_appearance_pitch_yaw_delta_radians: float = 0.0
     max_scene_ray_component_delta: float = 0.0
-    max_monitor_uv_delta_m: float = 0.0
+    max_sphere_hit_angle_delta_radians: float = 0.0
 
     def exact(self, path: str, baseline: Any, candidate: Any) -> None:
         if baseline != candidate:
@@ -62,7 +62,7 @@ class _Comparison:
         candidate: Any,
         *,
         tolerance: float,
-        max_delta_kind: Literal["appearance", "scene_ray", "monitor_uv"],
+        max_delta_kind: Literal["appearance", "scene_ray", "sphere_hit_angle"],
     ) -> None:
         baseline_number = _finite_number_or_none(baseline)
         candidate_number = _finite_number_or_none(candidate)
@@ -86,7 +86,7 @@ class _Comparison:
 
     def _record_max_delta(
         self,
-        max_delta_kind: Literal["appearance", "scene_ray", "monitor_uv"],
+        max_delta_kind: Literal["appearance", "scene_ray", "sphere_hit_angle"],
         delta: float,
     ) -> None:
         if max_delta_kind == "appearance":
@@ -100,8 +100,8 @@ class _Comparison:
                 delta,
             )
         else:
-            self.max_monitor_uv_delta_m = max(
-                self.max_monitor_uv_delta_m,
+            self.max_sphere_hit_angle_delta_radians = max(
+                self.max_sphere_hit_angle_delta_radians,
                 delta,
             )
 
@@ -152,7 +152,9 @@ def compare_runs(
             comparison.max_appearance_pitch_yaw_delta_radians
         ),
         max_scene_ray_component_delta=comparison.max_scene_ray_component_delta,
-        max_monitor_uv_delta_m=comparison.max_monitor_uv_delta_m,
+        max_sphere_hit_angle_delta_radians=(
+            comparison.max_sphere_hit_angle_delta_radians
+        ),
     )
 
 
@@ -354,7 +356,7 @@ def _compare_scene_frame_records(
         )
         for field_name in (
             "valid_for_scene_center",
-            "valid_for_main_monitor_direction",
+            "valid_for_sphere_projection",
         ):
             comparison.exact(
                 f"{prefix}.{field_name}",
@@ -363,7 +365,7 @@ def _compare_scene_frame_records(
             )
         _compare_scene_validity_fields(comparison, prefix, baseline, candidate)
         _compare_scene_ray(comparison, prefix, baseline, candidate)
-        _compare_monitor_hit(comparison, prefix, baseline, candidate)
+        _compare_sphere_hit(comparison, prefix, baseline, candidate)
         comparison.exact(
             f"{prefix}.diagnostics.source_error_codes",
             _get_path(baseline, ("diagnostics", "source_error_codes")),
@@ -377,24 +379,20 @@ def _compare_scene_validity_fields(
     baseline: dict[str, Any],
     candidate: dict[str, Any],
 ) -> None:
-    for field_name in ("left_eye", "right_eye", "eye_midpoint", "head", "unigaze_ray"):
+    for field_name in (
+        "left_eye",
+        "right_eye",
+        "eye_midpoint",
+        "head",
+        "unigaze_ray",
+        "sphere_hit",
+    ):
         _compare_valid_reason_record(
             comparison,
             f"{prefix}.{field_name}",
             _mapping_or_empty(baseline.get(field_name)),
             _mapping_or_empty(candidate.get(field_name)),
         )
-
-    baseline_hit = _monitor_hit_record(baseline)
-    candidate_hit = _monitor_hit_record(candidate)
-    monitor_path = _monitor_hit_path(prefix, baseline, candidate)
-    _compare_monitor_hit_field_presence(comparison, prefix, baseline, candidate)
-    _compare_valid_reason_record(
-        comparison,
-        monitor_path,
-        baseline_hit,
-        candidate_hit,
-    )
 
 
 def _compare_valid_reason_record(
@@ -434,25 +432,30 @@ def _compare_scene_ray(
             )
 
 
-def _compare_monitor_hit(
+def _compare_sphere_hit(
     comparison: _Comparison,
     prefix: str,
     baseline: dict[str, Any],
     candidate: dict[str, Any],
 ) -> None:
-    baseline_hit = _monitor_hit_record(baseline)
-    candidate_hit = _monitor_hit_record(candidate)
+    baseline_hit = _sphere_hit_record(baseline)
+    candidate_hit = _sphere_hit_record(candidate)
     if baseline_hit.get("valid") is not True or candidate_hit.get("valid") is not True:
         return
-    hit_path = _monitor_hit_path(prefix, baseline, candidate)
-    for component in ("u", "v"):
+    hit_path = f"{prefix}.sphere_hit"
+    for component in ("theta_radians", "phi_radians"):
         comparison.numeric(
-            f"{hit_path}.plane_uv_m.{component}",
-            _monitor_uv_component(baseline_hit, component),
-            _monitor_uv_component(candidate_hit, component),
-            tolerance=comparison.tolerances.monitor_uv_m,
-            max_delta_kind="monitor_uv",
+            f"{hit_path}.{component}",
+            baseline_hit.get(component),
+            candidate_hit.get(component),
+            tolerance=comparison.tolerances.sphere_hit_angle_radians,
+            max_delta_kind="sphere_hit_angle",
         )
+    comparison.exact(
+        f"{hit_path}.hemisphere",
+        baseline_hit.get("hemisphere"),
+        candidate_hit.get("hemisphere"),
+    )
 
 
 def _compare_summary_counts(
@@ -493,57 +496,11 @@ def _compare_viewer_counts(
     )
 
 
-def _monitor_hit_record(frame: dict[str, Any]) -> dict[str, Any]:
-    main_monitor_hit = frame.get("main_monitor_hit")
-    if isinstance(main_monitor_hit, dict):
-        return main_monitor_hit
-    monitor_hit = frame.get("monitor_hit")
-    if isinstance(monitor_hit, dict):
-        return monitor_hit
+def _sphere_hit_record(frame: dict[str, Any]) -> dict[str, Any]:
+    sphere_hit = frame.get("sphere_hit")
+    if isinstance(sphere_hit, dict):
+        return sphere_hit
     return {}
-
-
-def _compare_monitor_hit_field_presence(
-    comparison: _Comparison,
-    prefix: str,
-    baseline: dict[str, Any],
-    candidate: dict[str, Any],
-) -> None:
-    baseline_has_current = isinstance(baseline.get("main_monitor_hit"), dict)
-    candidate_has_current = isinstance(candidate.get("main_monitor_hit"), dict)
-    baseline_has_legacy = isinstance(baseline.get("monitor_hit"), dict)
-    candidate_has_legacy = isinstance(candidate.get("monitor_hit"), dict)
-    if baseline_has_current or candidate_has_current:
-        comparison.exact(
-            f"{prefix}.main_monitor_hit.present",
-            baseline_has_current,
-            candidate_has_current,
-        )
-        return
-    comparison.exact(
-        f"{prefix}.monitor_hit.present",
-        baseline_has_legacy,
-        candidate_has_legacy,
-    )
-
-
-def _monitor_hit_path(
-    prefix: str,
-    baseline: dict[str, Any],
-    candidate: dict[str, Any],
-) -> str:
-    if "main_monitor_hit" in baseline or "main_monitor_hit" in candidate:
-        return f"{prefix}.main_monitor_hit"
-    return f"{prefix}.monitor_hit"
-
-
-def _monitor_uv_component(hit: dict[str, Any], component: Literal["u", "v"]) -> Any:
-    plane_uv = hit.get("plane_uv_m")
-    if isinstance(plane_uv, dict):
-        return plane_uv.get(component, plane_uv.get(f"{component}_m"))
-    if isinstance(plane_uv, (list, tuple)) and len(plane_uv) >= 2:
-        return plane_uv[0 if component == "u" else 1]
-    return hit.get(f"{component}_m")
 
 
 def _error_codes(errors: Any) -> Any:
