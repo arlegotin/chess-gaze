@@ -66,6 +66,19 @@ def test_missing_input_returns_stable_error_without_output_dir(
     assert not output_root.exists()
 
 
+def test_missing_input_does_not_load_analysis_pipeline(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    missing = tmp_path / "missing.mp4"
+
+    def fail_if_pipeline_loads() -> object:
+        raise AssertionError("missing input must fail before loading pipeline")
+
+    monkeypatch.setattr(cli, "_pipeline_dependencies", fail_if_pipeline_loads)
+
+    assert main(["analyze", str(missing)]) == 10
+
+
 def test_analyze_missing_models_returns_stable_error_without_output_dir(
     tmp_path: Path, capsys: CaptureFixture[str]
 ) -> None:
@@ -189,6 +202,52 @@ def test_analyze_save_frames_flag_requests_frame_image_retention(
 
     [request] = captured_requests
     assert request.save_frame_images is True
+
+
+def test_analyze_progress_off_disables_progress_callback(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    run_dir = tmp_path / "runs" / "run-1"
+    make_tiny_video(video_path)
+    captured_requests: list[AnalyzeRequest] = []
+
+    def fake_analyze_video(request: AnalyzeRequest) -> object:
+        captured_requests.append(request)
+        return SimpleNamespace(
+            layout=SimpleNamespace(run_dir=run_dir),
+            viewer_index_path=run_dir / "viewer" / "index.html",
+        )
+
+    monkeypatch.setattr(cli, "analyze_video", fake_analyze_video)
+
+    assert main(["analyze", str(video_path), "--progress", "off"]) == 0
+
+    [request] = captured_requests
+    assert request.progress_callback is None
+
+
+def test_analyze_progress_on_requests_progress_callback(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    run_dir = tmp_path / "runs" / "run-1"
+    make_tiny_video(video_path)
+    captured_requests: list[AnalyzeRequest] = []
+
+    def fake_analyze_video(request: AnalyzeRequest) -> object:
+        captured_requests.append(request)
+        return SimpleNamespace(
+            layout=SimpleNamespace(run_dir=run_dir),
+            viewer_index_path=run_dir / "viewer" / "index.html",
+        )
+
+    monkeypatch.setattr(cli, "analyze_video", fake_analyze_video)
+
+    assert main(["analyze", str(video_path), "--progress", "on"]) == 0
+
+    [request] = captured_requests
+    assert request.progress_callback is not None
 
 
 def test_analyze_passes_unigaze_cli_overrides(

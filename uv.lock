@@ -199,6 +199,7 @@ dependencies = [
     { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
     { name = "unigaze" },
 ]
 
@@ -222,6 +223,7 @@ requires-dist = [
     { name = "timm", specifier = ">=0.3.2" },
     { name = "torch", specifier = ">=2.12.1" },
     { name = "torchvision", specifier = ">=0.27.1" },
+    { name = "tqdm", specifier = ">=4.68.3" },
     { name = "unigaze", specifier = "==0.1.3" },
 ]
 

@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any, TextIO, cast
 
 from chess_gaze.errors import CliErrorCode
-from chess_gaze.pipeline import AnalyzeRequest, PipelineError, analyze_video
 from chess_gaze.scene_viewer import ViewerServerError, serve_viewer
+
+AnalyzeVideoCallable = Any
+analyze_video: AnalyzeVideoCallable | None = None
+AnalyzeRequest: type[Any] | None = None
+PipelineError: type[Exception] | None = None
 
 INPUT_NOT_FOUND_EXIT = 10
 UNSUPPORTED_VIDEO_EXIT = 11
@@ -49,6 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--unigaze-device", choices=("cpu", "mps"), default=None)
     analyze.add_argument("--unigaze-batch-size", type=int, default=None)
     analyze.add_argument(
+        "--progress",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="show frame progress on stderr: auto, on, or off",
+    )
+    analyze.add_argument(
         "--save-frames",
         action="store_true",
         default=None,
@@ -87,9 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"INPUT_NOT_FOUND: {video_path}", file=sys.stderr)
         return INPUT_NOT_FOUND_EXIT
 
+    AnalyzeRequestType, PipelineErrorType, analyze_video_func = _pipeline_dependencies()
+    progress = _AnalyzeProgressBar(args.progress, sys.stderr)
     try:
-        result = analyze_video(
-            AnalyzeRequest(
+        result = analyze_video_func(
+            AnalyzeRequestType(
                 video_path=video_path,
                 output_root=(
                     Path(args.output_root) if args.output_root is not None else None
@@ -102,11 +115,16 @@ def main(argv: list[str] | None = None) -> int:
                 unigaze_batch_size=args.unigaze_batch_size,
                 save_frame_images=args.save_frame_images,
                 resume=args.resume,
+                progress_callback=progress.callback if progress.enabled else None,
             )
         )
-    except PipelineError as exc:
-        print(f"{exc.code.value}: {exc}", file=sys.stderr)
-        return ERROR_EXIT_CODES.get(exc.code, GENERAL_FAILURE_EXIT)
+    except PipelineErrorType as exc:
+        progress.close()
+        code = cast(Any, exc).code
+        print(f"{code.value}: {exc}", file=sys.stderr)
+        return ERROR_EXIT_CODES.get(code, GENERAL_FAILURE_EXIT)
+    finally:
+        progress.close()
 
     print(result.layout.run_dir)
     print(f"viewer: {result.viewer_index_path}")
@@ -129,6 +147,67 @@ def _run_view(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     finally:
         server.close()
     return 0
+
+
+def _pipeline_dependencies() -> tuple[type[Any], type[Exception], AnalyzeVideoCallable]:
+    global AnalyzeRequest, PipelineError, analyze_video
+
+    if AnalyzeRequest is None or PipelineError is None or analyze_video is None:
+        from chess_gaze.pipeline import (
+            AnalyzeRequest as LoadedAnalyzeRequest,
+            PipelineError as LoadedPipelineError,
+            analyze_video as loaded_analyze_video,
+        )
+
+        AnalyzeRequest = LoadedAnalyzeRequest
+        PipelineError = LoadedPipelineError
+        if analyze_video is None:
+            analyze_video = loaded_analyze_video
+
+    return AnalyzeRequest, PipelineError, analyze_video
+
+
+class _AnalyzeProgressBar:
+    def __init__(self, mode: str, stderr: TextIO) -> None:
+        self._enabled = mode == "on" or (mode == "auto" and stderr.isatty())
+        self._stderr = stderr
+        self._bar: Any | None = None
+        self._completed_frames = 0
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def callback(self, event: Any) -> None:
+        if not self._enabled:
+            return
+        if self._bar is None:
+            from tqdm import tqdm
+
+            self._bar = tqdm(
+                total=event.total_frames,
+                initial=event.completed_frames,
+                unit="frame",
+                desc="analyze frames",
+                dynamic_ncols=True,
+                file=self._stderr,
+            )
+            self._completed_frames = event.completed_frames
+            if event.completed_frames >= event.total_frames:
+                self.close()
+            return
+
+        delta = event.completed_frames - self._completed_frames
+        if delta > 0:
+            self._bar.update(delta)
+            self._completed_frames = event.completed_frames
+        if event.completed_frames >= event.total_frames:
+            self.close()
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
 
 
 def _usage_error(parser: argparse.ArgumentParser, message: str) -> int:
