@@ -244,7 +244,9 @@ def test_mediapipe_observer_keeps_nakamura_short_faces_bounded() -> None:
         observer.close()
 
 
-def test_mediapipe_observer_keeps_carlsen_face_centers_in_visible_person_region() -> None:
+def test_mediapipe_observer_keeps_carlsen_face_centers_in_visible_person_region() -> (
+    None
+):
     video_path = REPO_ROOT / CARLSEN_VIDEO
     if not video_path.is_file():
         pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
@@ -261,8 +263,7 @@ def test_mediapipe_observer_keeps_carlsen_face_centers_in_visible_person_region(
     assert sha256_file(model_path) == model_entry.checksum_sha256
 
     sampled_indices = (
-        CARLSEN_ADJACENT_CONTROL_FRAME_INDICES
-        + CARLSEN_REPORTED_VISIBLE_FRAME_INDICES
+        CARLSEN_ADJACENT_CONTROL_FRAME_INDICES + CARLSEN_REPORTED_VISIBLE_FRAME_INDICES
     )
     observer = MediaPipeFaceObserver(
         model_asset_path=model_path,
@@ -286,22 +287,24 @@ def test_mediapipe_observer_keeps_carlsen_face_centers_in_visible_person_region(
             center_x = round((bbox.x_min + bbox.x_max) / 2, 1)
             center_y = round((bbox.y_min + bbox.y_max) / 2, 1)
             recovered_centers[frame.frame_id] = (center_x, center_y)
-            assert CARLSEN_FACE_CENTER_X_BOUNDS[0] <= center_x <= (
-                CARLSEN_FACE_CENTER_X_BOUNDS[1]
+            assert (
+                CARLSEN_FACE_CENTER_X_BOUNDS[0]
+                <= center_x
+                <= (CARLSEN_FACE_CENTER_X_BOUNDS[1])
             ), (
                 f"{frame.frame_id} selected center x={center_x:.1f} outside "
                 "visible player-face bounds"
             )
-            assert CARLSEN_FACE_CENTER_Y_BOUNDS[0] <= center_y <= (
-                CARLSEN_FACE_CENTER_Y_BOUNDS[1]
+            assert (
+                CARLSEN_FACE_CENTER_Y_BOUNDS[0]
+                <= center_y
+                <= (CARLSEN_FACE_CENTER_Y_BOUNDS[1])
             ), (
                 f"{frame.frame_id} selected center y={center_y:.1f} outside "
                 "visible player-face bounds"
             )
 
-        assert set(recovered_centers) == {
-            f"f{index:09d}" for index in sampled_indices
-        }
+        assert set(recovered_centers) == {f"f{index:09d}" for index in sampled_indices}
     finally:
         observer.close()
 
