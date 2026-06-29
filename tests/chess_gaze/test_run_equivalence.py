@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 
 from chess_gaze.run_equivalence import EquivalenceTolerances, compare_runs
+from chess_gaze.scene_calibration import default_scene_assumptions
+from chess_gaze.scene_records import ViewerSceneData
 
 
 def _write_minimal_run(
@@ -58,9 +60,10 @@ def _write_minimal_run(
         },
     }
     viewer_data = {
-        "schema_version": "gaze-scene-viewer-data-v1",
-        "frame_count": viewer_frame_count,
-        "frames": [scene_frame],
+        **_viewer_data_payload(
+            scene_frame=scene_frame,
+            viewer_frame_count=viewer_frame_count,
+        )
     }
 
     (records_dir / "frames.jsonl").write_text(
@@ -319,6 +322,120 @@ def _vector_payload(*, x: float, y: float, z: float, space: str) -> dict[str, An
     }
 
 
+def _viewer_data_payload(
+    *,
+    scene_frame: dict[str, Any],
+    viewer_frame_count: int,
+) -> dict[str, Any]:
+    valid_hit_points: list[dict[str, Any]] = []
+    sphere_hit = scene_frame["sphere_hit"]
+    if sphere_hit["valid"]:
+        valid_hit_points.append(
+            {
+                "frame_id": scene_frame["frame_id"],
+                "frame_index": scene_frame["frame_index"],
+                "point_scene_m": sphere_hit["point_scene_m"],
+                "radius_m": sphere_hit["radius_m"],
+                "theta_radians": sphere_hit["theta_radians"],
+                "phi_radians": sphere_hit["phi_radians"],
+                "hemisphere": sphere_hit["hemisphere"],
+            }
+        )
+
+    viewer_data = ViewerSceneData.model_validate_json(
+        json.dumps(
+            {
+                "run_id": "run-123",
+                "source_video_stem": "synthetic-scene-source",
+                "frame_count": viewer_frame_count,
+                "frames": [scene_frame],
+                "valid_hit_points": valid_hit_points,
+                "gaze_sphere": {
+                    "center_scene_m": _vector_payload(
+                        x=0.0,
+                        y=0.0,
+                        z=0.0,
+                        space="scene_pseudo_m",
+                    ),
+                    "radius_m": 0.7,
+                    "radius_source": "DEFAULT_GAZE_SPHERE_RADIUS_M",
+                    "center_source": "robust_scene_center",
+                },
+                "axis_basis": {
+                    "right_camera": _vector_payload(
+                        x=-1.0,
+                        y=0.0,
+                        z=0.0,
+                        space="camera_opencv_pseudo_m",
+                    ),
+                    "up_camera": _vector_payload(
+                        x=0.0,
+                        y=-1.0,
+                        z=0.0,
+                        space="camera_opencv_pseudo_m",
+                    ),
+                    "back_camera": _vector_payload(
+                        x=0.0,
+                        y=0.0,
+                        z=1.0,
+                        space="camera_opencv_pseudo_m",
+                    ),
+                    "forward_camera": _vector_payload(
+                        x=0.0,
+                        y=0.0,
+                        z=-1.0,
+                        space="camera_opencv_pseudo_m",
+                    ),
+                    "determinant_right_up_back": 1.0,
+                    "convention": "right_up_back_columns_right_handed",
+                    "fallbacks": [],
+                },
+                "assumptions": [
+                    record.model_dump(mode="json")
+                    for record in default_scene_assumptions().records
+                ],
+                "summary": {
+                    "run_id": "run-123",
+                    "decoded_frames": viewer_frame_count,
+                    "scene_frame_records": viewer_frame_count,
+                    "valid_eye_midpoint_frames": 1,
+                    "valid_unigaze_ray_frames": 1
+                    if scene_frame["unigaze_ray"]["valid"]
+                    else 0,
+                    "valid_sphere_hit_frames": 1 if sphere_hit["valid"] else 0,
+                    "invalid_sphere_hit_reasons": (
+                        {} if sphere_hit["valid"] else {sphere_hit["reason_invalid"]: 1}
+                    ),
+                    "sphere_hit_angle_bounds": {
+                        "theta_min_radians": sphere_hit["theta_radians"] or 0.0,
+                        "theta_max_radians": sphere_hit["theta_radians"] or 0.0,
+                        "phi_min_radians": sphere_hit["phi_radians"] or 0.0,
+                        "phi_max_radians": sphere_hit["phi_radians"] or 0.0,
+                        "front_hemisphere_frames": 1
+                        if sphere_hit["hemisphere"] == "front"
+                        else 0,
+                        "rear_hemisphere_frames": 1
+                        if sphere_hit["hemisphere"] == "rear"
+                        else 0,
+                        "equator_frames": 1
+                        if sphere_hit["hemisphere"] == "equator"
+                        else 0,
+                    },
+                    "representative_scene_warning_frame_ids": [],
+                    "artifact_validation": {
+                        "scene_frame_count_matches_decoded": True,
+                        "viewer_exists": True,
+                        "scene_manifest_valid": True,
+                        "scene_summary_valid": True,
+                    },
+                },
+            },
+            allow_nan=False,
+        )
+    )
+    return viewer_data.model_dump(mode="json")
+
+
 def test_compare_runs_accepts_numeric_deltas_within_tolerance(tmp_path: Path) -> None:
     baseline = tmp_path / "baseline"
     candidate = tmp_path / "candidate"
@@ -443,6 +560,36 @@ def test_compare_runs_rejects_qa_count_and_viewer_frame_count_mismatches(
         "qa_summary.counts.crop_files exact mismatch: baseline=0 candidate=1",
         "viewer.frame_count exact mismatch: baseline=1 candidate=2",
     ]
+
+
+def test_compare_runs_rejects_non_v2_viewer_data(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_minimal_run(baseline)
+    _write_minimal_run(candidate)
+
+    candidate_viewer_path = candidate / "viewer" / "scene-data.json"
+    candidate_viewer_payload = json.loads(candidate_viewer_path.read_text("utf-8"))
+    candidate_viewer_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "gaze-scene-viewer-data-v1",
+                "frame_count": candidate_viewer_payload["frame_count"],
+                "frames": candidate_viewer_payload["frames"],
+            },
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = compare_runs(baseline, candidate)
+
+    assert report.passed is False
+    assert any(
+        "candidate viewer scene data" in error and "schema_version" in error
+        for error in report.validation_errors
+    )
 
 
 def test_compare_runs_does_not_count_absent_numeric_fields_when_both_invalid(

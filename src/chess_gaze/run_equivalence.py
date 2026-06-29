@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from chess_gaze.geometry import StrictSchemaModel
+from chess_gaze.scene_records import ViewerSceneData
 
 
 class EquivalenceTolerances(StrictSchemaModel):
@@ -185,6 +186,7 @@ def _load_run_artifacts(
             run_dir / "viewer" / "scene-data.json",
             label=f"{label} viewer scene data",
             validation_errors=validation_errors,
+            model_type=ViewerSceneData,
         ),
     )
 
@@ -227,10 +229,22 @@ def _read_json(
     *,
     label: str,
     validation_errors: list[str],
+    model_type: type[StrictSchemaModel] | None = None,
 ) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raw_text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        validation_errors.append(f"Invalid {label} at {path}: {exc}")
+        return {}
+    if model_type is not None:
+        try:
+            return model_type.model_validate_json(raw_text).model_dump(mode="json")
+        except ValueError as exc:
+            validation_errors.append(f"Invalid {label} at {path}: {exc}")
+            return {}
+    try:
+        value = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
         validation_errors.append(f"Invalid {label} at {path}: {exc}")
         return {}
     if not isinstance(value, dict):
