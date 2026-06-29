@@ -120,6 +120,28 @@ visible person region on all sampled frames:
 No sampled frame was missing a visible face, and none selected the historical
 plaque/background region.
 
+### Contact-Sheet Inspection
+
+Because a full `carlsen_1.mp4` rerun was intentionally skipped, I generated
+bounded verification contact sheets from decoded current-probe frames and from
+the available historical processed frames in the reported run:
+
+- `/private/tmp/chess-gaze-carlsen-verification/historical_processed_2036_2062.jpg`
+  shows the old early-window missing/wrong-overlay behavior in
+  `artifacts/output/carlsen_1/runs/20260628T101348Z-e546cf6a`.
+- `/private/tmp/chess-gaze-carlsen-verification/current_probe_2036_2062.jpg`
+  shows repaired current boxes consistently on the visible player face.
+- `/private/tmp/chess-gaze-carlsen-verification/historical_processed_reported_jumps.jpg`
+  shows the old plaque/background selections for `f000005695`, `f000009030`,
+  and `f000015080-f000015082`.
+- `/private/tmp/chess-gaze-carlsen-verification/current_probe_reported_jumps.jpg`
+  shows the current direct-probe boxes on the visible player face for those
+  later reported examples.
+
+Visual inspection confirmed the historical sheets reproduce the reported
+plaque/background and missing-face failures, while the current sheets place the
+selected boxes on the player face.
+
 ### Fresh Nakamura short analyze run
 
 Command:
@@ -163,7 +185,7 @@ Verified on 2026-06-29:
   Rechecked that renderer APIs draw the provided geometry directly, so renderer
   changes would not address a wrong selected face box.
 - PyAV container API:
-  https://pyav.basswood.io/docs/stable/api/container.html
+  https://pyav.org/docs/stable/api/container.html
   Rechecked that decoding remains a container/frame iteration boundary, not a
   candidate-arbitration boundary.
 
@@ -196,6 +218,22 @@ MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/
 
 Outcome: `1 passed in 24.27s`.
 
+Bounded Carlsen direct probe and contact-sheet generation:
+
+```sh
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run python /private/tmp/chess-gaze-carlsen-verification/generate_probe_contact_sheets.py
+```
+
+Outcome: exit `0`; wrote:
+
+```text
+/private/tmp/chess-gaze-carlsen-verification/current_probe_results.txt
+/private/tmp/chess-gaze-carlsen-verification/current_probe_2036_2062.jpg
+/private/tmp/chess-gaze-carlsen-verification/current_probe_reported_jumps.jpg
+/private/tmp/chess-gaze-carlsen-verification/historical_processed_2036_2062.jpg
+/private/tmp/chess-gaze-carlsen-verification/historical_processed_reported_jumps.jpg
+```
+
 User-provided Nakamura selector command:
 
 ```sh
@@ -227,12 +265,13 @@ Outcome: exit `0`; run `20260629T140320Z-eefca250` completed.
   probe crashed inside the sandbox with:
   `graph_service.h:139 Check failed: service_ Service is unavailable.`
 - I did not rerun a full `carlsen_1.mp4` analyze job in this task. The bounded
-  direct observer probes covered all reported frames plus adjacent controls,
-  which was the intended cheaper verification path.
+  direct observer probes covered all reported frames plus adjacent controls, and
+  the generated contact sheets were inspected against the available historical
+  processed frames from the reported run.
 - The fresh `nakamura_short` analyze run used the repo's default frame-image
   retention policy (`save_frame_images: false` in `run_manifest.json`), so the
   generated `raw_frames/` and `processed_frames/` directories are intentionally
-  empty and no contact sheets were produced from that run.
+  empty.
 
 ## Source-Layout Review Note
 

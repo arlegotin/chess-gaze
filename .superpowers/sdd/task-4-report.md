@@ -46,6 +46,25 @@
    - run path:
      `/private/tmp/chess-gaze-task4-output/nakamura_short/runs/20260629T140320Z-eefca250`
 
+6. Bounded Carlsen direct probe and contact-sheet generation:
+
+   - saved script:
+     `/private/tmp/chess-gaze-carlsen-verification/generate_probe_contact_sheets.py`
+   - command:
+     `MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run python /private/tmp/chess-gaze-carlsen-verification/generate_probe_contact_sheets.py`
+   - decoded `artifacts/input/carlsen_1.mp4`
+   - ran `MediaPipeFaceObserver` on frames `2036-2062`, `5694-5697`,
+     `9029-9031`, and `15079-15083`
+   - read historical processed frames from
+     `artifacts/output/carlsen_1/runs/20260628T101348Z-e546cf6a/processed_frames`
+   - wrote:
+     - `/private/tmp/chess-gaze-carlsen-verification/current_probe_results.txt`
+     - `/private/tmp/chess-gaze-carlsen-verification/current_probe_2036_2062.jpg`
+     - `/private/tmp/chess-gaze-carlsen-verification/current_probe_reported_jumps.jpg`
+     - `/private/tmp/chess-gaze-carlsen-verification/historical_processed_2036_2062.jpg`
+     - `/private/tmp/chess-gaze-carlsen-verification/historical_processed_reported_jumps.jpg`
+   - outcome: exit `0`
+
 ## Real-Video Evidence
 
 - Pre-fix `d6a6753` RED hit the historical wrong-selection signature:
@@ -64,6 +83,15 @@
   - `scene_frame_records = 180`
   - `face_present_rate = 1.0`
   - `scene_summary.valid_monitor_hit_frames = 180`
+- Contact-sheet visual inspection:
+  - `historical_processed_2036_2062.jpg` showed the old early-window
+    plaque/background jumps and missing/poor face overlays in the reported run.
+  - `current_probe_2036_2062.jpg` showed repaired boxes consistently on the
+    player face.
+  - `historical_processed_reported_jumps.jpg` showed the old wrong selections
+    for `f000005695`, `f000009030`, and `f000015080-f000015082`.
+  - `current_probe_reported_jumps.jpg` showed all later reported examples
+    selecting the player face.
 
 ## Files Changed
 
@@ -76,6 +104,8 @@
 - Real MediaPipe verification required host runtime access; the sandboxed probe
   crashed with `graph_service.h:139 Check failed: service_ Service is unavailable.`
 - I did not rerun a full `carlsen_1.mp4` analyze job; I used the bounded direct
-  probe path over all reported frames plus adjacent controls.
+  probe path over all reported frames plus adjacent controls and generated
+  contact sheets from decoded current-probe frames plus the available historical
+  processed frames.
 - The fresh `nakamura_short` analyze run kept `save_frame_images: false`, so
   its `raw_frames/` and `processed_frames/` directories are intentionally empty.
