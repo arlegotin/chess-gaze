@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, TextIO, cast
 
 from chess_gaze.errors import CliErrorCode
+from chess_gaze.native_log_filter import suppress_known_native_analysis_logs
 from chess_gaze.scene_viewer import ViewerServerError, serve_viewer
 
 AnalyzeVideoCallable = Any
@@ -98,34 +99,49 @@ def main(argv: list[str] | None = None) -> int:
         print(f"INPUT_NOT_FOUND: {video_path}", file=sys.stderr)
         return INPUT_NOT_FOUND_EXIT
 
-    AnalyzeRequestType, PipelineErrorType, analyze_video_func = _pipeline_dependencies()
-    progress = _AnalyzeProgressBar(args.progress, sys.stderr)
-    try:
-        result = analyze_video_func(
-            AnalyzeRequestType(
-                video_path=video_path,
-                output_root=(
-                    Path(args.output_root) if args.output_root is not None else None
-                ),
-                models_root=(
-                    Path(args.models_root) if args.models_root is not None else None
-                ),
-                config_path=Path(args.config) if args.config is not None else None,
-                unigaze_device=args.unigaze_device,
-                unigaze_batch_size=args.unigaze_batch_size,
-                save_frame_images=args.save_frame_images,
-                resume=args.resume,
-                progress_callback=progress.callback if progress.enabled else None,
-            )
+    pipeline_error: Exception | None = None
+    result: Any | None = None
+    with suppress_known_native_analysis_logs() as native_logs:
+        AnalyzeRequestType, PipelineErrorType, analyze_video_func = (
+            _pipeline_dependencies()
         )
-    except PipelineErrorType as exc:
-        progress.close()
-        code = cast(Any, exc).code
-        print(f"{code.value}: {exc}", file=sys.stderr)
-        return ERROR_EXIT_CODES.get(code, GENERAL_FAILURE_EXIT)
-    finally:
-        progress.close()
+        progress = _AnalyzeProgressBar(args.progress, native_logs.stderr)
+        try:
+            result = analyze_video_func(
+                AnalyzeRequestType(
+                    video_path=video_path,
+                    output_root=(
+                        Path(args.output_root)
+                        if args.output_root is not None
+                        else None
+                    ),
+                    models_root=(
+                        Path(args.models_root)
+                        if args.models_root is not None
+                        else None
+                    ),
+                    config_path=Path(args.config) if args.config is not None else None,
+                    unigaze_device=args.unigaze_device,
+                    unigaze_batch_size=args.unigaze_batch_size,
+                    save_frame_images=args.save_frame_images,
+                    resume=args.resume,
+                    progress_callback=(
+                        progress.callback if progress.enabled else None
+                    ),
+                )
+            )
+        except PipelineErrorType as exc:
+            pipeline_error = exc
+        finally:
+            progress.close()
 
+    if pipeline_error is not None:
+        code = cast(Any, pipeline_error).code
+        print(f"{code.value}: {pipeline_error}", file=sys.stderr)
+        return ERROR_EXIT_CODES.get(code, GENERAL_FAILURE_EXIT)
+
+    if result is None:
+        raise AssertionError("analyze_video did not return a result")
     print(result.layout.run_dir)
     print(f"viewer: {result.viewer_index_path}")
     return 0

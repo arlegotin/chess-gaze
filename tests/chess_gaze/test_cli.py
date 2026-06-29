@@ -250,6 +250,64 @@ def test_analyze_progress_on_requests_progress_callback(
     assert request.progress_callback is not None
 
 
+def test_analyze_uses_native_log_filter_for_progress_stream(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    run_dir = tmp_path / "runs" / "run-1"
+    make_tiny_video(video_path)
+    entered = False
+    exited = False
+
+    class FakeNativeLogFilter:
+        stderr = SimpleNamespace(
+            isatty=lambda: True,
+            write=lambda _text: None,
+            flush=lambda: None,
+        )
+
+        def __enter__(self) -> "FakeNativeLogFilter":
+            nonlocal entered
+            entered = True
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            nonlocal exited
+            exited = True
+
+    def fake_analyze_video(request: AnalyzeRequest) -> object:
+        if request.progress_callback is not None:
+            request.progress_callback(
+                SimpleNamespace(
+                    run_dir=run_dir,
+                    completed_frames=0,
+                    total_frames=1,
+                )
+            )
+            request.progress_callback(
+                SimpleNamespace(
+                    run_dir=run_dir,
+                    completed_frames=1,
+                    total_frames=1,
+                )
+            )
+        return SimpleNamespace(
+            layout=SimpleNamespace(run_dir=run_dir),
+            viewer_index_path=run_dir / "viewer" / "index.html",
+        )
+
+    monkeypatch.setattr(cli, "analyze_video", fake_analyze_video)
+    monkeypatch.setattr(
+        cli,
+        "suppress_known_native_analysis_logs",
+        lambda: FakeNativeLogFilter(),
+    )
+
+    assert main(["analyze", str(video_path), "--progress", "on"]) == 0
+    assert entered is True
+    assert exited is True
+
+
 def test_analyze_passes_unigaze_cli_overrides(
     tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: MonkeyPatch
 ) -> None:

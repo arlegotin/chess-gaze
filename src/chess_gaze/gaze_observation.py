@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import io
 import math
 import os
 from collections.abc import Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from typing import Any
 
@@ -86,7 +87,8 @@ class UniGazeModel:
 
         with _offline_huggingface_boundary():
             backend = _build_unigaze_backend(UNIGAZE_BUILDER_KEY)
-            backend.load_unigaze_weights(str(asset.resolved_path))
+            with redirect_stdout(io.StringIO()):
+                backend.load_unigaze_weights(str(asset.resolved_path))
             backend = backend.to(device).eval()
         return cls(backend, device=device)
 

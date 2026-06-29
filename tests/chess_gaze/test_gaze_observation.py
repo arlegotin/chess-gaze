@@ -104,6 +104,27 @@ def test_unigaze_model_loads_local_asset_without_download_helpers(
     )
 
 
+def test_from_local_asset_suppresses_backend_weight_load_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class NoisyBackend(FakeUniGazeBackend):
+        def load_unigaze_weights(self, path: str) -> None:
+            super().load_unigaze_weights(path)
+            print(f"Loaded UniGaze pretrained weights from {path}")
+
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: NoisyBackend()
+    )
+
+    UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
 def test_unigaze_prediction_requires_documented_output_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
