@@ -110,6 +110,16 @@ class ObserverBundle:
 
 
 @dataclass(frozen=True)
+class AnalysisProgressEvent:
+    run_dir: Path
+    completed_frames: int
+    total_frames: int
+
+
+ProgressCallback = Callable[[AnalysisProgressEvent], None]
+
+
+@dataclass(frozen=True)
 class AnalyzeRequest:
     video_path: Path
     output_root: Path | None = None
@@ -122,6 +132,7 @@ class AnalyzeRequest:
     run_suffix: str | None = None
     resume: bool = True
     clock: Clock = utc_now
+    progress_callback: ProgressCallback | None = None
 
 
 @dataclass(frozen=True)
@@ -265,6 +276,12 @@ def analyze_video(
     calibration_path = layout.run_dir / "calibration.json"
     video_manifest_path = layout.run_dir / "video_manifest.json"
     analysis_state_path = write_analysis_state(layout, analysis_state)
+    _report_analysis_progress(
+        request,
+        layout=layout,
+        completed_frames=analysis_state.next_frame_index,
+        total_frames=inspection.frame_count_decoded,
+    )
     frames_jsonl_path = layout.records_dir / "frames.jsonl"
     errors_jsonl_path = layout.records_dir / "errors.jsonl"
     qa_summary_path = layout.run_dir / "qa_summary.json"
@@ -324,6 +341,12 @@ def analyze_video(
                         analysis_state_path = write_analysis_state(
                             layout, analysis_state
                         )
+                        _report_analysis_progress(
+                            request,
+                            layout=layout,
+                            completed_frames=committed_next_frame_index,
+                            total_frames=inspection.frame_count_decoded,
+                        )
                         continue
                     pending_batch.append(decoded_frame)
                     if len(pending_batch) < resolved.unigaze_batch_size:
@@ -350,6 +373,12 @@ def analyze_video(
                         clock=request.clock,
                     )
                     analysis_state_path = write_analysis_state(layout, analysis_state)
+                    _report_analysis_progress(
+                        request,
+                        layout=layout,
+                        completed_frames=committed_next_frame_index,
+                        total_frames=inspection.frame_count_decoded,
+                    )
                     pending_batch = []
 
                 if pending_batch:
@@ -375,6 +404,12 @@ def analyze_video(
                         clock=request.clock,
                     )
                     analysis_state_path = write_analysis_state(layout, analysis_state)
+                    _report_analysis_progress(
+                        request,
+                        layout=layout,
+                        completed_frames=committed_next_frame_index,
+                        total_frames=inspection.frame_count_decoded,
+                    )
         finally:
             if observers.close is not None:
                 observers.close()
@@ -475,6 +510,24 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         save_frame_images=resolved_config.save_frame_images,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
+    )
+
+
+def _report_analysis_progress(
+    request: AnalyzeRequest,
+    *,
+    layout: RunLayout,
+    completed_frames: int,
+    total_frames: int,
+) -> None:
+    if request.progress_callback is None:
+        return
+    request.progress_callback(
+        AnalysisProgressEvent(
+            run_dir=layout.run_dir,
+            completed_frames=completed_frames,
+            total_frames=total_frames,
+        )
     )
 
 

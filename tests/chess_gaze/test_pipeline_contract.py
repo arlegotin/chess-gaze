@@ -16,6 +16,7 @@ from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.model_assets import ResolvedModelAsset
 from chess_gaze.pipeline import (
+    AnalysisProgressEvent,
     AnalyzeRequest,
     ObserverBundle,
     ObserverFrame,
@@ -568,6 +569,90 @@ def test_analyze_video_uses_batch_observer_without_reordering_frames(
     assert list(result.layout.raw_frames_dir.glob("*.png")) == []
     assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
     assert result.decoded_frame_count == 5
+
+
+def test_analyze_video_reports_committed_progress_after_each_batch(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=5)
+    events: list[tuple[Path, int, int]] = []
+
+    def progress_callback(event: AnalysisProgressEvent) -> None:
+        events.append((event.run_dir, event.completed_frames, event.total_frames))
+
+    def fake_batch_record(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        return [_fake_record(frame) for frame in frames]
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            unigaze_batch_size=2,
+            progress_callback=progress_callback,
+        ),
+        observers=ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=fake_batch_record,
+        ),
+    )
+
+    assert events == [
+        (result.layout.run_dir, 0, 5),
+        (result.layout.run_dir, 2, 5),
+        (result.layout.run_dir, 4, 5),
+        (result.layout.run_dir, 5, 5),
+    ]
+
+
+def test_analyze_video_reports_resumed_committed_progress_from_resume_point(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=5)
+
+    def interrupting_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        frame_indices = [frame.frame_index for frame in frames]
+        if frame_indices == [2, 3]:
+            raise RuntimeError("simulated batch interruption")
+        return [_fake_record(frame) for frame in frames]
+
+    with pytest.raises(RuntimeError, match="simulated batch interruption"):
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                unigaze_batch_size=2,
+            ),
+            observers=ObserverBundle(
+                frame_observer=_fake_record,
+                frame_batch_observer=interrupting_batch,
+            ),
+        )
+
+    resumed_events: list[tuple[int, int]] = []
+
+    def progress_callback(event: AnalysisProgressEvent) -> None:
+        resumed_events.append((event.completed_frames, event.total_frames))
+
+    def resumed_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
+        return [_fake_record(frame) for frame in frames]
+
+    analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            unigaze_batch_size=2,
+            progress_callback=progress_callback,
+        ),
+        observers=ObserverBundle(
+            frame_observer=_fake_record,
+            frame_batch_observer=resumed_batch,
+        ),
+    )
+
+    assert resumed_events == [(2, 5), (4, 5), (5, 5)]
 
 
 def test_batch_observer_identity_mismatch_fails_schema_validation(
