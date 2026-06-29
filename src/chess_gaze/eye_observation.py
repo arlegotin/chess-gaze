@@ -94,8 +94,8 @@ class _LandmarkPair:
 
 @dataclass(frozen=True)
 class _CropRecord:
-    path: Path
-    sha256: str
+    path: Path | None
+    sha256: str | None
     bbox_image_px: BBox
     transform_to_image_px: CropTransformToImagePx
 
@@ -105,6 +105,8 @@ def observe_eyes(
     rgb_frame: npt.NDArray[np.uint8],
     run_layout: RunLayout,
     frame_id: str,
+    *,
+    save_crop_images: bool = False,
 ) -> EyePairObservation:
     frame = _validate_rgb_frame(rgb_frame)
     image_height_px, image_width_px, _channels = frame.shape
@@ -123,6 +125,7 @@ def observe_eyes(
             iris_indices=LEFT_IRIS_INDICES,
             eye_missing_code=ErrorCode.LEFT_EYE_NOT_FOUND,
             iris_missing_code=ErrorCode.LEFT_IRIS_NOT_FOUND,
+            save_crop_images=save_crop_images,
         ),
         right=_observe_eye(
             side="right",
@@ -134,6 +137,7 @@ def observe_eyes(
             iris_indices=RIGHT_IRIS_INDICES,
             eye_missing_code=ErrorCode.RIGHT_EYE_NOT_FOUND,
             iris_missing_code=ErrorCode.RIGHT_IRIS_NOT_FOUND,
+            save_crop_images=save_crop_images,
         ),
     )
 
@@ -149,6 +153,7 @@ def _observe_eye(
     iris_indices: tuple[int, ...],
     eye_missing_code: ErrorCode,
     iris_missing_code: ErrorCode,
+    save_crop_images: bool,
 ) -> EyeObservation:
     eye_pairs = _landmarks_at_indices(face, eye_indices)
     eye_px = tuple(pair.image_px for pair in eye_pairs)
@@ -180,12 +185,13 @@ def _observe_eye(
             occlusion="severe",
         )
 
-    crop_record = _save_eye_crop(
+    crop_record = _eye_crop_record(
         side=side,
         rgb_frame=rgb_frame,
         bbox=eye_bbox_px,
         run_layout=run_layout,
         frame_id=frame_id,
+        save_crop_images=save_crop_images,
     )
     iris_pairs = _landmarks_at_indices(face, iris_indices)
     iris_px = tuple(pair.image_px for pair in iris_pairs)
@@ -352,13 +358,14 @@ def _eye_open_metric(bbox: BBox) -> float | None:
     return height / width
 
 
-def _save_eye_crop(
+def _eye_crop_record(
     *,
     side: EyeSide,
     rgb_frame: npt.NDArray[np.uint8],
     bbox: BBox,
     run_layout: RunLayout,
     frame_id: str,
+    save_crop_images: bool,
 ) -> _CropRecord:
     frame_height, frame_width, _channels = rgb_frame.shape
     crop_bounds = _crop_bounds(
@@ -367,10 +374,13 @@ def _save_eye_crop(
         image_height_px=int(frame_height),
     )
     x_min, y_min, x_max, y_max = crop_bounds
-    crop = rgb_frame[y_min:y_max, x_min:x_max]
-    crop_path = _absolute_crop_path(run_layout, side, frame_id)
-    crop_sha256 = save_rgb_png(crop_path, crop)
-    relative_path = run_layout.relative_artifact_path(crop_path)
+    relative_path: Path | None = None
+    crop_sha256: str | None = None
+    if save_crop_images:
+        crop = rgb_frame[y_min:y_max, x_min:x_max]
+        crop_path = _absolute_crop_path(run_layout, side, frame_id)
+        crop_sha256 = save_rgb_png(crop_path, crop)
+        relative_path = run_layout.relative_artifact_path(crop_path)
     crop_bbox = BBox(
         space=CoordinateSpace.IMAGE_PX,
         x_min=float(x_min),

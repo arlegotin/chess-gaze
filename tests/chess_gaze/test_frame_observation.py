@@ -324,8 +324,11 @@ def _observe_eyes(
     rgb_frame: np.ndarray,
     run_layout: RunLayout,
     frame_id: str,
+    *,
+    save_crop_images: bool = False,
 ) -> EyePairObservation:
     del face, rgb_frame, run_layout
+    assert save_crop_images is False
     return EyePairObservation(
         frame_id=frame_id,
         image_width_px=64,
@@ -340,8 +343,11 @@ def _observe_eyes_missing_right(
     rgb_frame: np.ndarray,
     run_layout: RunLayout,
     frame_id: str,
+    *,
+    save_crop_images: bool = False,
 ) -> EyePairObservation:
     del face, rgb_frame, run_layout
+    assert save_crop_images is False
     return EyePairObservation(
         frame_id=frame_id,
         image_width_px=64,

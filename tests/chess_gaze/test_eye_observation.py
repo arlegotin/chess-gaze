@@ -91,10 +91,15 @@ def test_observe_eyes_records_independent_eye_and_iris_measurements(
     assert observation.left.iris_present is True
     assert observation.right.iris_present is True
 
-    assert observation.left.eye_crop_path == Path("crops/eyes/left/f000000042.png")
-    assert observation.right.eye_crop_path == Path("crops/eyes/right/f000000042.png")
-    assert (run_layout.run_dir / observation.left.eye_crop_path).is_file()
-    assert (run_layout.run_dir / observation.right.eye_crop_path).is_file()
+    assert observation.left.crop_bbox_image_px is not None
+    assert observation.right.crop_bbox_image_px is not None
+    assert observation.left.eye_crop_transform_to_image_px is not None
+    assert observation.right.eye_crop_transform_to_image_px is not None
+    assert observation.left.eye_crop_path is None
+    assert observation.right.eye_crop_path is None
+    assert observation.left.eye_crop_sha256 is None
+    assert observation.right.eye_crop_sha256 is None
+    assert list(run_layout.crops_dir.rglob("*.png")) == []
 
     assert observation.left.bounding_box_image_px is not None
     assert observation.right.bounding_box_image_px is not None
@@ -160,7 +165,10 @@ def test_one_missing_eye_does_not_invalidate_the_other(tmp_path: Path) -> None:
     assert observation.right.present is True
     assert observation.right.iris_present is True
     assert observation.right.reason_missing is None
-    assert observation.right.eye_crop_path == Path("crops/eyes/right/f000000043.png")
+    assert observation.right.crop_bbox_image_px is not None
+    assert observation.right.eye_crop_transform_to_image_px is not None
+    assert observation.right.eye_crop_path is None
+    assert observation.right.eye_crop_sha256 is None
 
 
 def test_missing_iris_keeps_eye_contour_with_explicit_reason(
@@ -194,11 +202,47 @@ def test_missing_iris_keeps_eye_contour_with_explicit_reason(
     assert observation.left.reason_missing == ErrorCode.LEFT_IRIS_NOT_FOUND
     assert observation.left.iris_center_image_px is None
     assert observation.left.iris_diameter_px is None
-    assert observation.left.eye_crop_path == Path("crops/eyes/left/f000000044.png")
+    assert observation.left.crop_bbox_image_px is not None
+    assert observation.left.eye_crop_transform_to_image_px is not None
+    assert observation.left.eye_crop_path is None
+    assert observation.left.eye_crop_sha256 is None
     assert observation.left.occlusion == "partial"
     assert observation.right.present is True
     assert observation.right.iris_present is True
     assert observation.right.reason_missing is None
+
+
+def test_observe_eyes_retains_crop_files_when_requested(tmp_path: Path) -> None:
+    run_layout = make_run_layout(tmp_path)
+    face = make_face_candidate(
+        left_eye=EyeFixture(
+            bbox=(125.0, 32.0, 170.0, 56.0),
+            iris_center=(149.0, 42.0),
+            iris_radius_x=9.0,
+            iris_radius_y=6.0,
+        ),
+        right_eye=EyeFixture(
+            bbox=(40.0, 30.0, 80.0, 50.0),
+            iris_center=(57.0, 40.0),
+            iris_radius_x=6.0,
+            iris_radius_y=5.0,
+        ),
+    )
+
+    observation = observe_eyes(
+        face,
+        gradient_rgb_frame(),
+        run_layout,
+        frame_id="f000000047",
+        save_crop_images=True,
+    )
+
+    assert observation.left.eye_crop_path == Path("crops/eyes/left/f000000047.png")
+    assert observation.right.eye_crop_path == Path("crops/eyes/right/f000000047.png")
+    assert observation.left.eye_crop_sha256 is not None
+    assert observation.right.eye_crop_sha256 is not None
+    assert (run_layout.run_dir / observation.left.eye_crop_path).is_file()
+    assert (run_layout.run_dir / observation.right.eye_crop_path).is_file()
 
 
 def test_crop_transform_maps_crop_coordinates_back_to_image_px(

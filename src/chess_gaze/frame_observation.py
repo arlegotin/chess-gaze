@@ -39,9 +39,18 @@ FRAME_WARNING_ERROR_CODES = frozenset(
     }
 )
 
-EyeObserver = Callable[
-    [FaceCandidate, npt.NDArray[np.uint8], RunLayout, str], EyePairObservation
-]
+class EyeObserver(Protocol):
+    def __call__(
+        self,
+        face: FaceCandidate,
+        rgb_frame: npt.NDArray[np.uint8],
+        run_layout: RunLayout,
+        frame_id: str,
+        *,
+        save_crop_images: bool = False,
+    ) -> EyePairObservation: ...
+
+
 HeadPoseEstimator = Callable[
     [FaceCandidate, CalibrationRecord, ImageSize], HeadPoseObservation
 ]
@@ -92,6 +101,7 @@ class ModelBackedFrameObserver:
     eye_observer: EyeObserver = observe_eyes
     head_pose_estimator: HeadPoseEstimator = estimate_head_pose
     face_crop_normalizer: FaceCropNormalizer = normalize_face_crop
+    save_crop_images: bool = False
     gaze_thresholds: GazeThresholds = field(
         default_factory=lambda: GazeThresholds(
             max_pairwise_angle_delta_radians=(
@@ -215,7 +225,11 @@ class ModelBackedFrameObserver:
             reason_invalid=None,
         )
         eye_pair = self.eye_observer(
-            selected_face, frame.rgb, self.run_layout, frame.frame_id
+            selected_face,
+            frame.rgb,
+            self.run_layout,
+            frame.frame_id,
+            save_crop_images=self.save_crop_images,
         )
         left_eye = _eye_record(eye_pair.left, ErrorCode.LEFT_EYE_NOT_FOUND)
         right_eye = _eye_record(eye_pair.right, ErrorCode.RIGHT_EYE_NOT_FOUND)

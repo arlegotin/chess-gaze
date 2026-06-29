@@ -73,7 +73,8 @@ RawFrameWriter = Callable[[Path, npt.NDArray[np.uint8]], str]
 raw_frame_writer: RawFrameWriter = save_rgb_png
 FrameErrorWriter = Callable[[TextIO, FrameRecord], None]
 DefaultObserverBundleFactory = Callable[
-    [list[ResolvedModelAsset], CalibrationRecord, RunLayout, object], "ObserverBundle"
+    [list[ResolvedModelAsset], CalibrationRecord, RunLayout, object, bool],
+    "ObserverBundle",
 ]
 
 
@@ -304,6 +305,7 @@ def analyze_video(
             calibration,
             layout,
             prepared_unigaze_runtime.model,
+            resolved.save_crop_images,
         )
 
     try:
@@ -571,6 +573,7 @@ def _default_observer_bundle_factory(
     calibration: CalibrationRecord,
     run_layout: RunLayout,
     gaze_model: object,
+    save_crop_images: bool,
 ) -> ObserverBundle:
     from chess_gaze.face_observation import MediaPipeFaceObserver
     from chess_gaze.frame_observation import ModelBackedFrameObserver
@@ -584,6 +587,7 @@ def _default_observer_bundle_factory(
         gaze_model=cast(Any, gaze_model),
         calibration=calibration,
         run_layout=run_layout,
+        save_crop_images=save_crop_images,
     )
     return ObserverBundle(
         frame_observer=observer,

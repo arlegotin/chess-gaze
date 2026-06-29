@@ -783,8 +783,9 @@ def test_default_model_batch_inference_failure_returns_usage_error(
         calibration: object,
         run_layout: object,
         gaze_model: object,
+        save_crop_images: bool,
     ) -> ObserverBundle:
-        del resolved_assets, calibration, run_layout, gaze_model
+        del resolved_assets, calibration, run_layout, gaze_model, save_crop_images
 
         def fail_batch(frames: Sequence[ObserverFrame]) -> list[FrameRecord]:
             del frames
@@ -1040,8 +1041,9 @@ def test_default_model_observer_manifest_records_unigaze_runtime(
         calibration: object,
         run_layout: object,
         gaze_model: object,
+        save_crop_images: bool,
     ) -> ObserverBundle:
-        del resolved_assets, calibration, run_layout
+        del resolved_assets, calibration, run_layout, save_crop_images
         captured_gaze_models.append(gaze_model)
         return ObserverBundle(frame_observer=_fake_record)
 
@@ -1111,8 +1113,9 @@ def test_explicit_cpu_batch_one_override_reaches_default_model_runtime(
         calibration: object,
         run_layout: object,
         gaze_model: object,
+        save_crop_images: bool,
     ) -> ObserverBundle:
-        del resolved_assets, calibration, run_layout, gaze_model
+        del resolved_assets, calibration, run_layout, gaze_model, save_crop_images
         return ObserverBundle(frame_observer=_fake_record)
 
     monkeypatch.setattr(
@@ -1172,14 +1175,16 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
             self,
             *,
             face_observer: object,
-            gaze_model: object,
-            calibration: object,
-            run_layout: object,
-        ) -> None:
-            captured["face_observer"] = face_observer
-            captured["gaze_model"] = gaze_model
-            captured["calibration"] = calibration
-            captured["run_layout"] = run_layout
+                gaze_model: object,
+                calibration: object,
+                run_layout: object,
+                save_crop_images: bool,
+            ) -> None:
+                captured["face_observer"] = face_observer
+                captured["gaze_model"] = gaze_model
+                captured["calibration"] = calibration
+                captured["run_layout"] = run_layout
+                captured["save_crop_images"] = save_crop_images
 
         def __call__(self, frame: ObserverFrame) -> FrameRecord:
             return _fake_record(frame)
@@ -1221,11 +1226,12 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
     ]
 
     bundle = pipeline.default_observer_bundle_factory(
-        resolved_assets, calibration, run_layout, prepared_model
+        resolved_assets, calibration, run_layout, prepared_model, False
     )
 
     assert captured["face_model_asset_path"] == face_path
     assert captured["gaze_model"] is prepared_model
+    assert captured["save_crop_images"] is False
     assert bundle.frame_batch_observer is not None
     assert bundle.close is not None
 
@@ -1351,8 +1357,9 @@ def test_config_models_root_controls_default_model_observer_factory(
         calibration: object,
         run_layout: object,
         gaze_model: object,
+        save_crop_images: bool,
     ) -> ObserverBundle:
-        del calibration, run_layout, gaze_model
+        del calibration, run_layout, gaze_model, save_crop_images
         captured_asset_paths.extend(asset.resolved_path for asset in resolved_assets)
         return ObserverBundle(frame_observer=_fake_record)
 
