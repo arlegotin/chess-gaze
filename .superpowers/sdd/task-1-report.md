@@ -1,72 +1,107 @@
-# Task 1 Report: Calibration And Sphere Projection Math
+# Task 1 Report: Face Candidate Fallback Arbitration Regression
 
-## What I implemented
+## Scope
 
-- Replaced the active monitor-projection calibration constant and `SceneAssumptions` field set in [src/chess_gaze/scene_calibration.py](/Volumes/git/legotin/chess-gaze/src/chess_gaze/scene_calibration.py) with `DEFAULT_GAZE_SPHERE_RADIUS_M` and `gaze_sphere_radius_m`.
-- Removed the old monitor-projection assumption records from the default calibration metadata and persisted `DEFAULT_GAZE_SPHERE_RADIUS_M` instead.
-- Added the sphere-specific invalid reasons to `SceneInvalidReason` in [src/chess_gaze/scene_records.py](/Volumes/git/legotin/chess-gaze/src/chess_gaze/scene_records.py).
-- Added [src/chess_gaze/sphere_projection.py](/Volumes/git/legotin/chess-gaze/src/chess_gaze/sphere_projection.py) with:
-  - `GazeSphereSurface`
-  - `SphereHitResult`
-  - `build_gaze_sphere(...)`
-  - `intersect_ray_with_sphere(...)`
-- Replaced the calibration assertions in [tests/chess_gaze/test_scene_calibration.py](/Volumes/git/legotin/chess-gaze/tests/chess_gaze/test_scene_calibration.py) per the brief.
-- Added [tests/chess_gaze/test_sphere_projection.py](/Volumes/git/legotin/chess-gaze/tests/chess_gaze/test_sphere_projection.py) with the exact required sphere hit and invalid-path coverage.
+Implemented only Task 1 from `.superpowers/sdd/task-1-brief.md`.
 
-## Tests run and output summary
+Files changed:
 
-- Focused task test command:
-  - `UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_sphere_projection.py -q`
-- Final result:
-  - `11 passed in 0.10s`
-- Diff hygiene:
-  - `git diff --check -- src/chess_gaze/scene_calibration.py src/chess_gaze/scene_records.py src/chess_gaze/sphere_projection.py tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_sphere_projection.py`
-  - Result: no output
+- `tests/chess_gaze/test_face_observation_region_arbitration.py`
+- `.superpowers/sdd/task-1-report.md`
 
-## TDD evidence
+No production code was modified.
 
-### RED command
+## Regression Added
 
-```sh
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_sphere_projection.py -q
-```
+Added
+`test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_region_candidate`.
 
-Relevant failing output:
+The fake MediaPipe result sequence follows the current observer region order:
 
-```text
-ImportError: cannot import name 'DEFAULT_GAZE_SPHERE_RADIUS_M' from 'chess_gaze.scene_calibration'
-ERROR tests/chess_gaze/test_scene_calibration.py
-ERROR tests/chess_gaze/test_sphere_projection.py
-2 errors in 0.14s
-```
+1. `full_frame`: no detections.
+2. `left_half`: real face.
+3. `right_half`: no detections.
+4. `left_top`: no detections.
+5. `right_top`: no detections.
+6. `left_upper_band`: same real face plus a larger false positive.
+7. `right_upper_band`: no detections.
+8. `right_upper_middle`: no detections.
 
-### GREEN command
+The expected primary candidate is the cross-region-supported real face with
+full-image pixel bounds `(360, 216)` to `(540, 432)`, not the larger
+single-region false positive.
+
+## TDD RED Evidence
+
+Command:
 
 ```sh
-UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_scene_calibration.py tests/chess_gaze/test_sphere_projection.py -q
+MPLCONFIGDIR=/private/tmp/matplotlib UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_region_candidate -q
 ```
 
-Relevant passing output:
+Observed output:
 
 ```text
-...........                                                              [100%]
-11 passed in 0.10s
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_region_candidate _
+
+E       AssertionError: assert 'larger_singl...alse_positive' == 'cross_region_real_face'
+E
+E         - cross_region_real_face
+E         + larger_single_region_false_positive
+
+tests/chess_gaze/test_face_observation_region_arbitration.py:409: AssertionError
+=========================== short test summary info ============================
+FAILED tests/chess_gaze/test_face_observation_region_arbitration.py::test_mediapipe_observer_prefers_cross_region_consensus_over_larger_single_region_candidate
+1 failed in 0.16s
 ```
 
-## Files changed
+The failure is the intended RED failure: current fallback arbitration selects
+the `left_upper_band` primary candidate, which is the larger single-region false
+positive, instead of the real face seen in both `left_half` and
+`left_upper_band`.
 
-- [src/chess_gaze/scene_calibration.py](/Volumes/git/legotin/chess-gaze/src/chess_gaze/scene_calibration.py)
-- [src/chess_gaze/scene_records.py](/Volumes/git/legotin/chess-gaze/src/chess_gaze/scene_records.py)
-- [src/chess_gaze/sphere_projection.py](/Volumes/git/legotin/chess-gaze/src/chess_gaze/sphere_projection.py)
-- [tests/chess_gaze/test_scene_calibration.py](/Volumes/git/legotin/chess-gaze/tests/chess_gaze/test_scene_calibration.py)
-- [tests/chess_gaze/test_sphere_projection.py](/Volumes/git/legotin/chess-gaze/tests/chess_gaze/test_sphere_projection.py)
+## Additional Checks
 
-## Self-review findings
+Focused lint:
 
-- The sphere intersection logic covers the required cases from the brief: origin-inside forward hit, rear hit, outside-origin nearest root, tangent hit, discriminant miss, behind-origin invalidation, invalid radius, and missing-ray invalidation.
-- The new models remain strict/frozen Pydantic artifacts.
-- Calibration metadata now persists the sphere-radius record and excludes the removed monitor-plane records named in the brief.
+```sh
+uv run ruff check tests/chess_gaze/test_face_observation_region_arbitration.py
+```
 
-## Concerns if any
+Observed output:
 
-- This task intentionally removes active monitor-plane calibration fields from `SceneAssumptions`. Other repo modules and tests still reference those removed fields/constants, so broader repo migration work remains for later tasks. I did not run the full test suite because the brief scoped verification to the two Task 1 test files.
+```text
+All checks passed!
+```
+
+Diff whitespace check:
+
+```sh
+git diff --check
+```
+
+Observed result: exit code `0`, no output.
+
+## Self-Review
+
+- The test uses the existing fake MediaPipe sequence helper and tests the real
+  `MediaPipeFaceObserver.observe()` behavior at the observer seam.
+- The fake sequence length and detected image shapes lock the region order so
+  the regression cannot pass accidentally by shifting fake results across
+  regions.
+- The assertion resolves `selection.primary_candidate_id` before checking the
+  blendshape label, avoiding a false pass when the selected region contains
+  multiple candidates.
+- The expected coordinates are full-image pixel coordinates derived from the
+  same real-face landmarks in `left_half` and `left_upper_band`.
+- The function name keeps the exact brief-specified pytest node id; a narrow
+  `# noqa: E501` is used because the required name exceeds the Ruff line limit.
+
+## Concerns
+
+- This task is intentionally RED-only, so the focused pytest command fails until
+  the production arbitration is repaired in a later task.
+- I did not run full local gates because the active regression is expected to
+  fail and Task 1 is scoped to committing the failing test.
