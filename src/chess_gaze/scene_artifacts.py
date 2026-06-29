@@ -21,11 +21,9 @@ from chess_gaze.scene_geometry import (
     RobustDirectionEstimate,
     RobustPointEstimate,
     back_project_eye_points,
-    build_monitor_plane,
     build_scene_axis_basis,
     camera_point_to_scene,
     estimated_camera_model,
-    intersect_ray_with_monitor,
     robust_main_direction,
     robust_scene_center,
     unigaze_ray_from_frame,
@@ -44,14 +42,14 @@ from chess_gaze.scene_records import (
     SceneFrameCameraRecord,
     SceneFrameDiagnosticsRecord,
     SceneFrameRecord,
+    SceneGazeSphereRecord,
     SceneHeadRecord,
     SceneInvalidReason,
     SceneManifest,
-    SceneMonitorHitBoundsRecord,
-    SceneMonitorHitRecord,
-    SceneMonitorPlaneRecord,
     SceneOrientationEstimatorRecord,
     SceneRobustEstimatorsRecord,
+    SceneSphereHitAngleBoundsRecord,
+    SceneSphereHitRecord,
     SceneSourceArtifactsRecord,
     SceneSummary,
     SceneUniGazeRayRecord,
@@ -60,6 +58,12 @@ from chess_gaze.scene_records import (
     Vector3D,
     ViewerHitPoint,
     ViewerSceneData,
+)
+from chess_gaze.sphere_projection import (
+    GazeSphereSurface,
+    SphereHitResult,
+    build_gaze_sphere,
+    intersect_ray_with_sphere,
 )
 from chess_gaze.viewer_dependencies import (
     THREE_CDN_PROVIDER,
@@ -83,7 +87,7 @@ class SceneArtifactPaths:
 class SceneArtifactResult:
     paths: SceneArtifactPaths
     scene_frame_count: int
-    valid_monitor_hit_count: int
+    valid_sphere_hit_count: int
     viewer_data: ViewerSceneData
     manifest: SceneManifest
     summary: SceneSummary
@@ -149,12 +153,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         eye_pair_right_vectors,
         assumptions,
     )
-    monitor_plane = build_monitor_plane(
-        scene_center,
-        main_direction,
-        axis_basis,
-        assumptions,
-    )
+    gaze_sphere = build_gaze_sphere(assumptions)
 
     scene_frames = [
         _build_scene_frame(
@@ -163,12 +162,12 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
             assumptions=assumptions,
             scene_center=scene_center.point_camera_m,
             axis_basis=axis_basis,
-            monitor_plane=monitor_plane,
+            gaze_sphere=gaze_sphere,
         )
         for first_pass in first_pass_frames
     ]
-    valid_monitor_hit_count = sum(
-        1 for scene_frame in scene_frames if scene_frame.main_monitor_hit.valid
+    valid_sphere_hit_count = sum(
+        1 for scene_frame in scene_frames if scene_frame.sphere_hit.valid
     )
     manifest = _build_manifest(
         run_layout=run_layout,
@@ -179,7 +178,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         scene_center=scene_center,
         main_direction=main_direction,
         axis_basis=axis_basis,
-        monitor_plane=monitor_plane,
+        gaze_sphere=gaze_sphere,
     )
     summary = _build_summary(
         run_id=run_manifest.run_id,
@@ -193,7 +192,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         run_id=run_manifest.run_id,
         source_video_path=video_manifest.source_path,
         frames=scene_frames,
-        monitor_plane=monitor_plane,
+        gaze_sphere=_sphere_record(gaze_sphere),
         axis_basis=axis_basis,
         assumptions=assumptions.records,
         summary=summary,
@@ -206,7 +205,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
     return SceneArtifactResult(
         paths=paths,
         scene_frame_count=len(scene_frames),
-        valid_monitor_hit_count=valid_monitor_hit_count,
+        valid_sphere_hit_count=valid_sphere_hit_count,
         viewer_data=viewer_data,
         manifest=manifest,
         summary=summary,
@@ -229,7 +228,7 @@ def build_viewer_scene_data(result: SceneArtifactResult) -> ViewerSceneData:
         run_id=result.manifest.run_id,
         source_video_path=result.manifest.source_video_path,
         frames=result.frames,
-        monitor_plane=result.manifest.monitor_plane,
+        gaze_sphere=result.manifest.gaze_sphere,
         axis_basis=result.manifest.axis_basis,
         assumptions=result.manifest.assumptions,
         summary=result.summary,
@@ -259,7 +258,7 @@ def _build_scene_frame(
     assumptions: SceneAssumptions,
     scene_center: Vector3D,
     axis_basis: SceneAxisBasisRecord,
-    monitor_plane: SceneMonitorPlaneRecord,
+    gaze_sphere: GazeSphereSurface,
 ) -> SceneFrameRecord:
     projection = back_project_eye_points(source_frame, camera, assumptions)
     left_eye = _final_eye_record(
@@ -282,7 +281,18 @@ def _build_scene_frame(
         scene_center=scene_center,
         axis_basis=axis_basis,
     )
-    monitor_hit = intersect_ray_with_monitor(ray, monitor_plane, assumptions)
+    sphere_hit_result = intersect_ray_with_sphere(
+        origin_scene_m=ray.origin_scene_m,
+        direction_scene=ray.direction_scene,
+        sphere=gaze_sphere,
+        source_reason_invalid=ray.source_reason_invalid,
+        invalid_reason=(
+            SceneInvalidReason(ray.reason_invalid)
+            if ray.reason_invalid is not None
+            else SceneInvalidReason.UNIGAZE_INVALID
+        ),
+    )
+    sphere_hit = _sphere_hit_record(sphere_hit_result)
     head = _head_record(
         source_frame=source_frame,
         midpoint=midpoint,
@@ -290,7 +300,7 @@ def _build_scene_frame(
         scene_center=scene_center,
         axis_basis=axis_basis,
     )
-    warnings = _scene_warnings(midpoint, ray, monitor_hit)
+    warnings = _scene_warnings(midpoint, ray, sphere_hit)
     diagnostics = SceneFrameDiagnosticsRecord(
         warnings=warnings,
         source_error_codes=[_enum_value(error.code) for error in source_frame.errors],
@@ -301,7 +311,7 @@ def _build_scene_frame(
         timestamp_seconds=source_frame.timestamp_seconds,
         source_frame_status=source_frame.status,
         valid_for_scene_center=midpoint.valid,
-        valid_for_main_monitor_direction=ray.valid,
+        valid_for_sphere_projection=ray.valid,
         camera=SceneFrameCameraRecord(
             fx_px=camera.fx_px,
             fy_px=camera.fy_px,
@@ -314,7 +324,7 @@ def _build_scene_frame(
         eye_midpoint=midpoint,
         head=head,
         unigaze_ray=ray,
-        main_monitor_hit=monitor_hit,
+        sphere_hit=sphere_hit,
         diagnostics=diagnostics,
     )
 
@@ -453,7 +463,7 @@ def _build_manifest(
     scene_center: RobustPointEstimate,
     main_direction: RobustDirectionEstimate,
     axis_basis: SceneAxisBasisRecord,
-    monitor_plane: SceneMonitorPlaneRecord,
+    gaze_sphere: GazeSphereSurface,
 ) -> SceneManifest:
     del run_layout
     return SceneManifest(
@@ -469,7 +479,7 @@ def _build_manifest(
         coordinate_frames=SceneCoordinateFramesRecord(
             math_frame=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
             scene_frame=CoordinateFrame3D.SCENE_PSEUDO_M,
-            monitor_frame=CoordinateFrame3D.MONITOR_PLANE_PSEUDO_M,
+            projection_frame=CoordinateFrame3D.GAZE_SPHERE_PSEUDO_M,
             viewer_frame=CoordinateFrame3D.THREE_VIEW,
         ),
         camera_model=camera,
@@ -511,7 +521,7 @@ def _build_manifest(
         ),
         scene_center_camera_m=scene_center.point_camera_m,
         scene_axes_camera=axis_basis,
-        main_monitor_plane=monitor_plane,
+        gaze_sphere=_sphere_record(gaze_sphere),
         viewer=SceneViewerDependencyRecord(
             library=THREE_PACKAGE_NAME,
             version=THREE_VERSION,
@@ -534,11 +544,11 @@ def _build_summary(
     scene_summary_valid: bool,
     viewer_exists: bool,
 ) -> SceneSummary:
-    invalid_monitor_hit_reasons = Counter[str]()
+    invalid_sphere_hit_reasons = Counter[str]()
     for scene_frame in scene_frames:
-        hit = scene_frame.main_monitor_hit
+        hit = scene_frame.sphere_hit
         if not hit.valid and hit.reason_invalid is not None:
-            invalid_monitor_hit_reasons[_enum_value(hit.reason_invalid)] += 1
+            invalid_sphere_hit_reasons[_enum_value(hit.reason_invalid)] += 1
 
     return SceneSummary(
         run_id=run_id,
@@ -550,11 +560,11 @@ def _build_summary(
         valid_unigaze_ray_frames=sum(
             1 for scene_frame in scene_frames if scene_frame.unigaze_ray.valid
         ),
-        valid_monitor_hit_frames=sum(
-            1 for scene_frame in scene_frames if scene_frame.main_monitor_hit.valid
+        valid_sphere_hit_frames=sum(
+            1 for scene_frame in scene_frames if scene_frame.sphere_hit.valid
         ),
-        invalid_monitor_hit_reasons=dict(sorted(invalid_monitor_hit_reasons.items())),
-        monitor_hit_bounds=_monitor_hit_bounds(scene_frames),
+        invalid_sphere_hit_reasons=dict(sorted(invalid_sphere_hit_reasons.items())),
+        sphere_hit_angle_bounds=_sphere_hit_angle_bounds(scene_frames),
         representative_scene_warning_frame_ids=_representative_warning_frame_ids(
             scene_frames
         ),
@@ -572,7 +582,7 @@ def _viewer_scene_data_from_parts(
     run_id: str,
     source_video_path: str,
     frames: list[SceneFrameRecord],
-    monitor_plane: SceneMonitorPlaneRecord,
+    gaze_sphere: SceneGazeSphereRecord,
     axis_basis: SceneAxisBasisRecord,
     assumptions: list[SceneAssumptionRecord],
     summary: SceneSummary,
@@ -583,7 +593,7 @@ def _viewer_scene_data_from_parts(
         frame_count=len(frames),
         frames=frames,
         valid_hit_points=_valid_hit_points(frames),
-        monitor_plane=monitor_plane,
+        gaze_sphere=gaze_sphere,
         axis_basis=axis_basis,
         assumptions=assumptions,
         summary=summary,
@@ -593,45 +603,69 @@ def _viewer_scene_data_from_parts(
 def _valid_hit_points(frames: list[SceneFrameRecord]) -> list[ViewerHitPoint]:
     hit_points: list[ViewerHitPoint] = []
     for frame in frames:
-        hit = frame.main_monitor_hit
+        hit = frame.sphere_hit
         if not hit.valid:
             continue
-        if hit.point_scene_m is None or hit.u_m is None or hit.v_m is None:
-            raise ValueError("valid monitor hit is missing persisted viewer fields")
-        if hit.within_physical_monitor is None or hit.within_extended_plane is None:
-            raise ValueError("valid monitor hit is missing bounds flags")
+        if (
+            hit.point_scene_m is None
+            or hit.radius_m is None
+            or hit.theta_radians is None
+            or hit.phi_radians is None
+            or hit.hemisphere is None
+        ):
+            raise ValueError("valid sphere hit is missing persisted viewer fields")
         hit_points.append(
             ViewerHitPoint(
                 frame_id=frame.frame_id,
                 frame_index=frame.frame_index,
                 point_scene_m=hit.point_scene_m,
-                u_m=hit.u_m,
-                v_m=hit.v_m,
-                within_physical_monitor=hit.within_physical_monitor,
-                within_extended_plane=hit.within_extended_plane,
+                radius_m=hit.radius_m,
+                theta_radians=hit.theta_radians,
+                phi_radians=hit.phi_radians,
+                hemisphere=hit.hemisphere,
             )
         )
     return hit_points
 
 
-def _monitor_hit_bounds(frames: list[SceneFrameRecord]) -> SceneMonitorHitBoundsRecord:
-    valid_uv = [
-        (hit.u_m, hit.v_m)
-        for hit in (frame.main_monitor_hit for frame in frames)
-        if hit.valid and hit.u_m is not None and hit.v_m is not None
+def _sphere_hit_angle_bounds(
+    frames: list[SceneFrameRecord],
+) -> SceneSphereHitAngleBoundsRecord:
+    valid_hits = [
+        frame.sphere_hit
+        for frame in frames
+        if frame.sphere_hit.valid
+        and frame.sphere_hit.theta_radians is not None
+        and frame.sphere_hit.phi_radians is not None
+        and frame.sphere_hit.hemisphere is not None
     ]
-    if not valid_uv:
-        return SceneMonitorHitBoundsRecord(
-            u_min_m=0.0,
-            u_max_m=0.0,
-            v_min_m=0.0,
-            v_max_m=0.0,
+    if not valid_hits:
+        return SceneSphereHitAngleBoundsRecord(
+            theta_min_radians=0.0,
+            theta_max_radians=0.0,
+            phi_min_radians=0.0,
+            phi_max_radians=0.0,
+            front_hemisphere_frames=0,
+            rear_hemisphere_frames=0,
+            equator_frames=0,
         )
-    return SceneMonitorHitBoundsRecord(
-        u_min_m=min(u for u, _v in valid_uv),
-        u_max_m=max(u for u, _v in valid_uv),
-        v_min_m=min(v for _u, v in valid_uv),
-        v_max_m=max(v for _u, v in valid_uv),
+    theta_values = [hit.theta_radians for hit in valid_hits if hit.theta_radians is not None]
+    phi_values = [hit.phi_radians for hit in valid_hits if hit.phi_radians is not None]
+    hemispheres = [hit.hemisphere for hit in valid_hits]
+    return SceneSphereHitAngleBoundsRecord(
+        theta_min_radians=min(theta_values),
+        theta_max_radians=max(theta_values),
+        phi_min_radians=min(phi_values),
+        phi_max_radians=max(phi_values),
+        front_hemisphere_frames=sum(
+            1 for hemisphere in hemispheres if hemisphere == "front"
+        ),
+        rear_hemisphere_frames=sum(
+            1 for hemisphere in hemispheres if hemisphere == "rear"
+        ),
+        equator_frames=sum(
+            1 for hemisphere in hemispheres if hemisphere == "equator"
+        ),
     )
 
 
@@ -648,16 +682,39 @@ def _representative_warning_frame_ids(
 def _scene_warnings(
     midpoint: SceneEyeMidpointRecord,
     ray: SceneUniGazeRayRecord,
-    monitor_hit: SceneMonitorHitRecord,
+    sphere_hit: SceneSphereHitRecord,
 ) -> list[str]:
     warnings: list[str] = []
     if not midpoint.valid and midpoint.reason_invalid is not None:
         warnings.append(f"eye_midpoint:{_enum_value(midpoint.reason_invalid)}")
     if not ray.valid and ray.reason_invalid is not None:
         warnings.append(f"unigaze_ray:{_enum_value(ray.reason_invalid)}")
-    if not monitor_hit.valid and monitor_hit.reason_invalid is not None:
-        warnings.append(f"main_monitor_hit:{_enum_value(monitor_hit.reason_invalid)}")
+    if not sphere_hit.valid and sphere_hit.reason_invalid is not None:
+        warnings.append(f"sphere_hit:{_enum_value(sphere_hit.reason_invalid)}")
     return warnings
+
+
+def _sphere_record(surface: GazeSphereSurface) -> SceneGazeSphereRecord:
+    return SceneGazeSphereRecord(
+        center_scene_m=surface.center_scene_m,
+        radius_m=surface.radius_m,
+        radius_source=surface.radius_source,
+        center_source=surface.center_source,
+    )
+
+
+def _sphere_hit_record(result: SphereHitResult) -> SceneSphereHitRecord:
+    return SceneSphereHitRecord(
+        valid=result.valid,
+        point_scene_m=result.point_scene_m,
+        ray_t_m=result.ray_t_m,
+        radius_m=result.radius_m,
+        theta_radians=result.theta_radians,
+        phi_radians=result.phi_radians,
+        hemisphere=result.hemisphere,
+        source_reason_invalid=result.source_reason_invalid,
+        reason_invalid=result.reason_invalid,
+    )
 
 
 def _camera_direction_to_scene(

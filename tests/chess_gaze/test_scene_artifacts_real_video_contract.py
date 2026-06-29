@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from chess_gaze.errors import FrameStatus
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
@@ -144,6 +146,7 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
     assert generated_viewer_data.frame_count == expected_frame_count
     assert len(generated_viewer_data.frames) == expected_frame_count
     assert len(generated_viewer_data.valid_hit_points) == expected_frame_count
+    assert generated_viewer_data.gaze_sphere.radius_m == pytest.approx(0.7)
     assert generated_viewer_data.summary.artifact_validation.viewer_exists is True
     assert scene_result.scene_frame_count == expected_frame_count
     assert viewer_data.frame_count == expected_frame_count
@@ -155,19 +158,24 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
         2,
     ]
     assert viewer_data.valid_hit_points[-1].frame_index == expected_frame_count - 1
-    valid_frame = next(
-        frame for frame in viewer_data.frames if frame.main_monitor_hit.valid
-    )
-    assert valid_frame.main_monitor_hit.t is not None
-    assert valid_frame.main_monitor_hit.point_scene_m is not None
-    assert valid_frame.main_monitor_hit.point_camera_m is not None
+    assert all(frame.sphere_hit.valid for frame in generated_viewer_data.frames)
+    valid_frame = next(frame for frame in viewer_data.frames if frame.sphere_hit.valid)
+    assert valid_frame.sphere_hit.ray_t_m is not None
+    assert valid_frame.sphere_hit.point_scene_m is not None
+    assert valid_frame.sphere_hit.radius_m == pytest.approx(0.7)
     assert valid_frame.unigaze_ray.direction_scene is not None
     assert valid_frame.unigaze_ray.direction_camera is not None
-    assert viewer_data.monitor_plane.normal_camera is not None
+    assert viewer_data.gaze_sphere.radius_m == pytest.approx(0.7)
     assert viewer_data.axis_basis.right_camera is not None
     assert summary.decoded_frames == expected_frame_count
     assert summary.scene_frame_records == expected_frame_count
-    assert summary.valid_monitor_hit_frames == expected_frame_count
+    assert summary.valid_sphere_hit_frames == expected_frame_count
     assert summary.artifact_validation.scene_frame_count_matches_decoded is True
     assert summary.artifact_validation.scene_manifest_valid is True
     assert summary.artifact_validation.scene_summary_valid is True
+    assert "main_monitor_hit" not in pipeline_result.viewer_scene_data_path.read_text(
+        encoding="utf-8"
+    )
+    assert "monitor_plane" not in pipeline_result.viewer_scene_data_path.read_text(
+        encoding="utf-8"
+    )

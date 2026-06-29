@@ -27,7 +27,12 @@ from chess_gaze.scene_artifacts import (
     build_viewer_scene_data,
     load_scene_frames,
 )
-from chess_gaze.scene_records import SceneAssumptionRecord, SceneManifest, SceneSummary
+from chess_gaze.scene_records import (
+    CoordinateFrame3D,
+    SceneAssumptionRecord,
+    SceneManifest,
+    SceneSummary,
+)
 
 THREE_VERSION = "0.185.0"
 THREE_MODULE_URL = (
@@ -264,7 +269,7 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     assert manifest.assumptions
     assert {
         "DEFAULT_ADULT_MALE_INTERPUPILLARY_DISTANCE_M",
-        "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M",
+        "DEFAULT_GAZE_SPHERE_RADIUS_M",
     } <= {assumption.name for assumption in manifest.assumptions}
     assert manifest.robust_estimators.scene_center.candidate_frame_count == 7
     assert manifest.robust_estimators.scene_center.finite_candidate_frame_count == 7
@@ -302,12 +307,16 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     )
     assert manifest.robust_estimators.scene_orientation.candidate_frame_count == 0
     assert manifest.robust_estimators.scene_orientation.fallbacks == []
-    assert (
-        manifest.monitor_plane.distance_source == "DEFAULT_MONITOR_DISTANCE_FROM_EYES_M"
-    )
+    assert manifest.gaze_sphere.radius_m == pytest.approx(0.7)
+    assert manifest.gaze_sphere.radius_source == "DEFAULT_GAZE_SPHERE_RADIUS_M"
+    assert manifest.gaze_sphere.center_source == "robust_scene_center"
     assert manifest.axis_basis.convention == "right_up_back_columns_right_handed"
     assert manifest.axis_basis.determinant_right_up_back > 0.99
     assert manifest.coordinate_frames.math_frame == "camera_opencv_pseudo_m"
+    assert (
+        manifest.coordinate_frames.projection_frame
+        == CoordinateFrame3D.GAZE_SPHERE_PSEUDO_M
+    )
     assert manifest.viewer_dependency.library == "three"
     assert manifest.viewer_dependency.version == THREE_VERSION
     assert manifest.viewer_dependency.source == "npm:three"
@@ -322,17 +331,23 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     assert summary.scene_frame_records == 7
     assert summary.valid_eye_midpoint_frames == 7
     assert summary.valid_unigaze_ray_frames == 6
-    assert summary.valid_monitor_hit_frames == 6
-    assert summary.invalid_monitor_hit_reasons == {"UNIGAZE_INVALID": 1}
-    assert summary.monitor_hit_bounds.u_min_m <= summary.monitor_hit_bounds.u_max_m
-    assert summary.monitor_hit_bounds.v_min_m <= summary.monitor_hit_bounds.v_max_m
+    assert summary.valid_sphere_hit_frames == 6
+    assert summary.invalid_sphere_hit_reasons == {"UNIGAZE_INVALID": 1}
+    assert (
+        summary.sphere_hit_angle_bounds.theta_min_radians
+        <= summary.sphere_hit_angle_bounds.theta_max_radians
+    )
+    assert (
+        summary.sphere_hit_angle_bounds.phi_min_radians
+        <= summary.sphere_hit_angle_bounds.phi_max_radians
+    )
     assert summary.representative_scene_warning_frame_ids == ["f000000006"]
     assert summary.artifact_validation.scene_frame_count_matches_decoded is True
     assert summary.artifact_validation.scene_manifest_valid is True
     assert summary.artifact_validation.scene_summary_valid is True
 
     assert result.scene_frame_count == 7
-    assert result.valid_monitor_hit_count == 6
+    assert result.valid_sphere_hit_count == 6
     assert result.summary == summary
     assert result.manifest == manifest
 
@@ -344,6 +359,7 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
 
     result = build_scene_artifacts(layout)
     records = load_scene_frames(result.paths.scene_frames_jsonl_path)
+    raw_jsonl = result.paths.scene_frames_jsonl_path.read_text(encoding="utf-8")
 
     assert len(records) == 7
     assert [record.frame_id for record in records] == [
@@ -357,23 +373,24 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
         range(7)
     )
 
-    valid_hits = [record for record in records if record.main_monitor_hit.valid]
+    valid_hits = [record for record in records if record.sphere_hit.valid]
     assert len(valid_hits) == 6
-    assert all(
-        record.main_monitor_hit.point_scene_m is not None for record in valid_hits
-    )
+    assert all(record.sphere_hit.point_scene_m is not None for record in valid_hits)
     duplicate_hits = [
-        record.main_monitor_hit for record in records if record.frame_index in (2, 3)
+        record.sphere_hit for record in records if record.frame_index in (2, 3)
     ]
-    assert duplicate_hits[0].plane_uv_m == duplicate_hits[1].plane_uv_m
+    assert duplicate_hits[0].point_scene_m == duplicate_hits[1].point_scene_m
 
     invalid_record = records[6]
     assert invalid_record.source_frame_status == FrameStatus.WARNING
     assert invalid_record.unigaze_ray.valid is False
     assert invalid_record.unigaze_ray.source_reason_invalid == "GAZE_MODEL_FAILED"
-    assert invalid_record.main_monitor_hit.valid is False
-    assert invalid_record.main_monitor_hit.reason_invalid == "UNIGAZE_INVALID"
+    assert invalid_record.sphere_hit.valid is False
+    assert invalid_record.sphere_hit.reason_invalid == "UNIGAZE_INVALID"
     assert invalid_record.diagnostics.source_error_codes == ["GAZE_MODEL_FAILED"]
+    assert "main_monitor_hit" not in raw_jsonl
+    assert "monitor_hit" not in raw_jsonl
+    assert "plane_uv_m" not in raw_jsonl
 
     viewer_data = build_viewer_scene_data(result)
     assert viewer_data == result.viewer_data
@@ -381,20 +398,21 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
     assert viewer_data.source_video_stem == "synthetic_scene_source"
     assert viewer_data.frame_count == 7
     assert len(viewer_data.frames) == 7
-    assert len(viewer_data.valid_hit_points) == 6
-    assert [point.frame_index for point in viewer_data.valid_hit_points] == list(
-        range(6)
-    )
+    assert viewer_data.gaze_sphere == result.manifest.gaze_sphere
+    assert len(viewer_data.valid_hit_points) == result.valid_sphere_hit_count
+    assert [point.frame_index for point in viewer_data.valid_hit_points] == [
+        frame.frame_index for frame in records if frame.sphere_hit.valid
+    ]
     assert [
         (point.frame_id, point.frame_index)
         for point in viewer_data.valid_hit_points
         if point.frame_index in (2, 3)
     ] == [("f000000002", 2), ("f000000003", 3)]
-    assert viewer_data.valid_hit_points[2].u_m == viewer_data.valid_hit_points[3].u_m
-    assert viewer_data.valid_hit_points[2].v_m == viewer_data.valid_hit_points[3].v_m
-    assert viewer_data.monitor_plane == result.manifest.monitor_plane
+    assert all(
+        point.radius_m == pytest.approx(0.7) for point in viewer_data.valid_hit_points
+    )
     assert viewer_data.axis_basis == result.manifest.axis_basis
-    assert viewer_data.summary.valid_monitor_hit_frames == 6
+    assert viewer_data.summary.valid_sphere_hit_frames == 6
 
 
 def test_scene_frame_direction_maps_positive_pitch_to_scene_up(

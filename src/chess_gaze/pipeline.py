@@ -158,7 +158,7 @@ class AnalyzeResult:
     validated_error_count: int
     frame_error_count: int
     valid_scene_frame_count: int
-    valid_monitor_hit_count: int
+    valid_sphere_hit_count: int
 
 
 class PipelineError(RuntimeError):
@@ -489,7 +489,7 @@ def analyze_video(
         validated_error_count=sum(qa_summary.errors_by_code.values()),
         frame_error_count=frame_error_count,
         valid_scene_frame_count=scene_result.scene_frame_count,
-        valid_monitor_hit_count=scene_result.valid_monitor_hit_count,
+        valid_sphere_hit_count=scene_result.valid_sphere_hit_count,
     )
 
 

@@ -850,7 +850,7 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     )
     assert result.validated_record_count == 4
     assert result.valid_scene_frame_count == 4
-    assert result.valid_monitor_hit_count == 4
+    assert result.valid_sphere_hit_count == 4
     assert summary.counts.frame_records == 4
     assert summary.counts.scene_frame_records == 4
     assert summary.counts.scene_frame_records == summary.counts.decoded_frames
@@ -865,7 +865,7 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     scene_frame_lines = _jsonl(result.scene_frames_jsonl_path)
     assert [line["frame_index"] for line in scene_frame_lines] == [0, 1, 2, 3]
     viewer_data = json.loads(result.viewer_scene_data_path.read_text(encoding="utf-8"))
-    assert viewer_data["schema_version"] == "gaze-scene-viewer-data-v1"
+    assert viewer_data["schema_version"] == "gaze-scene-viewer-data-v2"
     assert viewer_data["frame_count"] == 4
     scene_summary = SceneSummary.model_validate_json(
         result.scene_summary_path.read_text(encoding="utf-8")
