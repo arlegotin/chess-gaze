@@ -142,11 +142,16 @@ def test_real_video_model_free_pipeline_writes_qa_summary_revalidation(
     assert video_path.is_file(), f"missing mandatory real-data video: {video_path}"
 
     result = analyze_video(
-        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            generate_qa_summary=True,
+        ),
         observers=ObserverBundle(frame_observer=_deterministic_real_video_record),
     )
     qa_summary_path = result.layout.run_dir / "qa_summary.json"
     scene_summary_path = result.layout.run_dir / "scene" / "scene_summary.json"
+    assert result.qa_summary_path == qa_summary_path
     assert qa_summary_path.is_file()
     assert scene_summary_path.is_file()
 

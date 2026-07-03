@@ -377,7 +377,10 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
             (1e-3, 1e-3, 2e-3),
         ),
     ]
+    assert commands
     assert all(command[:2] == ["chess-gaze", "analyze"] for command in commands)
+    for command in commands:
+        assert "--qa-summary" in command
     for env in subprocess_envs:
         assert "PYTORCH_ENABLE_MPS_FALLBACK" not in env
         assert "PYTORCH_MPS_FAST_MATH" not in env

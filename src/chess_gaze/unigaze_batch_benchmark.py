@@ -535,6 +535,7 @@ def _run_analysis_subprocess(
     command = [
         "chess-gaze",
         "analyze",
+        "--qa-summary",
         str(video_path),
         "--output-root",
         str(output_root),

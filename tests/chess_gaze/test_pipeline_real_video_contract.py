@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,6 @@ from chess_gaze.pipeline import (
     ObserverFrame,
     analyze_video,
 )
-from chess_gaze.qa_summary import QASummary
 
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
 NAKAMURA_SHORT_FRAME_COUNT = 180
@@ -139,30 +139,28 @@ def _records(path: Path) -> list[FrameRecord]:
     ]
 
 
-def _assert_completed_artifact_contract(
+def _assert_default_completed_artifact_contract(
     result: AnalyzeResult, *, expected_count: int
-) -> tuple[list[FrameRecord], QASummary]:
+) -> list[FrameRecord]:
     records = _records(result.frames_jsonl_path)
-    summary = QASummary.model_validate_json(
-        result.qa_summary_path.read_text(encoding="utf-8")
-    )
 
     assert result.decoded_frame_count == expected_count
+    assert result.qa_summary_path is None
+    assert result.validated_record_count is None
+    assert result.validated_error_count is None
+    assert not (result.layout.run_dir / "qa_summary.json").exists()
     assert len(records) == expected_count
     assert records[0].frame_id == "f000000000"
     assert records[-1].frame_index == expected_count - 1
-    assert summary.counts.decoded_frames == expected_count
-    assert summary.counts.frame_records == expected_count
-    assert summary.counts.scene_frame_records == expected_count
-    assert summary.artifact_validation.counts_match is True
-    assert summary.artifact_validation.validation_errors == []
-    assert summary.final_status == "complete"
     assert result.scene_manifest_path.is_file()
     assert result.scene_summary_path.is_file()
     assert result.scene_frames_jsonl_path.is_file()
     assert result.viewer_index_path.is_file()
     assert result.viewer_scene_data_path.is_file()
-    return records, summary
+    state = json.loads(result.analysis_state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "complete"
+    assert state["next_frame_index"] == expected_count
+    return records
 
 
 @pytest.mark.parametrize(
@@ -181,7 +179,7 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     raw_count = len(list(result.layout.raw_frames_dir.glob("*.png")))
     processed_count = len(list(result.layout.processed_frames_dir.glob("*.jpg")))
     crop_count = len(list(result.layout.crops_dir.rglob("*.png")))
-    records, summary = _assert_completed_artifact_contract(
+    records = _assert_default_completed_artifact_contract(
         result, expected_count=expected_count
     )
     print(
@@ -194,8 +192,6 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     assert processed_count == 0
     assert crop_count == 0
     assert not result.layout.crops_dir.exists()
-    assert summary.counts.crop_files == 0
-    assert summary.byte_counts.crops_bytes == 0
     assert all(record.status is FrameStatus.OK for record in records)
     assert all(
         ErrorCode.FACE_NOT_FOUND not in {error.code for error in record.errors}
