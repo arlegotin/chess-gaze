@@ -183,8 +183,11 @@ used with stricter recovery boundaries.
 
 Practices adopted:
 
-- Use an explicit completion seal (`qa_summary.json`) rather than run directory
-  existence.
+- Use the manifest-dependent completion signal rather than run directory
+  existence: `qa_summary.json` is the strict seal for QA-requested and legacy
+  QA-required runs, while manifests with
+  `qa_summary_policy.generate_qa_summary=false` treat `analysis_state.json`
+  plus the required derived artifact presence as the cheap completion signal.
 - Use a committed prefix and discard/repair any invalid tail.
 - Rebuild derived whole-run artifacts from the recovered frame journal.
 - Prefer idempotent repair over appending to potentially skewed
