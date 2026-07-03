@@ -342,6 +342,24 @@ def test_analyze_video_does_not_retain_raw_or_processed_frame_images_by_default(
     )
 
 
+def test_analyze_video_persists_default_no_qa_summary_policy(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=1)
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["qa_summary_policy"] == {
+        "schema_version": "qa-summary-policy-v1",
+        "generate_qa_summary": False,
+    }
+
+
 def test_analyze_video_retains_raw_and_processed_frame_images_when_requested(
     tmp_path: Path,
 ) -> None:

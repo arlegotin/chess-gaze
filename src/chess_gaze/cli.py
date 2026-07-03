@@ -82,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="create a fresh run instead of resuming a compatible interrupted run",
     )
+    analyze.add_argument(
+        "--qa-summary",
+        action="store_true",
+        default=False,
+        dest="generate_qa_summary",
+        help="run strict QA closeout and write qa_summary.json",
+    )
     view = subparsers.add_parser("view")
     view.add_argument("run_dir")
     view.add_argument("--host", default="127.0.0.1")
@@ -129,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
                     unigaze_batch_size=args.unigaze_batch_size,
                     save_frame_images=args.save_frame_images,
                     save_crop_images=args.save_crop_images,
+                    generate_qa_summary=args.generate_qa_summary,
                     resume=args.resume,
                     progress_callback=(progress.callback if progress.enabled else None),
                 )

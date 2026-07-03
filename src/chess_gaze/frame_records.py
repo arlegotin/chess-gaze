@@ -310,6 +310,11 @@ class CropImageRetentionPolicy(StrictSchemaModel):
     save_crop_images: bool
 
 
+class QASummaryPolicy(StrictSchemaModel):
+    schema_version: Literal["qa-summary-policy-v1"] = "qa-summary-policy-v1"
+    generate_qa_summary: bool
+
+
 class RunManifest(StrictSchemaModel):
     run_id: str
     created_at_utc: str
@@ -321,6 +326,9 @@ class RunManifest(StrictSchemaModel):
     )
     crop_image_retention: CropImageRetentionPolicy = Field(
         default_factory=lambda: CropImageRetentionPolicy(save_crop_images=True)
+    )
+    qa_summary_policy: QASummaryPolicy = Field(
+        default_factory=lambda: QASummaryPolicy(generate_qa_summary=True)
     )
 
 

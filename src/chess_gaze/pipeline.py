@@ -36,6 +36,7 @@ from chess_gaze.frame_records import (
     FrameErrorRecord,
     FrameImageRetentionPolicy,
     FrameRecord,
+    QASummaryPolicy,
 )
 from chess_gaze.gaze_observation import UNIGAZE_MODEL_ID
 from chess_gaze.image_io import save_rgb_png
@@ -131,6 +132,7 @@ class AnalyzeRequest:
     unigaze_batch_size: int | None = None
     save_frame_images: bool | None = None
     save_crop_images: bool | None = None
+    generate_qa_summary: bool = False
     model_registry_path: Path = DEFAULT_MODEL_REGISTRY_PATH
     run_suffix: str | None = None
     resume: bool = True
@@ -177,6 +179,7 @@ class _ResolvedRequest:
     processed_frame_jpeg_quality: int
     save_frame_images: bool
     save_crop_images: bool
+    generate_qa_summary: bool
     unigaze_device: str
     unigaze_batch_size: int
 
@@ -261,6 +264,9 @@ def analyze_video(
             inference=inference,
             frame_image_retention=frame_image_retention,
             crop_image_retention=crop_image_retention,
+            qa_summary_policy=QASummaryPolicy(
+                generate_qa_summary=resolved.generate_qa_summary
+            ),
         )
         analysis_state = new_analysis_state(
             layout,
@@ -547,6 +553,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         processed_frame_jpeg_quality=resolved_config.processed_frame_jpeg_quality,
         save_frame_images=resolved_config.save_frame_images,
         save_crop_images=resolved_config.save_crop_images,
+        generate_qa_summary=request.generate_qa_summary,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
     )

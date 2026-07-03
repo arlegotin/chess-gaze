@@ -11,6 +11,7 @@ from chess_gaze.frame_records import (
     FrameRecord,
     GazeAngles,
     InferenceRuntimeRecord,
+    QASummaryPolicy,
     RunManifest,
     VideoManifest,
     read_run_manifest_artifact_json,
@@ -355,6 +356,49 @@ def test_run_manifest_defaults_missing_frame_image_retention_to_legacy_save() ->
     assert manifest.crop_image_retention == CropImageRetentionPolicy(
         save_crop_images=True
     )
+
+
+def test_run_manifest_records_explicit_no_qa_summary_policy() -> None:
+    manifest = RunManifest(
+        run_id="run-1",
+        created_at_utc="2026-06-26T00:00:00Z",
+        input_path="artifacts/input/nakamura_short.mp4",
+        video=VideoManifest(
+            source_path="artifacts/input/nakamura_short.mp4",
+            source_sha256="0" * 64,
+            frame_width=1920,
+            frame_height=1080,
+            frame_count_decoded=180,
+        ),
+        inference=InferenceRuntimeRecord(**_external_observer_inference_payload()),
+        qa_summary_policy=QASummaryPolicy(generate_qa_summary=False),
+    )
+
+    assert manifest.qa_summary_policy.generate_qa_summary is False
+    assert manifest.model_dump(mode="json")["qa_summary_policy"] == {
+        "schema_version": "qa-summary-policy-v1",
+        "generate_qa_summary": False,
+    }
+
+
+def test_run_manifest_defaults_missing_qa_summary_policy_to_legacy_generate() -> None:
+    manifest = RunManifest.model_validate(
+        {
+            "run_id": "run-1",
+            "created_at_utc": "2026-06-26T00:00:00Z",
+            "input_path": "artifacts/input/nakamura_short.mp4",
+            "video": {
+                "source_path": "artifacts/input/nakamura_short.mp4",
+                "source_sha256": "0" * 64,
+                "frame_width": 1920,
+                "frame_height": 1080,
+                "frame_count_decoded": 180,
+            },
+            "inference": _external_observer_inference_payload(),
+        }
+    )
+
+    assert manifest.qa_summary_policy.generate_qa_summary is True
 
 
 def test_run_manifest_direct_validation_rejects_missing_inference() -> None:

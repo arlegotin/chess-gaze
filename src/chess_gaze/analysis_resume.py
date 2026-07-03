@@ -19,6 +19,7 @@ from chess_gaze.frame_records import (
     FrameImageRetentionPolicy,
     FrameRecord,
     InferenceRuntimeRecord,
+    QASummaryPolicy,
     RunManifest,
     VideoManifest,
     read_run_manifest_artifact_json,
@@ -131,6 +132,7 @@ def write_initial_run_artifacts(
     inference: InferenceRuntimeRecord,
     frame_image_retention: FrameImageRetentionPolicy,
     crop_image_retention: CropImageRetentionPolicy,
+    qa_summary_policy: QASummaryPolicy,
 ) -> None:
     _write_json(
         layout.run_dir / "run_manifest.json",
@@ -142,6 +144,7 @@ def write_initial_run_artifacts(
             inference=inference,
             frame_image_retention=frame_image_retention,
             crop_image_retention=crop_image_retention,
+            qa_summary_policy=qa_summary_policy,
         ).model_dump(mode="json"),
     )
     _write_json(
