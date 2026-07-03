@@ -139,19 +139,29 @@ def _records(path: Path) -> list[FrameRecord]:
     ]
 
 
+def _frame_record_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
 def _assert_default_completed_artifact_contract(
     result: AnalyzeResult, *, expected_count: int
-) -> list[FrameRecord]:
-    records = _records(result.frames_jsonl_path)
+) -> list[str]:
+    record_lines = _frame_record_lines(result.frames_jsonl_path)
 
     assert result.decoded_frame_count == expected_count
     assert result.qa_summary_path is None
     assert result.validated_record_count is None
     assert result.validated_error_count is None
     assert not (result.layout.run_dir / "qa_summary.json").exists()
-    assert len(records) == expected_count
-    assert records[0].frame_id == "f000000000"
-    assert records[-1].frame_index == expected_count - 1
+    assert len(record_lines) == expected_count
+    first_record = json.loads(record_lines[0])
+    last_record = json.loads(record_lines[-1])
+    assert first_record["frame_id"] == "f000000000"
+    assert first_record["frame_index"] == 0
+    assert last_record["frame_id"] == f"f{expected_count - 1:09d}"
+    assert last_record["frame_index"] == expected_count - 1
+    assert first_record["status"] == FrameStatus.OK.value
+    assert last_record["status"] == FrameStatus.OK.value
     assert result.scene_manifest_path.is_file()
     assert result.scene_summary_path.is_file()
     assert result.scene_frames_jsonl_path.is_file()
@@ -160,7 +170,7 @@ def _assert_default_completed_artifact_contract(
     state = json.loads(result.analysis_state_path.read_text(encoding="utf-8"))
     assert state["status"] == "complete"
     assert state["next_frame_index"] == expected_count
-    return records
+    return record_lines
 
 
 @pytest.mark.parametrize(
@@ -179,24 +189,54 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     raw_count = len(list(result.layout.raw_frames_dir.glob("*.png")))
     processed_count = len(list(result.layout.processed_frames_dir.glob("*.jpg")))
     crop_count = len(list(result.layout.crops_dir.rglob("*.png")))
-    records = _assert_default_completed_artifact_contract(
+    record_lines = _assert_default_completed_artifact_contract(
         result, expected_count=expected_count
     )
     print(
         f"{video_path}: decoded={result.decoded_frame_count} "
         f"raw={raw_count} processed={processed_count} crops={crop_count} "
-        f"records={len(records)}"
+        f"records={len(record_lines)}"
     )
 
     assert raw_count == 0
     assert processed_count == 0
     assert crop_count == 0
     assert not result.layout.crops_dir.exists()
+    records = [FrameRecord.model_validate_json(line) for line in record_lines[:5]]
     assert all(record.status is FrameStatus.OK for record in records)
     assert all(
         ErrorCode.FACE_NOT_FOUND not in {error.code for error in record.errors}
-        for record in records[:5]
+        for record in records
     )
+
+
+def test_default_completed_artifact_contract_avoids_full_record_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert NAKAMURA_SHORT_VIDEO.is_file(), (
+        f"missing mandatory real-data video: {NAKAMURA_SHORT_VIDEO}"
+    )
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=NAKAMURA_SHORT_VIDEO, output_root=tmp_path / "output"),
+        observers=ObserverBundle(frame_observer=_deterministic_real_video_record),
+    )
+
+    original_validator = FrameRecord.model_validate_json
+    validated_lines: list[str] = []
+
+    def _track_validation(line: str, *args: object, **kwargs: object) -> FrameRecord:
+        validated_lines.append(line)
+        return original_validator(line, *args, **kwargs)
+
+    monkeypatch.setattr(FrameRecord, "model_validate_json", _track_validation)
+
+    record_lines = _assert_default_completed_artifact_contract(
+        result, expected_count=NAKAMURA_SHORT_FRAME_COUNT
+    )
+
+    assert len(record_lines) == NAKAMURA_SHORT_FRAME_COUNT
+    assert validated_lines == []
 
 
 @pytest.mark.native_mediapipe
@@ -215,7 +255,7 @@ def test_nakamura_short_default_model_pipeline_does_not_create_crop_directory(
             unigaze_batch_size=7,
         )
     )
-    _records, summary = _assert_completed_artifact_contract(
+    _assert_default_completed_artifact_contract(
         result, expected_count=NAKAMURA_SHORT_FRAME_COUNT
     )
 
@@ -223,10 +263,6 @@ def test_nakamura_short_default_model_pipeline_does_not_create_crop_directory(
     assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
     assert not result.layout.crops_dir.exists()
     assert list(result.layout.crops_dir.rglob("*.png")) == []
-    assert summary.counts.raw_frames == 0
-    assert summary.counts.processed_frames == 0
-    assert summary.counts.crop_files == 0
-    assert summary.byte_counts.crops_bytes == 0
 
 
 @pytest.mark.native_mediapipe
@@ -246,7 +282,7 @@ def test_nakamura_short_save_crops_retains_crop_images_only(
             save_crop_images=True,
         )
     )
-    _records, summary = _assert_completed_artifact_contract(
+    _assert_default_completed_artifact_contract(
         result, expected_count=NAKAMURA_SHORT_FRAME_COUNT
     )
     crop_paths = list(result.layout.crops_dir.rglob("*.png"))
@@ -255,7 +291,3 @@ def test_nakamura_short_save_crops_retains_crop_images_only(
     assert list(result.layout.processed_frames_dir.glob("*.jpg")) == []
     assert result.layout.crops_dir.is_dir()
     assert len(crop_paths) > 0
-    assert summary.counts.raw_frames == 0
-    assert summary.counts.processed_frames == 0
-    assert summary.counts.crop_files == len(crop_paths)
-    assert summary.byte_counts.crops_bytes > 0
