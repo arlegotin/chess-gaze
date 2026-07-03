@@ -154,10 +154,10 @@ class AnalyzeResult:
     scene_frames_jsonl_path: Path
     viewer_index_path: Path
     viewer_scene_data_path: Path
-    qa_summary_path: Path
+    qa_summary_path: Path | None
     decoded_frame_count: int
-    validated_record_count: int
-    validated_error_count: int
+    validated_record_count: int | None
+    validated_error_count: int | None
     frame_error_count: int
     valid_scene_frame_count: int
     valid_sphere_hit_count: int
@@ -450,6 +450,36 @@ def analyze_video(
         analysis_state_path = write_analysis_state(layout, analysis_state)
         raise
 
+    if not resolved.generate_qa_summary:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            next_frame_index=inspection.frame_count_decoded,
+            status="complete",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
+        return AnalyzeResult(
+            layout=layout,
+            run_manifest_path=run_manifest_path,
+            calibration_path=calibration_path,
+            video_manifest_path=video_manifest_path,
+            analysis_state_path=analysis_state_path,
+            frames_jsonl_path=frames_jsonl_path,
+            errors_jsonl_path=errors_jsonl_path,
+            scene_manifest_path=scene_result.paths.scene_manifest_path,
+            scene_summary_path=scene_result.paths.scene_summary_path,
+            scene_frames_jsonl_path=scene_result.paths.scene_frames_jsonl_path,
+            viewer_index_path=viewer_result.index_path,
+            viewer_scene_data_path=viewer_result.scene_data_path,
+            qa_summary_path=None,
+            decoded_frame_count=decoded_frame_count,
+            validated_record_count=None,
+            validated_error_count=None,
+            frame_error_count=frame_error_count,
+            valid_scene_frame_count=scene_result.scene_frame_count,
+            valid_sphere_hit_count=scene_result.valid_sphere_hit_count,
+        )
+
     analysis_state = update_analysis_state(
         analysis_state,
         next_frame_index=inspection.frame_count_decoded,
@@ -492,7 +522,13 @@ def analyze_video(
         )
         analysis_state_path = write_analysis_state(layout, analysis_state)
         raise
-    if not qa_summary.artifact_validation.schema_validation_passed:
+    validation = qa_summary.artifact_validation
+    if (
+        qa_summary.final_status != "complete"
+        or validation.final_status != "complete"
+        or not validation.schema_validation_passed
+        or not validation.counts_match
+    ):
         analysis_state = update_analysis_state(
             analysis_state,
             status="failed",

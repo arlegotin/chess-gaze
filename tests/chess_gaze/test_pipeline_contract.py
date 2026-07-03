@@ -327,19 +327,13 @@ def test_analyze_video_does_not_retain_raw_or_processed_frame_images_by_default(
         "schema_version": "crop-image-retention-v1",
         "save_crop_images": False,
     }
-    assert result.qa_summary_path.is_file()
-    summary = QASummary.model_validate_json(
-        result.qa_summary_path.read_text(encoding="utf-8")
-    )
-    assert summary.counts.raw_frames == 0
-    assert summary.counts.processed_frames == 0
-    assert summary.artifact_validation.counts_match is True
-    assert summary.final_status == "complete"
-    assert summary.byte_counts.total_run_bytes == sum(
-        path.stat().st_size
-        for path in result.layout.run_dir.rglob("*")
-        if path.is_file()
-    )
+    assert result.qa_summary_path is None
+    assert result.validated_record_count is None
+    assert result.validated_error_count is None
+    assert not (result.layout.run_dir / "qa_summary.json").exists()
+    analysis_state = json.loads(result.analysis_state_path.read_text(encoding="utf-8"))
+    assert analysis_state["status"] == "complete"
+    assert analysis_state["next_frame_index"] == 4
 
 
 def test_analyze_video_persists_default_no_qa_summary_policy(
@@ -371,6 +365,7 @@ def test_analyze_video_retains_raw_and_processed_frame_images_when_requested(
             video_path=video_path,
             output_root=tmp_path / "output",
             save_frame_images=True,
+            generate_qa_summary=True,
         ),
         observers=ObserverBundle(frame_observer=_fake_record),
     )
@@ -411,7 +406,11 @@ def test_analyze_video_resumes_latest_compatible_partial_run(
 
     with pytest.raises(RuntimeError, match="simulated interruption"):
         analyze_video(
-            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                generate_qa_summary=True,
+            ),
             observers=ObserverBundle(frame_observer=interrupt_after_two),
         )
 
@@ -426,7 +425,11 @@ def test_analyze_video_resumes_latest_compatible_partial_run(
         return _fake_record(frame)
 
     result = analyze_video(
-        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=output_root,
+            generate_qa_summary=True,
+        ),
         observers=ObserverBundle(frame_observer=resumed_observer),
     )
 
@@ -555,6 +558,29 @@ def test_analyze_video_does_not_resume_complete_run(
     )
 
     assert second.layout.run_dir != first.layout.run_dir
+
+
+def test_analyze_video_does_not_resume_complete_no_qa_run(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+
+    first = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+    second = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=output_root),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert first.qa_summary_path is None
+    assert second.qa_summary_path is None
+    assert second.layout.run_dir != first.layout.run_dir
+    assert not (first.layout.run_dir / "qa_summary.json").exists()
+    assert not (second.layout.run_dir / "qa_summary.json").exists()
 
 
 def test_analyze_video_uses_batch_observer_without_reordering_frames(
@@ -862,24 +888,11 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     assert result.scene_frames_jsonl_path.is_file()
     assert result.viewer_index_path.is_file()
     assert result.viewer_scene_data_path.is_file()
-
-    summary = QASummary.model_validate_json(
-        result.qa_summary_path.read_text(encoding="utf-8")
-    )
-    assert result.validated_record_count == 4
+    assert result.qa_summary_path is None
+    assert not (result.layout.run_dir / "qa_summary.json").exists()
+    assert result.validated_record_count is None
     assert result.valid_scene_frame_count == 4
     assert result.valid_sphere_hit_count == 4
-    assert summary.counts.frame_records == 4
-    assert summary.counts.scene_frame_records == 4
-    assert summary.counts.scene_frame_records == summary.counts.decoded_frames
-    assert summary.source_artifacts == summary.artifact_validation.source_artifacts
-    assert {
-        "scene_manifest",
-        "scene_summary",
-        "scene_frames_jsonl",
-        "viewer_index",
-        "viewer_scene_data",
-    }.issubset(summary.source_artifacts)
     scene_frame_lines = _jsonl(result.scene_frames_jsonl_path)
     assert [line["frame_index"] for line in scene_frame_lines] == [0, 1, 2, 3]
     viewer_data = json.loads(result.viewer_scene_data_path.read_text(encoding="utf-8"))
@@ -893,23 +906,63 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     )
     assert scene_summary.artifact_validation.viewer_exists is True
     assert viewer_scene_data.summary.artifact_validation.viewer_exists is True
+
+
+def test_analyze_video_writes_qa_summary_when_requested(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=3)
+
+    result = analyze_video(
+        AnalyzeRequest(
+            video_path=video_path,
+            output_root=tmp_path / "output",
+            generate_qa_summary=True,
+        ),
+        observers=ObserverBundle(frame_observer=_fake_record),
+    )
+
+    assert result.qa_summary_path == result.layout.run_dir / "qa_summary.json"
+    assert result.qa_summary_path.is_file()
+    summary = QASummary.model_validate_json(
+        result.qa_summary_path.read_text(encoding="utf-8")
+    )
     assert summary.final_status == "complete"
-    assert summary.byte_counts.scene_jsonl_bytes == (
-        result.scene_frames_jsonl_path.stat().st_size
+    assert summary.artifact_validation.counts_match is True
+    assert result.validated_record_count == 3
+    assert result.validated_error_count == sum(summary.errors_by_code.values())
+    analysis_state = json.loads(result.analysis_state_path.read_text(encoding="utf-8"))
+    assert analysis_state["status"] == "complete"
+
+
+def test_analyze_video_default_does_not_build_or_write_qa_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    def fail_build_qa_summary(*args: Any, **kwargs: Any) -> QASummary:
+        del args, kwargs
+        raise AssertionError("default analyze must not build QA summary")
+
+    def fail_write_qa_summary(*args: Any, **kwargs: Any) -> QASummary:
+        del args, kwargs
+        raise AssertionError("default analyze must not write QA summary")
+
+    monkeypatch.setattr(pipeline, "build_qa_summary", fail_build_qa_summary)
+    monkeypatch.setattr(pipeline, "write_qa_summary", fail_write_qa_summary)
+
+    result = analyze_video(
+        AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+        observers=ObserverBundle(frame_observer=_fake_record),
     )
-    assert summary.byte_counts.scene_bytes >= (
-        result.scene_manifest_path.stat().st_size
-        + result.scene_summary_path.stat().st_size
-    )
-    assert summary.byte_counts.viewer_bytes >= (
-        result.viewer_index_path.stat().st_size
-        + result.viewer_scene_data_path.stat().st_size
-    )
-    assert summary.byte_counts.total_run_bytes == sum(
-        path.stat().st_size
-        for path in result.layout.run_dir.rglob("*")
-        if path.is_file()
-    )
+
+    assert result.qa_summary_path is None
+    assert not (result.layout.run_dir / "qa_summary.json").exists()
 
 
 def test_analyze_video_does_not_mark_complete_before_qa_summary_exists(
@@ -930,7 +983,11 @@ def test_analyze_video_does_not_mark_complete_before_qa_summary_exists(
 
     with pytest.raises(RuntimeError, match="simulated QA write failure"):
         analyze_video(
-            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                generate_qa_summary=True,
+            ),
             observers=ObserverBundle(frame_observer=_fake_record),
         )
 
@@ -941,6 +998,51 @@ def test_analyze_video_does_not_mark_complete_before_qa_summary_exists(
 
     assert analysis_state["status"] == "revalidating"
     assert not (run_dir / "qa_summary.json").exists()
+
+
+def test_analyze_video_requested_qa_fails_on_counts_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    real_build_qa_summary = pipeline.build_qa_summary
+
+    def build_failed_summary(layout: object) -> QASummary:
+        summary = real_build_qa_summary(layout)
+        validation = summary.artifact_validation.model_copy(
+            update={
+                "counts_match": False,
+                "final_status": "failed",
+                "validation_errors": ["simulated counts mismatch"],
+            }
+        )
+        return summary.model_copy(
+            update={
+                "final_status": "failed",
+                "artifact_validation": validation,
+            }
+        )
+
+    monkeypatch.setattr(pipeline, "build_qa_summary", build_failed_summary)
+
+    with pytest.raises(PipelineError, match="Run artifact validation failed"):
+        analyze_video(
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=output_root,
+                generate_qa_summary=True,
+            ),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    state = json.loads((run_dir / "analysis_state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "failed"
 
 
 def test_model_free_observer_run_manifest_records_external_observer(
@@ -1311,7 +1413,11 @@ def test_analyze_video_fails_when_scene_artifact_validation_fails(
 
     with pytest.raises(PipelineError) as exc_info:
         analyze_video(
-            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                generate_qa_summary=True,
+            ),
             observers=ObserverBundle(frame_observer=_fake_record),
         )
 
@@ -1668,7 +1774,11 @@ def test_malformed_errors_jsonl_fails_artifact_revalidation(
 
     with pytest.raises(PipelineError) as exc_info:
         analyze_video(
-            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                generate_qa_summary=True,
+            ),
             observers=ObserverBundle(
                 frame_observer=lambda frame: _fake_record(frame, face_present=False)
             ),
@@ -1706,7 +1816,11 @@ def test_invalid_utf8_errors_jsonl_writes_failed_qa_summary(
 
     with pytest.raises(PipelineError) as exc_info:
         analyze_video(
-            AnalyzeRequest(video_path=video_path, output_root=tmp_path / "output"),
+            AnalyzeRequest(
+                video_path=video_path,
+                output_root=tmp_path / "output",
+                generate_qa_summary=True,
+            ),
             observers=ObserverBundle(frame_observer=_fake_record),
         )
 
