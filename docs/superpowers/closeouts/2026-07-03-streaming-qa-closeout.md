@@ -45,9 +45,10 @@ server, or a progress-thread leak.
   `scene_frames.jsonl` line by line, validating each record with Pydantic and
   aggregating only QA counters.
 - `viewer/scene-data.json` is validated with a stdlib structural scanner that
-  counts top-level `frames` and `valid_hit_points`, validates the small envelope
-  with Pydantic, and cross-checks it against `run_manifest`, `video_manifest`,
-  and `scene_summary`.
+  rejects unexpected top-level keys, validates each `frames` item as a
+  `SceneFrameRecord`, validates each `valid_hit_points` item as a
+  `ViewerHitPoint`, validates the small envelope with Pydantic, and cross-checks
+  it against `run_manifest`, `video_manifest`, and `scene_summary`.
 - `write_qa_summary()` accepts an already-built `QASummary` so pipeline closeout
   no longer reparses the whole run a second time.
 - `AnalysisState.status` now includes `revalidating`.
@@ -93,7 +94,7 @@ uv run pytest tests/chess_gaze/test_pipeline_contract.py tests/chess_gaze/test_a
 Result:
 
 ```text
-14 passed
+17 passed
 49 passed
 ```
 
@@ -115,8 +116,8 @@ Fixed large-run closeout measurement:
 
 ```text
 complete 28141 28141 1278665712
-48.37 real
-223100928 maximum resident set size
+73.00 real
+224313344 maximum resident set size
 ```
 
 Local gates:
@@ -137,14 +138,11 @@ Success: no issues found in 71 source files.
 
 ## Residual Risk
 
-- Closeout still scans large artifacts, so elapsed time remains about the same
-  on the `nepo_2` run. The critical memory failure is fixed; a later performance
-  improvement should use persisted incremental counters or a vetted streaming
-  JSON parser.
-- `viewer/scene-data.json` frame objects are not revalidated twice. The
-  canonical strict validation source is `records/scene_frames.jsonl`; viewer
-  JSON is structurally checked and cross-checked for counts and summary
-  consistency.
+- Closeout still scans large artifacts, and restoring strict viewer array
+  validation increased elapsed time on the `nepo_2` run from the 50-second
+  baseline to 73 seconds. The critical memory failure is fixed; a later
+  performance improvement should use persisted incremental counters or a vetted
+  streaming JSON parser.
 - A process kill can still happen in the small window after terminal
   `analysis_state.json` is written and before the atomic `qa_summary.json`
   write completes. The long high-memory window is removed, and a subsequent run

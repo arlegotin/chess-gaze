@@ -41,7 +41,7 @@ Primary sources checked on 2026-07-03:
 | --- | --- | --- |
 | Keep whole-run Pydantic materialization | Directly measured 8.39 GB max RSS on the interrupted run. It preserves strict validation but makes closeout fragile for large runs. | Rejected. |
 | Add a streaming JSON dependency such as `ijson` | Would reduce custom scanner code, but adds a core dependency solely for closeout and triggers dependency-selection overhead. `ijson` is not already installed locally. | Rejected for this repair. |
-| Stream JSONL records and structurally validate viewer data envelope/counts | Keeps strict validation for manifests, frame JSONL, error JSONL, and scene-frame JSONL while avoiding full `ViewerSceneData` materialization. Viewer frame objects are already validated through `records/scene_frames.jsonl`; viewer JSON is checked for top-level structure, counts, and summary consistency. | Accepted. |
+| Stream JSONL records and structurally validate viewer data while validating each large array element incrementally | Keeps strict validation for manifests, frame JSONL, error JSONL, scene-frame JSONL, viewer frames, and viewer hit points while avoiding full `ViewerSceneData` materialization. | Accepted. |
 | Mark `analysis_state` complete only after `qa_summary.json` exists | Avoids complete state without seal, but violates the prior final-state-before-seal regression and can leave a complete seal with stale state if interrupted. | Rejected. |
 | Add `revalidating` state and revert on in-process QA write failure | Preserves `qa_summary.json` as the completion seal, reduces the complete-without-seal window to the final atomic write path, and makes in-process write failures visibly nonterminal. | Accepted. |
 
@@ -57,10 +57,10 @@ whole-file reads for:
 - `viewer/scene-data.json`
 
 `viewer/scene-data.json` is validated with a standard-library structural
-top-level scanner. The scanner counts `frames` and `valid_hit_points`, validates
-the small envelope with Pydantic, and cross-checks it against `run_manifest`,
-`video_manifest`, and `scene_summary`. The source `SceneFrameRecord` objects
-remain strictly validated from `records/scene_frames.jsonl`.
+scanner. The scanner rejects unexpected top-level keys, validates every `frames`
+item as `SceneFrameRecord`, validates every `valid_hit_points` item as
+`ViewerHitPoint`, validates the small envelope with Pydantic, and cross-checks
+it against `run_manifest`, `video_manifest`, and `scene_summary`.
 
 `AnalysisState.status` includes `revalidating`. The analyzer writes
 `revalidating` before QA closeout, writes the terminal state before the QA seal,
@@ -70,7 +70,7 @@ and reverts to `revalidating` if the QA write fails in-process.
 
 Benefits:
 
-- Peak closeout memory on the stopped run dropped from 8.39 GB to about 223 MB.
+- Peak closeout memory on the stopped run dropped from 8.39 GB to about 224 MB.
 - `qa_summary.json` remains the completion seal.
 - Frame, error, and scene-frame schemas remain validated record by record.
 - The existing final-state-before-seal regression remains honored.
@@ -79,9 +79,9 @@ Costs:
 
 - `qa_summary.py` now owns a small JSON structural scanner and is intentionally
   deep.
-- Viewer scene-data frame objects are not revalidated twice; the canonical
-  scene-frame JSONL remains the strict validation source.
-- Closeout still scans large files, so elapsed time is not materially reduced.
+- Closeout now validates viewer scene-data frames in addition to scene-frame
+  JSONL records, so elapsed time increased from about 50 seconds at baseline to
+  about 73 seconds while fixing the memory failure.
 
 Follow-up work:
 

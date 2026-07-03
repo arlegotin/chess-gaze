@@ -570,6 +570,78 @@ def test_qa_summary_reports_missing_or_malformed_scene_artifacts(
     )
 
 
+def test_qa_summary_rejects_unexpected_viewer_scene_data_top_level_key(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=3)
+    viewer_path = layout.viewer_dir / "scene-data.json"
+    payload = json.loads(viewer_path.read_text(encoding="utf-8"))
+    payload["unexpected"] = True
+    viewer_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = build_qa_summary(layout)
+
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert any(
+        "unexpected top-level key" in error
+        for error in summary.artifact_validation.validation_errors
+    )
+
+
+def test_qa_summary_rejects_malformed_viewer_hit_points(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path)
+    viewer_path = layout.viewer_dir / "scene-data.json"
+    payload = json.loads(viewer_path.read_text(encoding="utf-8"))
+    payload["valid_hit_points"] = [
+        {
+            "frame_id": "f000000000",
+            "frame_index": 0,
+            "point_scene_m": {
+                "space": "scene_pseudo_m",
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0,
+            },
+            "radius_m": -1.0,
+            "theta_radians": 0.0,
+            "phi_radians": 0.0,
+            "hemisphere": "front",
+        }
+    ]
+    viewer_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = build_qa_summary(layout)
+
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert any(
+        "viewer hit point" in error
+        for error in summary.artifact_validation.validation_errors
+    )
+
+
+def test_qa_summary_rejects_malformed_viewer_frames(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=3)
+    viewer_path = layout.viewer_dir / "scene-data.json"
+    payload = json.loads(viewer_path.read_text(encoding="utf-8"))
+    payload["frames"][0]["frame_index"] = "not-an-int"
+    viewer_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = build_qa_summary(layout)
+
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert any(
+        "viewer frame" in error
+        for error in summary.artifact_validation.validation_errors
+    )
+
+
 def test_build_qa_summary_does_not_treat_warning_only_records_as_failures(
     tmp_path: Path,
 ) -> None:

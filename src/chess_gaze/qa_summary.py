@@ -35,6 +35,7 @@ from chess_gaze.scene_records import (
     SceneGazeSphereRecord,
     SceneManifest,
     SceneSummary,
+    ViewerHitPoint,
 )
 
 QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
@@ -634,7 +635,7 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
         if key in {"frames", "valid_hit_points"}:
             if key in array_counts:
                 raise ValueError(f"duplicate top-level key: {key}")
-            count, index = _count_and_skip_json_array(data, index)
+            count, index = _count_and_validate_viewer_array(data, index, key)
             array_counts[key] = count
         elif key in envelope_keys:
             if key in payload:
@@ -646,7 +647,7 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
             payload[key] = value
             index = value_end
         else:
-            index = _skip_json_value(data, index)
+            raise ValueError(f"unexpected top-level key: {key}")
 
         index = _skip_json_whitespace(data, index)
         byte = _json_byte(data, index)
@@ -730,7 +731,9 @@ def _parse_json_string(data: mmap.mmap, index: int) -> tuple[str, int]:
     raise ValueError("unterminated string")
 
 
-def _count_and_skip_json_array(data: mmap.mmap, index: int) -> tuple[int, int]:
+def _count_and_validate_viewer_array(
+    data: mmap.mmap, index: int, key: str
+) -> tuple[int, int]:
     index = _expect_json_byte(data, index, ord("["))
     index = _skip_json_whitespace(data, index)
     if _json_byte(data, index) == ord("]"):
@@ -738,7 +741,9 @@ def _count_and_skip_json_array(data: mmap.mmap, index: int) -> tuple[int, int]:
 
     count = 0
     while True:
+        value_start = index
         index = _skip_json_value(data, index)
+        _validate_viewer_array_item(data, value_start, index, key, count)
         count += 1
         index = _skip_json_whitespace(data, index)
         byte = _json_byte(data, index)
@@ -748,6 +753,27 @@ def _count_and_skip_json_array(data: mmap.mmap, index: int) -> tuple[int, int]:
         if byte == ord("]"):
             return count, index + 1
         raise ValueError("expected ',' or ']' in viewer scene data array")
+
+
+def _validate_viewer_array_item(
+    data: mmap.mmap, value_start: int, value_end: int, key: str, index: int
+) -> None:
+    raw = bytes(data[value_start:value_end])
+    if key == "frames":
+        try:
+            SceneFrameRecord.model_validate_json(raw)
+        except ValueError as exc:
+            raise ValueError(f"invalid viewer frame at index {index}: {exc}") from exc
+        return
+    if key == "valid_hit_points":
+        try:
+            ViewerHitPoint.model_validate_json(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid viewer hit point at index {index}: {exc}"
+            ) from exc
+        return
+    raise ValueError(f"unexpected viewer array key: {key}")
 
 
 def _skip_json_value(data: mmap.mmap, index: int) -> int:
