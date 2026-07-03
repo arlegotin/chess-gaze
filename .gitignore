@@ -34,3 +34,4 @@ runs/
 *.pt
 *.pth
 .gstack/
+.superpowers/sdd/
