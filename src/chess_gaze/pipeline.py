@@ -443,6 +443,13 @@ def analyze_video(
         analysis_state_path = write_analysis_state(layout, analysis_state)
         raise
 
+    analysis_state = update_analysis_state(
+        analysis_state,
+        next_frame_index=inspection.frame_count_decoded,
+        status="revalidating",
+        clock=request.clock,
+    )
+    analysis_state_path = write_analysis_state(layout, analysis_state)
     try:
         qa_summary = build_qa_summary(layout)
     except ArtifactValidationError as exc:
@@ -461,10 +468,30 @@ def analyze_video(
     )
     analysis_state_path = write_analysis_state(layout, analysis_state)
     try:
-        qa_summary = write_qa_summary(layout, qa_summary_path)
+        qa_summary = write_qa_summary(layout, qa_summary_path, qa_summary=qa_summary)
     except ArtifactValidationError as exc:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            status="revalidating",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
         raise PipelineError(exc.code, str(exc)) from exc
+    except Exception:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            status="revalidating",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
+        raise
     if not qa_summary.artifact_validation.schema_validation_passed:
+        analysis_state = update_analysis_state(
+            analysis_state,
+            status="failed",
+            clock=request.clock,
+        )
+        analysis_state_path = write_analysis_state(layout, analysis_state)
         raise PipelineError(
             CliErrorCode.SCHEMA_VALIDATION_FAILED,
             f"Run artifact validation failed; see {qa_summary_path}",

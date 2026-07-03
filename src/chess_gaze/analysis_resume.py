@@ -42,7 +42,7 @@ class AnalysisState(StrictSchemaModel):
     source_video_sha256: str
     frame_count_decoded: int
     next_frame_index: int
-    status: Literal["processing", "complete", "failed"]
+    status: Literal["processing", "revalidating", "complete", "failed"]
     updated_at_utc: str
 
 
@@ -161,7 +161,7 @@ def new_analysis_state(
     *,
     video_manifest: VideoManifest,
     next_frame_index: int,
-    status: Literal["processing", "complete", "failed"],
+    status: Literal["processing", "revalidating", "complete", "failed"],
     clock: Callable[[], datetime],
 ) -> AnalysisState:
     return AnalysisState(
@@ -179,7 +179,7 @@ def update_analysis_state(
     state: AnalysisState,
     *,
     next_frame_index: int | None = None,
-    status: Literal["processing", "complete", "failed"] | None = None,
+    status: Literal["processing", "revalidating", "complete", "failed"] | None = None,
     clock: Callable[[], datetime],
 ) -> AnalysisState:
     return AnalysisState(

@@ -47,6 +47,16 @@ package instead of accidentally importing Python files from the repository root.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration,
     policy-aware artifact validation, and command-line entry points.
 
+Source-layout review, 2026-07-03: `qa_summary.py` is intentionally deep at
+1,093 lines after the streaming closeout repair. It still owns one cohesive
+run-closeout boundary: loading durable run artifacts, validating their schemas,
+aggregating QA counters, stabilizing byte counts, and writing the completion
+seal. The custom viewer-data scanner is kept with the QA validator because its
+only purpose is preserving that seal without materializing duplicate scene
+frames. If the file grows toward 1,500 lines or adds non-QA artifact repair,
+split JSONL streaming summaries and viewer-envelope scanning into named modules
+with explicit interface tests.
+
 Source-layout review, 2026-06-29: `pipeline.py` is intentionally deep at 839
 lines after adding crop image retention plumbing. It still owns one cohesive
 analysis orchestration boundary: request resolution, model/runtime preparation,
@@ -56,6 +66,13 @@ change only threads an existing kind of artifact policy through this boundary.
 If the file grows toward 1,500 lines or adds a second independent workflow,
 split request resolution, observer construction, and artifact closeout into
 named modules with explicit interface tests.
+
+Source-layout review, 2026-07-03: `pipeline.py` remains intentionally deep at
+866 lines after adding the `revalidating` closeout state. The new state is part
+of the existing orchestration boundary rather than an independent workflow:
+frame processing, derived scene/viewer artifacts, QA validation, and completion
+seal ordering must stay coordinated. The previous split candidates remain the
+right ones if this file grows further.
 
 Source-layout review, 2026-06-29: `face_observation.py` is intentionally deep
 at 1,203 lines, still below the 1,500-line split-plan trigger. It owns one

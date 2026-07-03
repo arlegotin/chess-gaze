@@ -894,6 +894,37 @@ def test_analyze_video_writes_scene_artifacts_and_viewer_files(
     )
 
 
+def test_analyze_video_does_not_mark_complete_before_qa_summary_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video_path = tmp_path / "tiny.mp4"
+    output_root = tmp_path / "output"
+    make_tiny_video(video_path, frame_count=2)
+
+    from chess_gaze import pipeline
+
+    def fail_qa_write(*args: Any, **kwargs: Any) -> QASummary:
+        del args, kwargs
+        raise RuntimeError("simulated QA write failure")
+
+    monkeypatch.setattr(pipeline, "write_qa_summary", fail_qa_write)
+
+    with pytest.raises(RuntimeError, match="simulated QA write failure"):
+        analyze_video(
+            AnalyzeRequest(video_path=video_path, output_root=output_root),
+            observers=ObserverBundle(frame_observer=_fake_record),
+        )
+
+    [run_dir] = (output_root / "tiny" / "runs").iterdir()
+    analysis_state = json.loads(
+        (run_dir / "analysis_state.json").read_text(encoding="utf-8")
+    )
+
+    assert analysis_state["status"] == "revalidating"
+    assert not (run_dir / "qa_summary.json").exists()
+
+
 def test_model_free_observer_run_manifest_records_external_observer(
     tmp_path: Path,
 ) -> None:

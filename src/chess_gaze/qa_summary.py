@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import mmap
 import shutil
 from collections import Counter
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -26,10 +29,12 @@ from chess_gaze.frame_records import (
 from chess_gaze.geometry import StrictSchemaModel
 from chess_gaze.image_io import atomic_write_bytes
 from chess_gaze.scene_records import (
+    SceneAssumptionRecord,
+    SceneAxisBasisRecord,
     SceneFrameRecord,
+    SceneGazeSphereRecord,
     SceneManifest,
     SceneSummary,
-    ViewerSceneData,
 )
 
 QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
@@ -136,15 +141,62 @@ class QASummary(StrictSchemaModel):
     built_from_disk_at_utc: str
 
 
-class _LoadedRunArtifacts(StrictSchemaModel):
+@dataclass
+class _FrameRecordSummary:
+    count: int = 0
+    frame_index_ids: list[tuple[int, str]] = field(default_factory=list)
+    face_present_count: int = 0
+    both_eyes_present_count: int = 0
+    left_eye_only_count: int = 0
+    right_eye_only_count: int = 0
+    left_iris_present_count: int = 0
+    right_iris_present_count: int = 0
+    head_pose_valid_count: int = 0
+    appearance_gaze_valid_count: int = 0
+    recommended_gaze_valid_count: int = 0
+    hard_failure_candidates: list[tuple[int, str]] = field(default_factory=list)
+
+    @property
+    def frame_indices(self) -> list[int]:
+        return [frame_index for frame_index, _frame_id in self.frame_index_ids]
+
+
+@dataclass
+class _FrameErrorSummary:
+    count: int = 0
+    errors_by_code: Counter[str] = field(default_factory=Counter)
+    errors_by_severity: Counter[str] = field(default_factory=Counter)
+    hard_failure_candidates: list[tuple[int, str]] = field(default_factory=list)
+
+
+@dataclass
+class _SceneFrameSummary:
+    count: int = 0
+    frame_indices: list[int] = field(default_factory=list)
+
+
+class _ViewerSceneDataEnvelope(StrictSchemaModel):
+    schema_version: Literal["gaze-scene-viewer-data-v2"]
+    run_id: str
+    source_video_stem: str
+    frame_count: int
+    frames_count: int
+    valid_hit_points_count: int
+    gaze_sphere: SceneGazeSphereRecord
+    axis_basis: SceneAxisBasisRecord
+    assumptions: list[SceneAssumptionRecord]
+    summary: SceneSummary
+
+
+@dataclass(frozen=True)
+class _LoadedRunArtifacts:
     run_manifest: RunManifest
     video_manifest: VideoManifest
-    frame_records: list[FrameRecord]
-    error_records: list[FrameErrorRecord]
+    frame_records: _FrameRecordSummary
+    error_records: _FrameErrorSummary
     scene_manifest: SceneManifest | None
     scene_summary: SceneSummary | None
-    scene_frame_records: list[SceneFrameRecord]
-    viewer_scene_data: ViewerSceneData | None
+    scene_frame_records: _SceneFrameSummary
     raw_frame_paths: list[Path]
     processed_frame_paths: list[Path]
     crop_paths: list[Path]
@@ -188,21 +240,30 @@ def build_qa_summary(run_layout: RunLayout) -> QASummary:
     )
 
 
-def write_qa_summary(run_layout: RunLayout, qa_summary_path: Path) -> QASummary:
-    qa_summary = _build_stabilized_qa_summary(run_layout, qa_summary_path)
+def write_qa_summary(
+    run_layout: RunLayout,
+    qa_summary_path: Path,
+    *,
+    qa_summary: QASummary | None = None,
+) -> QASummary:
+    if qa_summary is None:
+        qa_summary = build_qa_summary(run_layout)
+    qa_summary = _stabilize_qa_summary_byte_count(
+        run_layout, qa_summary, qa_summary_path
+    )
     _write_json(qa_summary_path, qa_summary.model_dump(mode="json"))
     return qa_summary
 
 
-def _build_stabilized_qa_summary(
-    run_layout: RunLayout, qa_summary_path: Path
+def _stabilize_qa_summary_byte_count(
+    run_layout: RunLayout, qa_summary: QASummary, qa_summary_path: Path
 ) -> QASummary:
-    qa_summary = build_qa_summary(run_layout)
     existing_qa_summary_bytes = (
         qa_summary_path.stat().st_size if qa_summary_path.exists() else 0
     )
     run_bytes_without_qa_summary = (
-        qa_summary.byte_counts.total_run_bytes - existing_qa_summary_bytes
+        _total_file_size(_artifact_files(run_layout.run_dir))
+        - existing_qa_summary_bytes
     )
     stable_total_run_bytes: int | None = None
 
@@ -259,11 +320,11 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
     video_manifest = _read_json_model(
         run_layout.run_dir / "video_manifest.json", VideoManifest
     )
-    frame_records, frame_record_errors = _read_jsonl_model(
-        run_layout.records_dir / "frames.jsonl", FrameRecord, "frame"
+    frame_records, frame_record_errors = _read_frame_record_summary(
+        run_layout.records_dir / "frames.jsonl"
     )
-    error_records, frame_error_record_errors = _read_jsonl_model(
-        run_layout.records_dir / "errors.jsonl", FrameErrorRecord, "frame error"
+    error_records, frame_error_record_errors = _read_frame_error_summary(
+        run_layout.records_dir / "errors.jsonl"
     )
     scene_manifest, scene_manifest_errors = _read_optional_json_model(
         run_layout.scene_dir / "scene_manifest.json",
@@ -275,15 +336,14 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
         SceneSummary,
         "scene summary",
     )
-    scene_frame_records, scene_frame_record_errors = _read_jsonl_model(
-        run_layout.records_dir / "scene_frames.jsonl",
-        SceneFrameRecord,
-        "scene frame",
+    scene_frame_records, scene_frame_record_errors = _read_scene_frame_summary(
+        run_layout.records_dir / "scene_frames.jsonl"
     )
-    viewer_scene_data, viewer_scene_data_errors = _read_optional_json_model(
+    viewer_scene_data_errors = _viewer_scene_data_validation_errors(
         run_layout.viewer_dir / "scene-data.json",
-        ViewerSceneData,
-        "viewer scene data",
+        run_manifest=run_manifest,
+        video_manifest=video_manifest,
+        scene_summary=scene_summary,
     )
     viewer_index_errors = _required_file_errors(
         run_layout.viewer_dir / "index.html", "viewer index"
@@ -296,7 +356,6 @@ def _load_run_artifacts(run_layout: RunLayout) -> _LoadedRunArtifacts:
         scene_manifest=scene_manifest,
         scene_summary=scene_summary,
         scene_frame_records=scene_frame_records,
-        viewer_scene_data=viewer_scene_data,
         raw_frame_paths=_artifact_files(run_layout.raw_frames_dir),
         processed_frame_paths=_artifact_files(run_layout.processed_frames_dir),
         crop_paths=_artifact_files(run_layout.crops_dir),
@@ -375,32 +434,378 @@ def _read_optional_json_model[ModelT: BaseModel](
         ]
 
 
-def _read_jsonl_model[ModelT: BaseModel](
-    path: Path, model_type: type[ModelT], record_name: str
-) -> tuple[list[ModelT], list[str]]:
-    records: list[ModelT] = []
+def _read_frame_record_summary(
+    path: Path,
+) -> tuple[_FrameRecordSummary, list[str]]:
+    summary = _FrameRecordSummary()
     validation_errors: list[str] = []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as exc:
-        return records, [
-            (
-                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
-                f"Unable to read {record_name} JSONL artifact at {path}: {exc}"
-            )
-        ]
-
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
+    for line_number, line in _iter_jsonl_lines(path, "frame", validation_errors):
         try:
-            records.append(model_type.model_validate_json(line))
+            record = FrameRecord.model_validate_json(line)
         except ValueError as exc:
             validation_errors.append(
                 f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
-                f"Invalid {record_name} record at {path}:{line_number}: {exc}"
+                f"Invalid frame record at {path}:{line_number}: {exc}"
             )
-    return records, validation_errors
+            continue
+        _accumulate_frame_record(summary, record)
+    return summary, validation_errors
+
+
+def _accumulate_frame_record(summary: _FrameRecordSummary, record: FrameRecord) -> None:
+    summary.count += 1
+    summary.frame_index_ids.append((record.frame_index, record.frame_id))
+    if record.face.present:
+        summary.face_present_count += 1
+    if record.left_eye.present and record.right_eye.present:
+        summary.both_eyes_present_count += 1
+    if record.left_eye.present and not record.right_eye.present:
+        summary.left_eye_only_count += 1
+    if record.right_eye.present and not record.left_eye.present:
+        summary.right_eye_only_count += 1
+    if record.left_eye.iris_landmarks:
+        summary.left_iris_present_count += 1
+    if record.right_eye.iris_landmarks:
+        summary.right_iris_present_count += 1
+    if record.head_pose.valid:
+        summary.head_pose_valid_count += 1
+    if record.appearance_gaze.valid:
+        summary.appearance_gaze_valid_count += 1
+    if record.recommended_gaze.valid:
+        summary.recommended_gaze_valid_count += 1
+    if record.status is FrameStatus.ERROR:
+        summary.hard_failure_candidates.append((record.frame_index, record.frame_id))
+
+
+def _read_frame_error_summary(
+    path: Path,
+) -> tuple[_FrameErrorSummary, list[str]]:
+    summary = _FrameErrorSummary()
+    validation_errors: list[str] = []
+    for line_number, line in _iter_jsonl_lines(path, "frame error", validation_errors):
+        try:
+            record = FrameErrorRecord.model_validate_json(line)
+        except ValueError as exc:
+            validation_errors.append(
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Invalid frame error record at {path}:{line_number}: {exc}"
+            )
+            continue
+        summary.count += 1
+        code = record.code.value
+        severity = _severity(record.code)
+        summary.errors_by_code[code] += 1
+        summary.errors_by_severity[severity] += 1
+        if severity == "error":
+            summary.hard_failure_candidates.append(
+                (record.frame_index, record.frame_id)
+            )
+    return summary, validation_errors
+
+
+def _read_scene_frame_summary(
+    path: Path,
+) -> tuple[_SceneFrameSummary, list[str]]:
+    summary = _SceneFrameSummary()
+    validation_errors: list[str] = []
+    for line_number, line in _iter_jsonl_lines(path, "scene frame", validation_errors):
+        try:
+            record = SceneFrameRecord.model_validate_json(line)
+        except ValueError as exc:
+            validation_errors.append(
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Invalid scene frame record at {path}:{line_number}: {exc}"
+            )
+            continue
+        summary.count += 1
+        summary.frame_indices.append(record.frame_index)
+    return summary, validation_errors
+
+
+def _iter_jsonl_lines(
+    path: Path, record_name: str, validation_errors: list[str]
+) -> Iterator[tuple[int, str]]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if line.strip():
+                    yield line_number, line
+    except (OSError, UnicodeDecodeError) as exc:
+        validation_errors.append(
+            f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+            f"Unable to read {record_name} JSONL artifact at {path}: {exc}"
+        )
+
+
+def _viewer_scene_data_validation_errors(
+    path: Path,
+    *,
+    run_manifest: RunManifest,
+    video_manifest: VideoManifest,
+    scene_summary: SceneSummary | None,
+) -> list[str]:
+    try:
+        envelope = _read_viewer_scene_data_envelope(path)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return [
+            (
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Invalid viewer scene data at {path}: {exc}"
+            )
+        ]
+
+    errors: list[str] = []
+    expected_source_video_stem = Path(video_manifest.source_path).stem
+    if envelope.run_id != run_manifest.run_id:
+        errors.append(
+            "viewer scene data run_id does not match run manifest: "
+            f"{envelope.run_id} != {run_manifest.run_id}"
+        )
+    if envelope.source_video_stem != expected_source_video_stem:
+        errors.append(
+            "viewer scene data source video stem does not match video manifest: "
+            f"{envelope.source_video_stem} != {expected_source_video_stem}"
+        )
+    if envelope.frame_count != video_manifest.frame_count_decoded:
+        errors.append(
+            "viewer scene data frame_count does not match decoded frame count: "
+            f"{envelope.frame_count} != {video_manifest.frame_count_decoded}"
+        )
+    if envelope.frames_count != video_manifest.frame_count_decoded:
+        errors.append(
+            "viewer scene data frames count does not match decoded frame count: "
+            f"{envelope.frames_count} != {video_manifest.frame_count_decoded}"
+        )
+    if scene_summary is not None:
+        if envelope.summary != scene_summary:
+            errors.append("viewer scene data summary does not match scene summary")
+        if envelope.valid_hit_points_count != scene_summary.valid_sphere_hit_frames:
+            errors.append(
+                "viewer scene data valid hit point count does not match scene "
+                "summary: "
+                f"{envelope.valid_hit_points_count} != "
+                f"{scene_summary.valid_sphere_hit_frames}"
+            )
+    if errors:
+        return [
+            (
+                f"{CliErrorCode.SCHEMA_VALIDATION_FAILED.value}: "
+                f"Invalid viewer scene data at {path}: {error}"
+            )
+            for error in errors
+        ]
+    return []
+
+
+def _read_viewer_scene_data_envelope(path: Path) -> _ViewerSceneDataEnvelope:
+    with path.open("rb") as handle:
+        if path.stat().st_size == 0:
+            raise ValueError("empty JSON document")
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            payload = _scan_viewer_scene_data_payload(data)
+    return _ViewerSceneDataEnvelope.model_validate(payload)
+
+
+def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
+    envelope_keys = {
+        "schema_version",
+        "run_id",
+        "source_video_stem",
+        "frame_count",
+        "gaze_sphere",
+        "axis_basis",
+        "assumptions",
+        "summary",
+    }
+    payload: dict[str, object] = {}
+    array_counts: dict[str, int] = {}
+    index = _skip_json_whitespace(data, 0)
+    index = _expect_json_byte(data, index, ord("{"))
+    index = _skip_json_whitespace(data, index)
+    if _json_byte(data, index) == ord("}"):
+        raise ValueError("viewer scene data object is empty")
+
+    while True:
+        key, index = _parse_json_string(data, index)
+        index = _skip_json_whitespace(data, index)
+        index = _expect_json_byte(data, index, ord(":"))
+        index = _skip_json_whitespace(data, index)
+
+        if key in {"frames", "valid_hit_points"}:
+            if key in array_counts:
+                raise ValueError(f"duplicate top-level key: {key}")
+            count, index = _count_and_skip_json_array(data, index)
+            array_counts[key] = count
+        elif key in envelope_keys:
+            if key in payload:
+                raise ValueError(f"duplicate top-level key: {key}")
+            value_end = _skip_json_value(data, index)
+            value = json.loads(bytes(data[index:value_end]).decode("utf-8"))
+            if key == "assumptions":
+                value = _coerce_assumption_triplets(value)
+            payload[key] = value
+            index = value_end
+        else:
+            index = _skip_json_value(data, index)
+
+        index = _skip_json_whitespace(data, index)
+        byte = _json_byte(data, index)
+        if byte == ord(","):
+            index = _skip_json_whitespace(data, index + 1)
+            continue
+        if byte == ord("}"):
+            index = _skip_json_whitespace(data, index + 1)
+            if index != len(data):
+                raise ValueError("unexpected data after viewer scene data object")
+            break
+        raise ValueError("expected ',' or '}' in viewer scene data object")
+
+    missing = (
+        envelope_keys
+        | {
+            "frames",
+            "valid_hit_points",
+        }
+    ) - (set(payload) | set(array_counts))
+    if missing:
+        raise ValueError(f"missing top-level keys: {', '.join(sorted(missing))}")
+    payload["frames_count"] = array_counts["frames"]
+    payload["valid_hit_points_count"] = array_counts["valid_hit_points"]
+    return payload
+
+
+def _coerce_assumption_triplets(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    coerced: list[object] = []
+    for item in value:
+        if not isinstance(item, dict):
+            coerced.append(item)
+            continue
+        record = dict(item)
+        record_value = record.get("value")
+        if isinstance(record_value, list) and len(record_value) == 3:
+            record["value"] = tuple(record_value)
+        coerced.append(record)
+    return coerced
+
+
+def _skip_json_whitespace(data: mmap.mmap, index: int) -> int:
+    while index < len(data) and _json_byte(data, index) in b" \t\r\n":
+        index += 1
+    return index
+
+
+def _expect_json_byte(data: mmap.mmap, index: int, expected: int) -> int:
+    if _json_byte(data, index) != expected:
+        raise ValueError(f"expected {chr(expected)!r} at byte {index}")
+    return index + 1
+
+
+def _json_byte(data: mmap.mmap, index: int) -> int:
+    if index >= len(data):
+        raise ValueError("unexpected end of JSON document")
+    return data[index]
+
+
+def _parse_json_string(data: mmap.mmap, index: int) -> tuple[str, int]:
+    if _json_byte(data, index) != ord('"'):
+        raise ValueError(f"expected string at byte {index}")
+    cursor = index + 1
+    escaped = False
+    while cursor < len(data):
+        byte = _json_byte(data, cursor)
+        if escaped:
+            escaped = False
+            cursor += 1
+            continue
+        if byte == ord("\\"):
+            escaped = True
+            cursor += 1
+            continue
+        if byte == ord('"'):
+            raw = bytes(data[index : cursor + 1]).decode("utf-8")
+            return str(json.loads(raw)), cursor + 1
+        cursor += 1
+    raise ValueError("unterminated string")
+
+
+def _count_and_skip_json_array(data: mmap.mmap, index: int) -> tuple[int, int]:
+    index = _expect_json_byte(data, index, ord("["))
+    index = _skip_json_whitespace(data, index)
+    if _json_byte(data, index) == ord("]"):
+        return 0, index + 1
+
+    count = 0
+    while True:
+        index = _skip_json_value(data, index)
+        count += 1
+        index = _skip_json_whitespace(data, index)
+        byte = _json_byte(data, index)
+        if byte == ord(","):
+            index = _skip_json_whitespace(data, index + 1)
+            continue
+        if byte == ord("]"):
+            return count, index + 1
+        raise ValueError("expected ',' or ']' in viewer scene data array")
+
+
+def _skip_json_value(data: mmap.mmap, index: int) -> int:
+    index = _skip_json_whitespace(data, index)
+    byte = _json_byte(data, index)
+    if byte == ord('"'):
+        _value, end = _parse_json_string(data, index)
+        return end
+    if byte in {ord("{"), ord("[")}:
+        return _skip_json_container(data, index)
+
+    cursor = index
+    while cursor < len(data) and _json_byte(data, cursor) not in b",]} \t\r\n":
+        cursor += 1
+    if cursor == index:
+        raise ValueError(f"expected JSON value at byte {index}")
+    json.loads(bytes(data[index:cursor]).decode("utf-8"))
+    return cursor
+
+
+def _skip_json_container(data: mmap.mmap, index: int) -> int:
+    opening = _json_byte(data, index)
+    if opening == ord("{"):
+        stack = [ord("}")]
+    elif opening == ord("["):
+        stack = [ord("]")]
+    else:
+        raise ValueError(f"expected JSON container at byte {index}")
+
+    cursor = index + 1
+    in_string = False
+    escaped = False
+    while cursor < len(data):
+        byte = _json_byte(data, cursor)
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == ord("\\"):
+                escaped = True
+            elif byte == ord('"'):
+                in_string = False
+            cursor += 1
+            continue
+
+        if byte == ord('"'):
+            in_string = True
+        elif byte == ord("{"):
+            stack.append(ord("}"))
+        elif byte == ord("["):
+            stack.append(ord("]"))
+        elif byte in {ord("}"), ord("]")}:
+            expected = stack.pop()
+            if byte != expected:
+                raise ValueError(f"mismatched JSON delimiter at byte {cursor}")
+            if not stack:
+                return cursor + 1
+        cursor += 1
+    raise ValueError("unterminated JSON container")
 
 
 def _required_file_errors(path: Path, artifact_name: str) -> list[str]:
@@ -423,8 +828,8 @@ def _artifact_files(directory: Path) -> list[Path]:
 def _artifact_counts(loaded: _LoadedRunArtifacts) -> ArtifactCounts:
     return ArtifactCounts(
         decoded_frames=loaded.video_manifest.frame_count_decoded,
-        frame_records=len(loaded.frame_records),
-        scene_frame_records=len(loaded.scene_frame_records),
+        frame_records=loaded.frame_records.count,
+        scene_frame_records=loaded.scene_frame_records.count,
         raw_frames=len(loaded.raw_frame_paths),
         processed_frames=len(loaded.processed_frame_paths),
         crop_files=len(loaded.crop_paths),
@@ -453,8 +858,8 @@ def _total_file_size(paths: list[Path]) -> int:
 
 def _count_validation_errors(
     counts: ArtifactCounts,
-    frame_records: list[FrameRecord],
-    scene_frame_records: list[SceneFrameRecord],
+    frame_records: _FrameRecordSummary,
+    scene_frame_records: _SceneFrameSummary,
     frame_image_retention: FrameImageRetentionPolicy,
     crop_image_retention: CropImageRetentionPolicy,
 ) -> list[str]:
@@ -486,12 +891,10 @@ def _count_validation_errors(
             f"{counts.scene_frame_records} != {counts.decoded_frames}"
         )
 
-    observed_indices = sorted(record.frame_index for record in frame_records)
+    observed_indices = sorted(frame_records.frame_indices)
     if observed_indices != list(range(counts.decoded_frames)):
         errors.append("frame records are not contiguous from decoded frame zero")
-    observed_scene_indices = sorted(
-        record.frame_index for record in scene_frame_records
-    )
+    observed_scene_indices = sorted(scene_frame_records.frame_indices)
     if observed_scene_indices != list(range(counts.decoded_frames)):
         errors.append("scene frame records are not contiguous from decoded frame zero")
     return errors
@@ -544,49 +947,28 @@ def _frame_image_count_error(
     )
 
 
-def _detection_rates(frame_records: list[FrameRecord]) -> DetectionRates:
-    total = len(frame_records)
+def _detection_rates(frame_records: _FrameRecordSummary) -> DetectionRates:
+    total = frame_records.count
     return DetectionRates(
-        face_present_rate=_rate(
-            total, sum(record.face.present for record in frame_records)
-        ),
+        face_present_rate=_rate(total, frame_records.face_present_count),
         both_eyes_present_rate=_rate(
             total,
-            sum(
-                record.left_eye.present and record.right_eye.present
-                for record in frame_records
-            ),
+            frame_records.both_eyes_present_count,
         ),
         left_eye_only_rate=_rate(
             total,
-            sum(
-                record.left_eye.present and not record.right_eye.present
-                for record in frame_records
-            ),
+            frame_records.left_eye_only_count,
         ),
         right_eye_only_rate=_rate(
             total,
-            sum(
-                record.right_eye.present and not record.left_eye.present
-                for record in frame_records
-            ),
+            frame_records.right_eye_only_count,
         ),
-        left_iris_present_rate=_rate(
-            total,
-            sum(bool(record.left_eye.iris_landmarks) for record in frame_records),
-        ),
-        right_iris_present_rate=_rate(
-            total,
-            sum(bool(record.right_eye.iris_landmarks) for record in frame_records),
-        ),
-        head_pose_valid_rate=_rate(
-            total, sum(record.head_pose.valid for record in frame_records)
-        ),
-        face_gaze_valid_rate=_rate(
-            total, sum(record.appearance_gaze.valid for record in frame_records)
-        ),
+        left_iris_present_rate=_rate(total, frame_records.left_iris_present_count),
+        right_iris_present_rate=_rate(total, frame_records.right_iris_present_count),
+        head_pose_valid_rate=_rate(total, frame_records.head_pose_valid_count),
+        face_gaze_valid_rate=_rate(total, frame_records.appearance_gaze_valid_count),
         recommended_gaze_valid_rate=_rate(
-            total, sum(record.recommended_gaze.valid for record in frame_records)
+            total, frame_records.recommended_gaze_valid_count
         ),
     )
 
@@ -597,14 +979,12 @@ def _rate(total: int, count: int) -> float:
     return count / total
 
 
-def _errors_by_code(error_records: list[FrameErrorRecord]) -> dict[str, int]:
-    return dict(sorted(Counter(record.code.value for record in error_records).items()))
+def _errors_by_code(error_records: _FrameErrorSummary) -> dict[str, int]:
+    return dict(sorted(error_records.errors_by_code.items()))
 
 
-def _errors_by_severity(error_records: list[FrameErrorRecord]) -> dict[str, int]:
-    return dict(
-        sorted(Counter(_severity(record.code) for record in error_records).items())
-    )
+def _errors_by_severity(error_records: _FrameErrorSummary) -> dict[str, int]:
+    return dict(sorted(error_records.errors_by_severity.items()))
 
 
 def _severity(code: ErrorCode) -> Literal["error", "warning"]:
@@ -652,32 +1032,27 @@ def _quality_scores(raw_frame_paths: list[Path]) -> list[tuple[str, float, float
     return scores
 
 
-def _qa_sample_frame_ids(frame_records: list[FrameRecord]) -> list[str]:
-    ordered_records = sorted(frame_records, key=lambda record: record.frame_index)
+def _qa_sample_frame_ids(frame_records: _FrameRecordSummary) -> list[str]:
+    ordered_records = sorted(frame_records.frame_index_ids)
     if len(ordered_records) <= QA_SAMPLE_COUNT:
-        return [record.frame_id for record in ordered_records]
+        return [frame_id_value for _frame_index, frame_id_value in ordered_records]
 
     last_index = len(ordered_records) - 1
     sample_indices = [
         round(sample_index * last_index / (QA_SAMPLE_COUNT - 1))
         for sample_index in range(QA_SAMPLE_COUNT)
     ]
-    return [ordered_records[index].frame_id for index in sample_indices]
+    return [ordered_records[index][1] for index in sample_indices]
 
 
 def _representative_failure_frame_ids(
-    frame_records: list[FrameRecord], error_records: list[FrameErrorRecord]
+    frame_records: _FrameRecordSummary, error_records: _FrameErrorSummary
 ) -> list[str]:
     failed_frames: dict[str, tuple[int, str]] = {}
-    for record in frame_records:
-        if record.status is FrameStatus.ERROR:
-            failed_frames[record.frame_id] = (record.frame_index, record.frame_id)
-    for error_record in error_records:
-        if _severity(error_record.code) == "error":
-            failed_frames.setdefault(
-                error_record.frame_id,
-                (error_record.frame_index, error_record.frame_id),
-            )
+    for frame_index, frame_id_value in frame_records.hard_failure_candidates:
+        failed_frames[frame_id_value] = (frame_index, frame_id_value)
+    for frame_index, frame_id_value in error_records.hard_failure_candidates:
+        failed_frames.setdefault(frame_id_value, (frame_index, frame_id_value))
 
     return [
         frame_id_value

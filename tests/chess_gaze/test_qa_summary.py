@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -279,6 +280,34 @@ def test_build_qa_summary_reads_legacy_run_manifest_without_inference(
     assert summary.source_video_path == str(tmp_path / "source.mp4")
     assert summary.artifact_validation.schema_validation_passed is True
     assert manifest.inference.observer_source == "legacy_manifest_without_inference"
+
+
+def test_build_qa_summary_streams_large_artifacts_without_whole_file_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _write_fixture_run(tmp_path, frame_count=7)
+    blocked_names = {
+        "frames.jsonl",
+        "errors.jsonl",
+        "scene_frames.jsonl",
+        "scene-data.json",
+    }
+    original_read_text = Path.read_text
+
+    def guarded_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path.name in blocked_names:
+            raise AssertionError(f"whole-file read forbidden for {path.name}")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+    summary = build_qa_summary(layout)
+
+    assert summary.final_status == "complete"
+    assert summary.counts.frame_records == 7
+    assert summary.counts.scene_frame_records == 7
+    assert summary.artifact_validation.validation_errors == []
 
 
 def _make_layout(tmp_path: Path) -> RunLayout:

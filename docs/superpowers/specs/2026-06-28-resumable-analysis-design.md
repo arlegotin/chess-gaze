@@ -133,7 +133,14 @@ Schema:
 }
 ```
 
-Allowed statuses are `processing`, `complete`, and `failed`.
+Allowed statuses are `processing`, `revalidating`, `complete`, and `failed`.
+`revalidating` means frame processing and derived scene/viewer artifacts are
+done, but the `qa_summary.json` completion seal is not yet durable. A run with
+`analysis_state.status == "complete"` but no valid complete `qa_summary.json`
+is still incomplete and must be resumable from the frame journal. The analyzer
+may write terminal `complete` or `failed` state before atomically writing
+`qa_summary.json`, but if the QA write fails in-process it must revert the state
+to `revalidating` so the run is not reported as complete without the seal.
 
 ## Non-Goals
 

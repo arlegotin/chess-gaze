@@ -51,7 +51,7 @@
 - Consumes: `build_qa_summary(run_layout)`, `analyze_video(request, observers=...)`, `AnalysisState`.
 - Produces: failing tests that prove the current whole-file QA reads and premature complete state.
 
-- [ ] **Step 1: Add a streaming-read regression**
+- [x] **Step 1: Add a streaming-read regression**
 
 Add a test that builds an existing fixture run, monkeypatches `Path.read_text` to raise for:
 
@@ -61,7 +61,7 @@ Add a test that builds an existing fixture run, monkeypatches `Path.read_text` t
 
 and asserts `build_qa_summary(layout)` still returns a complete summary.
 
-- [ ] **Step 2: Run the new QA regression and verify RED**
+- [x] **Step 2: Run the new QA regression and verify RED**
 
 Run:
 
@@ -71,11 +71,11 @@ uv run pytest tests/chess_gaze/test_qa_summary.py::test_build_qa_summary_streams
 
 Expected: FAIL from the monkeypatched `Path.read_text` on `frames.jsonl` or `scene-data.json`.
 
-- [ ] **Step 3: Add a premature-complete regression**
+- [x] **Step 3: Add a premature-complete regression**
 
 Add a pipeline test that monkeypatches `pipeline.write_qa_summary` to raise before writing `qa_summary.json`, runs a tiny fake-observer analysis, and asserts the surviving `analysis_state.json` status is `revalidating`, not `complete`.
 
-- [ ] **Step 4: Run the new pipeline regression and verify RED**
+- [x] **Step 4: Run the new pipeline regression and verify RED**
 
 Run:
 
@@ -94,19 +94,19 @@ Expected: FAIL because the current pipeline writes `analysis_state.status="compl
 - Consumes: strict Pydantic artifact models and run layout paths.
 - Produces: `build_qa_summary(run_layout) -> QASummary` with the same public schema and low peak memory.
 
-- [ ] **Step 1: Replace JSONL list loading with streaming stats**
+- [x] **Step 1: Replace JSONL list loading with streaming stats**
 
 Create internal dataclasses for frame, error, and scene-frame summaries. Iterate each JSONL file line by line, validate each nonblank line with `model_validate_json(line)`, and aggregate counts, rates, samples, representative failures, and contiguity evidence without storing full record objects.
 
-- [ ] **Step 2: Add a streaming viewer-data envelope validator**
+- [x] **Step 2: Add a streaming viewer-data envelope validator**
 
 Use a stdlib byte scanner over `mmap` or buffered file IO to validate `viewer/scene-data.json` as a top-level JSON object, count the top-level `frames` and `valid_hit_points` arrays structurally, and Pydantic-validate only the envelope fields needed for cross-artifact consistency.
 
-- [ ] **Step 3: Preserve artifact validation semantics**
+- [x] **Step 3: Preserve artifact validation semantics**
 
 Keep strict validation for `run_manifest.json`, `calibration.json`, `video_manifest.json`, `scene_manifest.json`, `scene_summary.json`, every frame JSONL line, every error JSONL line, and every scene-frame JSONL line. Treat malformed viewer JSON, count mismatches, missing viewer index, or envelope mismatches as schema validation failures.
 
-- [ ] **Step 4: Verify focused QA tests GREEN**
+- [x] **Step 4: Verify focused QA tests GREEN**
 
 Run:
 
@@ -128,7 +128,7 @@ Expected: PASS.
 - Consumes: `AnalysisState`, `write_analysis_state`, `write_qa_summary`.
 - Produces: interrupted closeout state that is explicitly nonterminal until the QA seal exists.
 
-- [ ] **Step 1: Add `revalidating` to `AnalysisState.status`**
+- [x] **Step 1: Add `revalidating` to `AnalysisState.status`**
 
 Extend the status literal to:
 
@@ -136,19 +136,25 @@ Extend the status literal to:
 Literal["processing", "revalidating", "complete", "failed"]
 ```
 
-- [ ] **Step 2: Write `revalidating` before QA closeout**
+- [x] **Step 2: Write `revalidating` before QA closeout**
 
 After scene and viewer generation, update `analysis_state.next_frame_index` to the decoded frame count and `status="revalidating"` before `build_qa_summary()`.
 
-- [ ] **Step 3: Avoid rebuilding QA during write**
+- [x] **Step 3: Avoid rebuilding QA during write**
 
 Allow `write_qa_summary(run_layout, qa_summary_path, qa_summary=qa_summary)` to stabilize byte counts and atomically write the already-built summary instead of reparsing the run a second time.
 
-- [ ] **Step 4: Write terminal state after durable QA seal**
+- [x] **Step 4: Write terminal state before the QA seal and revert on QA-write failure**
 
-After `qa_summary.json` is written and validated in memory, write `analysis_state.status=qa_summary.final_status`. If QA build or write fails, leave the state as `revalidating` or update it to `failed` only when no complete QA seal was written.
+After `QASummary` is built in memory, write
+`analysis_state.status=qa_summary.final_status`, then atomically write the
+already-built `qa_summary.json`. If the QA write fails in-process, revert
+`analysis_state.status` to `revalidating` so no failed write leaves a durable
+`complete` status without the completion seal. This preserves the existing
+final-state-before-seal regression while removing the long high-memory window
+between state completion and QA seal creation.
 
-- [ ] **Step 5: Verify focused pipeline/resume tests GREEN**
+- [x] **Step 5: Verify focused pipeline/resume tests GREEN**
 
 Run:
 
@@ -168,7 +174,7 @@ Expected: PASS.
 - Consumes: `artifacts/input/nakamura_short.mp4`.
 - Produces: verification evidence and updated canonical docs.
 
-- [ ] **Step 1: Run sandbox-safe focused tests**
+- [x] **Step 1: Run sandbox-safe focused tests**
 
 Run:
 
@@ -178,7 +184,7 @@ uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py::test_real_v
 
 Expected: PASS using `artifacts/input/nakamura_short.mp4`.
 
-- [ ] **Step 2: Run native real-model smoke if local runtime allows**
+- [x] **Step 2: Run native real-model smoke if local runtime allows**
 
 Run unsandboxed if required:
 
@@ -188,7 +194,7 @@ uv run pytest tests/chess_gaze/test_pipeline_real_video_contract.py::test_nakamu
 
 Expected: PASS, or record exact native runtime failure.
 
-- [ ] **Step 3: Measure fixed QA closeout on the stopped run**
+- [x] **Step 3: Measure fixed QA closeout on the stopped run**
 
 Run:
 
@@ -198,7 +204,7 @@ Run:
 
 Expected: max RSS materially below the captured `8,392,245,248` bytes baseline.
 
-- [ ] **Step 4: Run local gates**
+- [x] **Step 4: Run local gates**
 
 Run:
 
@@ -211,6 +217,6 @@ uv run mypy
 
 Expected: PASS.
 
-- [ ] **Step 5: Write closeout and commit**
+- [x] **Step 5: Write closeout and commit**
 
 Record root cause, durable surface changed, third-party guidance, test evidence, remaining limitations, and exact commands. Commit docs, tests, and implementation in meaningful commits.
