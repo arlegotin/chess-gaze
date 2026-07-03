@@ -241,6 +241,7 @@ def analyze_video(
             inference,
             frame_image_retention,
             crop_image_retention,
+            QASummaryPolicy(generate_qa_summary=resolved.generate_qa_summary),
         )
         if request.resume
         else None

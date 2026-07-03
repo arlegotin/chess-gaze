@@ -26,6 +26,7 @@ from chess_gaze.frame_records import (
     FrameRecord,
     GazeAngles,
     HeadPoseRecord,
+    QASummaryPolicy,
     RunManifest,
     VideoManifest,
 )
@@ -115,9 +116,88 @@ def test_find_latest_resumable_run_ignores_complete_and_incompatible_runs(
         external_observer_inference_record(),
         FrameImageRetentionPolicy(save_frame_images=True),
         CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
     )
 
     assert result == compatible
+
+
+def test_find_latest_resumable_run_ignores_complete_no_qa_run(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    complete_no_qa = _make_compatible_run(
+        runs_root / "20260628T110000Z-complete-no-qa",
+        generate_qa_summary=False,
+    )
+    _write_complete_analysis_state(complete_no_qa, frame_count=4)
+    _write_basic_complete_derived_artifacts(complete_no_qa)
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
+        CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=False),
+    )
+
+    assert result is None
+
+
+def test_find_latest_resumable_run_keeps_legacy_complete_state_without_qa_resumable(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    legacy = _make_compatible_run(
+        runs_root / "20260628T110000Z-legacy-without-qa-policy"
+    )
+    manifest = json.loads((legacy.run_dir / "run_manifest.json").read_text())
+    manifest.pop("qa_summary_policy", None)
+    (legacy.run_dir / "run_manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    _write_complete_analysis_state(legacy, frame_count=4)
+    _write_basic_complete_derived_artifacts(legacy)
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
+        CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
+    )
+
+    assert result == legacy
+
+
+def test_find_latest_resumable_run_requires_matching_qa_summary_policy(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "output" / "clip" / "runs"
+    _make_compatible_run(
+        runs_root / "20260628T100000Z-no-qa-partial",
+        generate_qa_summary=False,
+    )
+
+    result = find_latest_resumable_run(
+        runs_root,
+        Path("artifacts/input/clip.mp4"),
+        _video_manifest(frame_count=4),
+        default_calibration(),
+        external_observer_inference_record(),
+        FrameImageRetentionPolicy(save_frame_images=True),
+        CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
+    )
+
+    assert result is None
 
 
 def test_find_latest_resumable_run_ignores_symlinked_run_directories(
@@ -137,6 +217,7 @@ def test_find_latest_resumable_run_ignores_symlinked_run_directories(
         external_observer_inference_record(),
         FrameImageRetentionPolicy(save_frame_images=True),
         CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
     )
 
     assert result is None
@@ -159,6 +240,7 @@ def test_find_latest_resumable_run_skips_malformed_newest_run(
         external_observer_inference_record(),
         FrameImageRetentionPolicy(save_frame_images=True),
         CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
     )
 
     assert result == compatible
@@ -186,6 +268,7 @@ def test_find_latest_resumable_run_skips_cleanup_invalid_newest_run(
         external_observer_inference_record(),
         FrameImageRetentionPolicy(save_frame_images=True),
         CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
     )
 
     assert result == compatible
@@ -208,6 +291,7 @@ def test_find_latest_resumable_run_requires_matching_frame_image_retention(
         external_observer_inference_record(),
         FrameImageRetentionPolicy(save_frame_images=False),
         CropImageRetentionPolicy(save_crop_images=True),
+        QASummaryPolicy(generate_qa_summary=True),
     )
 
     assert result is None
@@ -230,6 +314,7 @@ def test_find_latest_resumable_run_requires_matching_crop_image_retention(
         external_observer_inference_record(),
         FrameImageRetentionPolicy(save_frame_images=True),
         CropImageRetentionPolicy(save_crop_images=False),
+        QASummaryPolicy(generate_qa_summary=True),
     )
 
     assert result is None
@@ -437,6 +522,7 @@ def _make_compatible_run(
     source_sha256: str = "a" * 64,
     save_frame_images: bool = True,
     save_crop_images: bool = True,
+    generate_qa_summary: bool = True,
 ) -> RunLayout:
     run_dir.mkdir(parents=True)
     layout = RunLayout(
@@ -469,6 +555,7 @@ def _make_compatible_run(
         source_sha256=source_sha256,
         save_frame_images=save_frame_images,
         save_crop_images=save_crop_images,
+        generate_qa_summary=generate_qa_summary,
     )
     return layout
 
@@ -481,6 +568,7 @@ def _write_run_metadata(
     source_sha256: str = "a" * 64,
     save_frame_images: bool = True,
     save_crop_images: bool = True,
+    generate_qa_summary: bool = True,
 ) -> None:
     video_manifest = _video_manifest(
         frame_count=frame_count,
@@ -499,6 +587,7 @@ def _write_run_metadata(
         crop_image_retention=CropImageRetentionPolicy(
             save_crop_images=save_crop_images
         ),
+        qa_summary_policy=QASummaryPolicy(generate_qa_summary=generate_qa_summary),
     )
     (layout.run_dir / "run_manifest.json").write_text(
         run_manifest.model_dump_json(),
@@ -593,6 +682,32 @@ def _write_complete_qa_summary(layout: RunLayout) -> None:
         summary.model_dump_json(),
         encoding="utf-8",
     )
+
+
+def _write_complete_analysis_state(layout: RunLayout, *, frame_count: int = 4) -> None:
+    state = AnalysisState(
+        run_id=layout.run_dir.name,
+        input_path="artifacts/input/clip.mp4",
+        source_video_sha256="a" * 64,
+        frame_count_decoded=frame_count,
+        next_frame_index=frame_count,
+        status="complete",
+        updated_at_utc="2026-06-28T12:00:00Z",
+    )
+    (layout.run_dir / "analysis_state.json").write_text(
+        state.model_dump_json(),
+        encoding="utf-8",
+    )
+
+
+def _write_basic_complete_derived_artifacts(layout: RunLayout) -> None:
+    (layout.records_dir / "frames.jsonl").write_text("", encoding="utf-8")
+    (layout.records_dir / "errors.jsonl").write_text("", encoding="utf-8")
+    (layout.records_dir / "scene_frames.jsonl").write_text("", encoding="utf-8")
+    (layout.scene_dir / "scene_manifest.json").write_text("{}", encoding="utf-8")
+    (layout.scene_dir / "scene_summary.json").write_text("{}", encoding="utf-8")
+    (layout.viewer_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (layout.viewer_dir / "scene-data.json").write_text("{}", encoding="utf-8")
 
 
 def _video_manifest(

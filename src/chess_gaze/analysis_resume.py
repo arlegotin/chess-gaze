@@ -55,6 +55,7 @@ def find_latest_resumable_run(
     inference: InferenceRuntimeRecord,
     frame_image_retention: FrameImageRetentionPolicy,
     crop_image_retention: CropImageRetentionPolicy,
+    qa_summary_policy: QASummaryPolicy,
 ) -> RunLayout | None:
     if not runs_root.exists():
         return None
@@ -77,6 +78,7 @@ def find_latest_resumable_run(
             inference=inference,
             frame_image_retention=frame_image_retention,
             crop_image_retention=crop_image_retention,
+            expected_qa_summary_policy=qa_summary_policy,
         ):
             continue
         if _run_is_complete(run_dir):
@@ -260,6 +262,7 @@ def _run_matches(
     inference: InferenceRuntimeRecord,
     frame_image_retention: FrameImageRetentionPolicy,
     crop_image_retention: CropImageRetentionPolicy,
+    expected_qa_summary_policy: QASummaryPolicy,
 ) -> bool:
     try:
         run_manifest = read_run_manifest_artifact_json(
@@ -281,11 +284,29 @@ def _run_matches(
         and run_manifest.inference == inference
         and run_manifest.frame_image_retention == frame_image_retention
         and run_manifest.crop_image_retention == crop_image_retention
+        and run_manifest.qa_summary_policy == expected_qa_summary_policy
         and persisted_calibration == calibration
     )
 
 
 def _run_is_complete(run_dir: Path) -> bool:
+    if _run_has_complete_qa_summary(run_dir):
+        return True
+
+    try:
+        run_manifest = read_run_manifest_artifact_json(
+            (run_dir / "run_manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError):
+        return False
+
+    if run_manifest.qa_summary_policy.generate_qa_summary:
+        return False
+
+    return _run_has_complete_no_qa_state(run_dir)
+
+
+def _run_has_complete_qa_summary(run_dir: Path) -> bool:
     qa_summary_path = run_dir / "qa_summary.json"
     if not qa_summary_path.exists():
         return False
@@ -304,6 +325,36 @@ def _run_is_complete(run_dir: Path) -> bool:
         and validation.schema_validation_passed
         and validation.counts_match
     )
+
+
+def _run_has_complete_no_qa_state(run_dir: Path) -> bool:
+    try:
+        state = AnalysisState.model_validate_json(
+            (run_dir / "analysis_state.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError):
+        return False
+
+    return (
+        state.status == "complete"
+        and state.next_frame_index == state.frame_count_decoded
+        and all(
+            path.is_file()
+            for path in _required_no_qa_completion_artifacts(run_dir)
+        )
+    )
+
+
+def _required_no_qa_completion_artifacts(run_dir: Path) -> list[Path]:
+    return [
+        run_dir / "records" / "frames.jsonl",
+        run_dir / "records" / "errors.jsonl",
+        run_dir / "records" / "scene_frames.jsonl",
+        run_dir / "scene" / "scene_manifest.json",
+        run_dir / "scene" / "scene_summary.json",
+        run_dir / "viewer" / "index.html",
+        run_dir / "viewer" / "scene-data.json",
+    ]
 
 
 def _committed_frame_records(
