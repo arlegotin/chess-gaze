@@ -10,6 +10,7 @@ import av
 import numpy as np
 import pytest
 
+from chess_gaze.artifact_runs import RunLayout
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import FrameRecord
@@ -23,7 +24,12 @@ from chess_gaze.pipeline import (
     PipelineError,
     analyze_video,
 )
-from chess_gaze.qa_summary import QASummary
+from chess_gaze.qa_summary import (
+    QASummary,
+)
+from chess_gaze.qa_summary import (
+    build_qa_summary as real_build_qa_summary,
+)
 from chess_gaze.scene_artifacts import (
     build_scene_artifacts as real_build_scene_artifacts,
 )
@@ -382,6 +388,7 @@ def test_analyze_video_retains_raw_and_processed_frame_images_when_requested(
         "schema_version": "crop-image-retention-v1",
         "save_crop_images": False,
     }
+    assert result.qa_summary_path is not None
     summary = QASummary.model_validate_json(
         result.qa_summary_path.read_text(encoding="utf-8")
     )
@@ -438,6 +445,7 @@ def test_analyze_video_resumes_latest_compatible_partial_run(
     assert [
         record.frame_index for record in _records_from(result.frames_jsonl_path)
     ] == [0, 1, 2, 3, 4]
+    assert result.qa_summary_path is not None
     summary = QASummary.model_validate_json(
         result.qa_summary_path.read_text(encoding="utf-8")
     )
@@ -1010,9 +1018,7 @@ def test_analyze_video_requested_qa_fails_on_counts_mismatch(
 
     from chess_gaze import pipeline
 
-    real_build_qa_summary = pipeline.build_qa_summary
-
-    def build_failed_summary(layout: object) -> QASummary:
+    def build_failed_summary(layout: RunLayout) -> QASummary:
         summary = real_build_qa_summary(layout)
         validation = summary.artifact_validation.model_copy(
             update={

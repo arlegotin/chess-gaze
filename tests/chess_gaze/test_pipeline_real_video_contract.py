@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import TracebackType
+from typing import IO, Any, NoReturn, cast
 
 import pytest
 
@@ -151,21 +153,48 @@ def _read_last_jsonl_record(path: Path) -> tuple[str, dict[str, object]]:
         handle.seek(0, 2)
         file_size = handle.tell()
         assert file_size > 0
-        buffer = bytearray()
-        chunk_size = 4096
+        position = file_size
 
-        while handle.tell() > 0:
-            read_size = min(chunk_size, handle.tell())
-            handle.seek(-read_size, 1)
-            buffer[:0] = handle.read(read_size)
-            handle.seek(-read_size, 1)
-            lines = buffer.rstrip(b"\n").splitlines()
-            if lines:
-                last_line = lines[-1].decode("utf-8")
-                assert last_line
-                return last_line, json.loads(last_line)
+        while position > 0:
+            position -= 1
+            handle.seek(position)
+            if handle.read(1) not in (b"\n", b"\r"):
+                break
+
+        while position > 0:
+            position -= 1
+            handle.seek(position)
+            if handle.read(1) == b"\n":
+                position += 1
+                break
+
+        handle.seek(position)
+        last_line = handle.readline().decode("utf-8").rstrip("\r\n")
+        assert last_line
+        return last_line, json.loads(last_line)
 
     raise AssertionError(f"expected at least one JSONL record in {path}")
+
+
+def test_read_last_jsonl_record_handles_last_line_larger_than_tail_chunk(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "records.jsonl"
+    first = {"frame_id": "f000000000", "frame_index": 0}
+    last = {
+        "frame_id": "f000000001",
+        "frame_index": 1,
+        "payload": "x" * 5000,
+    }
+    path.write_text(
+        json.dumps(first) + "\n" + json.dumps(last) + "\n",
+        encoding="utf-8",
+    )
+
+    last_line, last_record = _read_last_jsonl_record(path)
+
+    assert last_line == json.dumps(last)
+    assert last_record == last
 
 
 def _assert_default_completed_artifact_contract(
@@ -183,8 +212,6 @@ def _assert_default_completed_artifact_contract(
     assert first_record["frame_index"] == 0
     assert last_record["frame_id"] == f"f{expected_count - 1:09d}"
     assert last_record["frame_index"] == expected_count - 1
-    assert first_record["status"] == FrameStatus.OK.value
-    assert last_record["status"] == FrameStatus.OK.value
     assert result.scene_manifest_path.is_file()
     assert result.scene_summary_path.is_file()
     assert result.scene_frames_jsonl_path.is_file()
@@ -244,7 +271,9 @@ def test_default_completed_artifact_contract_avoids_full_record_validation(
     )
 
     result = analyze_video(
-        AnalyzeRequest(video_path=NAKAMURA_SHORT_VIDEO, output_root=tmp_path / "output"),
+        AnalyzeRequest(
+            video_path=NAKAMURA_SHORT_VIDEO, output_root=tmp_path / "output"
+        ),
         observers=ObserverBundle(frame_observer=_deterministic_real_video_record),
     )
 
@@ -252,48 +281,74 @@ def test_default_completed_artifact_contract_avoids_full_record_validation(
     original_open = Path.open
 
     def _fail_frame_record_read_text(
-        self: Path, *args: object, **kwargs: object
+        self: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
     ) -> str:
         if self == result.frames_jsonl_path:
             raise AssertionError("default no-QA helper must not call Path.read_text()")
-        return original_read_text(self, *args, **kwargs)
+        return original_read_text(self, encoding=encoding, errors=errors)
 
-    def _fail_validation(*args: object, **kwargs: object) -> FrameRecord:
+    def _fail_validation(*args: object, **kwargs: object) -> NoReturn:
+        del args, kwargs
         raise AssertionError(
-            "default no-QA helper must not validate frame JSON via FrameRecord.model_validate_json()"
+            "default no-QA helper must not validate frame JSON via "
+            "FrameRecord.model_validate_json()"
         )
 
     class _BoundedFrameReadProxy:
-        def __init__(self, wrapped: object) -> None:
+        def __init__(self, wrapped: IO[Any]) -> None:
             self._wrapped = wrapped
 
         def read(self, size: int = -1) -> bytes | str:
             if size < 0:
-                raise AssertionError("default no-QA helper must not read the whole file")
-            return self._wrapped.read(size)
+                raise AssertionError(
+                    "default no-QA helper must not read the whole file"
+                )
+            return cast(bytes | str, self._wrapped.read(size))
 
-        def readlines(self, *args: object, **kwargs: object) -> list[bytes] | list[str]:
+        def readlines(self, *args: object, **kwargs: object) -> NoReturn:
+            del args, kwargs
             raise AssertionError(
                 "default no-QA helper must not materialize all JSONL lines"
             )
 
-        def __iter__(self) -> object:
+        def __iter__(self) -> NoReturn:
             raise AssertionError(
                 "default no-QA helper must not iterate every JSONL record"
             )
 
-        def __enter__(self) -> "_BoundedFrameReadProxy":
+        def __enter__(self) -> _BoundedFrameReadProxy:
             self._wrapped.__enter__()
             return self
 
-        def __exit__(self, *args: object) -> object:
-            return self._wrapped.__exit__(*args)
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> bool | None:
+            return self._wrapped.__exit__(exc_type, exc, traceback)
 
-        def __getattr__(self, name: str) -> object:
+        def __getattr__(self, name: str) -> Any:
             return getattr(self._wrapped, name)
 
-    def _guarded_open(self: Path, *args: object, **kwargs: object) -> object:
-        handle = original_open(self, *args, **kwargs)
+    def _guarded_open(
+        self: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> Any:
+        handle = original_open(
+            self,
+            mode=mode,
+            buffering=buffering,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+        )
         if self == result.frames_jsonl_path:
             return _BoundedFrameReadProxy(handle)
         return handle

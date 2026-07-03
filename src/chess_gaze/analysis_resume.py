@@ -339,8 +339,7 @@ def _run_has_complete_no_qa_state(run_dir: Path) -> bool:
         state.status == "complete"
         and state.next_frame_index == state.frame_count_decoded
         and all(
-            path.is_file()
-            for path in _required_no_qa_completion_artifacts(run_dir)
+            path.is_file() for path in _required_no_qa_completion_artifacts(run_dir)
         )
     )
 
