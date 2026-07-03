@@ -4,8 +4,9 @@ Local Python pipeline for per-frame video evidence and 3D scene artifacts used
 by chess gaze analysis.
 
 The implemented pipeline decodes video, writes strict run artifacts, keeps raw,
-processed, and crop debug images only when explicitly requested, and revalidates
-artifacts into `qa_summary.json`.
+processed, and crop debug images only when explicitly requested, and can
+revalidate artifacts into `qa_summary.json` when strict run-level QA is
+requested.
 The default CLI path validates local model checksums, runs MediaPipe face
 landmarks, derives eye/iris and head-pose evidence, runs the local UniGaze
 checkpoint, records strict per-frame gaze outputs, builds pseudo-metric 3D scene
@@ -50,7 +51,12 @@ uv run chess-gaze analyze artifacts/input/test_1.mp4 --models-root models
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --config analysis.json
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --save-frames
 uv run chess-gaze analyze artifacts/input/test_1.mp4 --save-crops
+uv run chess-gaze analyze --qa-summary artifacts/input/nakamura_short.mp4
 ```
+
+Default analysis writes frame records, scene artifacts, and viewer artifacts.
+It does not write `qa_summary.json`. Use `--qa-summary` when you want strict
+run-level artifact validation and a persisted QA report.
 
 By default, UniGaze runs on Apple Silicon MPS with batch size 7:
 
@@ -124,7 +130,7 @@ Each completed run contains:
 - `viewer/index.html`
 - `viewer/served.html`
 - `viewer/scene-data.json`
-- `qa_summary.json`
+- `qa_summary.json` (written only by `--qa-summary` and legacy QA-required runs)
 
 `chess-gaze analyze` prints the run directory and then the generated viewer
 entry point:

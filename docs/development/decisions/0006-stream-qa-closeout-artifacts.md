@@ -6,6 +6,10 @@ Date: 2026-07-03
 
 Accepted
 
+Superseded in part by `docs/superpowers/specs/2026-07-03-optional-qa-summary-design.md`:
+streaming QA closeout still applies when QA summary generation is requested,
+but default analysis no longer builds or writes `qa_summary.json`.
+
 ## Context
 
 The run `artifacts/output/nepo_2/runs/20260630T082559Z-f865e2af` produced frame,
@@ -71,7 +75,8 @@ and reverts to `revalidating` if the QA write fails in-process.
 Benefits:
 
 - Peak closeout memory on the stopped run dropped from 8.39 GB to about 224 MB.
-- `qa_summary.json` remains the completion seal.
+- `qa_summary.json` remains the strict QA validation seal only for
+  QA-requested and legacy QA-required runs.
 - Frame, error, and scene-frame schemas remain validated record by record.
 - The existing final-state-before-seal regression remains honored.
 

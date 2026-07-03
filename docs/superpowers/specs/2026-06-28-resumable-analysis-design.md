@@ -13,6 +13,13 @@ examples are superseded by
 ADR-0004. Current default runs validate zero raw and processed frame image
 files; explicit save-frame runs validate decoded-frame-count image files.
 
+Supersession note, 2026-07-03: `qa_summary.json` is no longer the universal
+completion seal for new runs.
+`docs/superpowers/specs/2026-07-03-optional-qa-summary-design.md` supersedes
+the completion-seal sections for runs whose manifest explicitly sets
+`qa_summary_policy.generate_qa_summary=false`. Legacy manifests without that
+policy still require a valid complete `qa_summary.json`.
+
 ## Goal
 
 Make `uv run chess-gaze analyze <video>` resume the latest compatible
@@ -116,7 +123,10 @@ informational and recoverable; `frames.jsonl` remains the commit log.
 ## New Artifact
 
 `analysis_state.json` lives at the run root. It is not the completion seal.
-`qa_summary.json` remains the completion seal.
+For legacy and QA-requested runs, `qa_summary.json` remains the QA completion
+seal. For new no-QA runs, `analysis_state.json` plus the required derived
+artifact files form the cheap completion signal described in the optional QA
+summary design.
 
 Schema:
 
