@@ -113,7 +113,7 @@ Use `--save-frames` when a run must retain `raw_frames/*.png` and
 `processed_frames/*.jpg`; use `--save-crops` when a run must retain
 `crops/**/*.png` for visual debugging or external QA.
 
-Each completed run contains:
+Each completed run contains these core artifacts:
 
 - `run_manifest.json`
 - `calibration.json`
@@ -130,6 +130,9 @@ Each completed run contains:
 - `viewer/index.html`
 - `viewer/served.html`
 - `viewer/scene-data.json`
+
+Optional QA artifact:
+
 - `qa_summary.json` (written only by `--qa-summary` and legacy QA-required runs)
 
 `chess-gaze analyze` prints the run directory and then the generated viewer

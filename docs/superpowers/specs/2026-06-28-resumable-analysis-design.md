@@ -145,12 +145,17 @@ Schema:
 
 Allowed statuses are `processing`, `revalidating`, `complete`, and `failed`.
 `revalidating` means frame processing and derived scene/viewer artifacts are
-done, but the `qa_summary.json` completion seal is not yet durable. A run with
-`analysis_state.status == "complete"` but no valid complete `qa_summary.json`
-is still incomplete and must be resumable from the frame journal. The analyzer
-may write terminal `complete` or `failed` state before atomically writing
-`qa_summary.json`, but if the QA write fails in-process it must revert the state
-to `revalidating` so the run is not reported as complete without the seal.
+done, but a required `qa_summary.json` completion seal is not yet durable. For
+legacy manifests and QA-requested runs, `analysis_state.status == "complete"`
+still requires a valid complete `qa_summary.json`; without it, the run remains
+incomplete and must stay resumable from the frame journal. For new no-QA runs
+whose manifest sets `qa_summary_policy.generate_qa_summary=false`,
+`analysis_state.status == "complete"` plus the required derived artifact
+presence is the cheap completion signal, so no `qa_summary.json` is required.
+The analyzer may write terminal `complete` or `failed` state before atomically
+writing `qa_summary.json`, but if that QA write fails in-process for a
+QA-required run it must revert the state to `revalidating` so the run is not
+reported as complete without the seal.
 
 ## Non-Goals
 
