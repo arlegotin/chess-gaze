@@ -32,7 +32,9 @@ been produced.
 - Canonical docs now describe `qa_summary.json` as optional by default and as
   the strict QA seal only for QA-requested or legacy QA-required runs.
 
-## Regression Tests
+## Regression Coverage
+
+Feature-level tests added or changed across this plan:
 
 - CLI default and `--qa-summary` request plumbing in
   `tests/chess_gaze/test_cli.py`.
@@ -52,6 +54,18 @@ been produced.
 - Bounded JSONL boundary checks in
   `tests/chess_gaze/test_pipeline_real_video_contract.py`, including a
   regression for a last record larger than the previous fixed tail chunk.
+
+Task 6 added or changed:
+
+- `tests/chess_gaze/test_pipeline_real_video_contract.py`
+  - `test_read_last_jsonl_record_handles_last_line_larger_than_tail_chunk`
+  - `_read_last_jsonl_record`
+  - `_assert_default_completed_artifact_contract`
+  - `test_default_completed_artifact_contract_avoids_full_record_validation`
+- `tests/chess_gaze/test_pipeline_contract.py`
+  - `test_analyze_video_retains_raw_and_processed_frame_images_when_requested`
+  - `test_analyze_video_resumes_latest_compatible_partial_run`
+  - `test_analyze_video_requested_qa_fails_on_counts_mismatch`
 
 ## Verification
 
