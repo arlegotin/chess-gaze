@@ -139,23 +139,46 @@ def _records(path: Path) -> list[FrameRecord]:
     ]
 
 
-def _frame_record_lines(path: Path) -> list[str]:
-    return path.read_text(encoding="utf-8").splitlines()
+def _read_first_jsonl_record(path: Path) -> tuple[str, dict[str, object]]:
+    with path.open("r", encoding="utf-8") as handle:
+        first_line = handle.readline().strip()
+    assert first_line
+    return first_line, json.loads(first_line)
+
+
+def _read_last_jsonl_record(path: Path) -> tuple[str, dict[str, object]]:
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        file_size = handle.tell()
+        assert file_size > 0
+        buffer = bytearray()
+        chunk_size = 4096
+
+        while handle.tell() > 0:
+            read_size = min(chunk_size, handle.tell())
+            handle.seek(-read_size, 1)
+            buffer[:0] = handle.read(read_size)
+            handle.seek(-read_size, 1)
+            lines = buffer.rstrip(b"\n").splitlines()
+            if lines:
+                last_line = lines[-1].decode("utf-8")
+                assert last_line
+                return last_line, json.loads(last_line)
+
+    raise AssertionError(f"expected at least one JSONL record in {path}")
 
 
 def _assert_default_completed_artifact_contract(
     result: AnalyzeResult, *, expected_count: int
-) -> list[str]:
-    record_lines = _frame_record_lines(result.frames_jsonl_path)
+) -> tuple[str, str]:
+    first_line, first_record = _read_first_jsonl_record(result.frames_jsonl_path)
+    last_line, last_record = _read_last_jsonl_record(result.frames_jsonl_path)
 
     assert result.decoded_frame_count == expected_count
     assert result.qa_summary_path is None
     assert result.validated_record_count is None
     assert result.validated_error_count is None
     assert not (result.layout.run_dir / "qa_summary.json").exists()
-    assert len(record_lines) == expected_count
-    first_record = json.loads(record_lines[0])
-    last_record = json.loads(record_lines[-1])
     assert first_record["frame_id"] == "f000000000"
     assert first_record["frame_index"] == 0
     assert last_record["frame_id"] == f"f{expected_count - 1:09d}"
@@ -170,7 +193,7 @@ def _assert_default_completed_artifact_contract(
     state = json.loads(result.analysis_state_path.read_text(encoding="utf-8"))
     assert state["status"] == "complete"
     assert state["next_frame_index"] == expected_count
-    return record_lines
+    return first_line, last_line
 
 
 @pytest.mark.parametrize(
@@ -189,24 +212,27 @@ def test_real_video_model_free_pipeline_writes_complete_artifact_contract(
     raw_count = len(list(result.layout.raw_frames_dir.glob("*.png")))
     processed_count = len(list(result.layout.processed_frames_dir.glob("*.jpg")))
     crop_count = len(list(result.layout.crops_dir.rglob("*.png")))
-    record_lines = _assert_default_completed_artifact_contract(
+    first_line, last_line = _assert_default_completed_artifact_contract(
         result, expected_count=expected_count
     )
     print(
         f"{video_path}: decoded={result.decoded_frame_count} "
         f"raw={raw_count} processed={processed_count} crops={crop_count} "
-        f"records={len(record_lines)}"
+        f"first={json.loads(first_line)['frame_id']} "
+        f"last={json.loads(last_line)['frame_id']}"
     )
 
     assert raw_count == 0
     assert processed_count == 0
     assert crop_count == 0
     assert not result.layout.crops_dir.exists()
-    records = [FrameRecord.model_validate_json(line) for line in record_lines[:5]]
-    assert all(record.status is FrameStatus.OK for record in records)
+    first_record = FrameRecord.model_validate_json(first_line)
+    last_record = FrameRecord.model_validate_json(last_line)
+    assert first_record.status is FrameStatus.OK
+    assert last_record.status is FrameStatus.OK
     assert all(
         ErrorCode.FACE_NOT_FOUND not in {error.code for error in record.errors}
-        for record in records
+        for record in (first_record, last_record)
     )
 
 
@@ -222,21 +248,66 @@ def test_default_completed_artifact_contract_avoids_full_record_validation(
         observers=ObserverBundle(frame_observer=_deterministic_real_video_record),
     )
 
-    original_validator = FrameRecord.model_validate_json
-    validated_lines: list[str] = []
+    original_read_text = Path.read_text
+    original_open = Path.open
 
-    def _track_validation(line: str, *args: object, **kwargs: object) -> FrameRecord:
-        validated_lines.append(line)
-        return original_validator(line, *args, **kwargs)
+    def _fail_frame_record_read_text(
+        self: Path, *args: object, **kwargs: object
+    ) -> str:
+        if self == result.frames_jsonl_path:
+            raise AssertionError("default no-QA helper must not call Path.read_text()")
+        return original_read_text(self, *args, **kwargs)
 
-    monkeypatch.setattr(FrameRecord, "model_validate_json", _track_validation)
+    def _fail_validation(*args: object, **kwargs: object) -> FrameRecord:
+        raise AssertionError(
+            "default no-QA helper must not validate frame JSON via FrameRecord.model_validate_json()"
+        )
 
-    record_lines = _assert_default_completed_artifact_contract(
+    class _BoundedFrameReadProxy:
+        def __init__(self, wrapped: object) -> None:
+            self._wrapped = wrapped
+
+        def read(self, size: int = -1) -> bytes | str:
+            if size < 0:
+                raise AssertionError("default no-QA helper must not read the whole file")
+            return self._wrapped.read(size)
+
+        def readlines(self, *args: object, **kwargs: object) -> list[bytes] | list[str]:
+            raise AssertionError(
+                "default no-QA helper must not materialize all JSONL lines"
+            )
+
+        def __iter__(self) -> object:
+            raise AssertionError(
+                "default no-QA helper must not iterate every JSONL record"
+            )
+
+        def __enter__(self) -> "_BoundedFrameReadProxy":
+            self._wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args: object) -> object:
+            return self._wrapped.__exit__(*args)
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._wrapped, name)
+
+    def _guarded_open(self: Path, *args: object, **kwargs: object) -> object:
+        handle = original_open(self, *args, **kwargs)
+        if self == result.frames_jsonl_path:
+            return _BoundedFrameReadProxy(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "read_text", _fail_frame_record_read_text)
+    monkeypatch.setattr(Path, "open", _guarded_open)
+    monkeypatch.setattr(FrameRecord, "model_validate_json", _fail_validation)
+
+    first_line, last_line = _assert_default_completed_artifact_contract(
         result, expected_count=NAKAMURA_SHORT_FRAME_COUNT
     )
 
-    assert len(record_lines) == NAKAMURA_SHORT_FRAME_COUNT
-    assert validated_lines == []
+    assert json.loads(first_line)["frame_index"] == 0
+    assert json.loads(last_line)["frame_index"] == NAKAMURA_SHORT_FRAME_COUNT - 1
 
 
 @pytest.mark.native_mediapipe
