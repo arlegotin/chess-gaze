@@ -79,7 +79,7 @@ def _draw_box(
     image: np.ndarray, bbox: BBox, color: Color, *, thickness: int = 2
 ) -> None:
     top_left, bottom_right = _bbox_pixels(bbox, image)
-    _draw_corner_box(image, top_left, bottom_right, color, thickness=thickness)
+    cv2.rectangle(image, top_left, bottom_right, color, thickness, lineType=cv2.LINE_AA)
 
 
 def _draw_circle(
@@ -96,9 +96,16 @@ def _draw_circle(
 
 
 def _draw_eye(image: np.ndarray, eye: EyeRecord, color: Color, label: str) -> None:
-    del label
     if eye.bounding_box is not None:
-        _draw_eye_corner(image, eye.bounding_box, color)
+        _draw_box(image, eye.bounding_box, color, thickness=1)
+
+    if eye.iris_landmarks:
+        iris_pixels = [_point_pixel(point, image) for point in eye.iris_landmarks]
+        if len(iris_pixels) >= 3:
+            contour = np.array(iris_pixels, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(image, [contour], isClosed=True, color=color, thickness=1)
+        for point in eye.iris_landmarks:
+            _draw_circle(image, point, _IRIS_LANDMARK_COLOR, radius=1, filled=True)
 
     if eye.pupil_center is not None:
         center = _point_pixel(eye.pupil_center, image)
@@ -110,7 +117,14 @@ def _draw_eye(image: np.ndarray, eye: EyeRecord, color: Color, label: str) -> No
             -1,
             lineType=cv2.LINE_AA,
         )
-        cv2.circle(image, center, 5, color, 1, lineType=cv2.LINE_AA)
+        cv2.circle(image, center, 6, color, 1, lineType=cv2.LINE_AA)
+        _draw_text(
+            image,
+            label,
+            (center[0] + 7, center[1] + 4),
+            color=color,
+            scale=0.35,
+        )
 
 
 def _draw_unigaze_vector(image: np.ndarray, record: FrameRecord) -> None:
@@ -180,7 +194,7 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
     if not _has_complete_head_pose(record.head_pose):
         return
 
-    origin = _head_pose_origin(record)
+    origin = _nose_or_face_center(record)
     if origin is None:
         return
 
@@ -330,21 +344,6 @@ def _face_center(record: FrameRecord) -> Point2D | None:
     )
 
 
-def _head_pose_origin(record: FrameRecord) -> Point2D | None:
-    origin = _nose_or_face_center(record)
-    if origin is None:
-        return None
-
-    face_box = record.face.bounding_box
-    if face_box is not None and face_box.space is origin.space:
-        offset = (face_box.y_max - face_box.y_min) * 0.08
-    elif origin.space is CoordinateSpace.IMAGE_PX:
-        offset = 8.0
-    else:
-        offset = 0.05
-    return Point2D(space=origin.space, x=origin.x, y=origin.y + offset)
-
-
 def _nose_or_face_center(record: FrameRecord) -> Point2D | None:
     if record.face.landmarks and len(record.face.landmarks) >= 3:
         return record.face.landmarks[2]
@@ -378,107 +377,6 @@ def _point_pixel(point: Point2D, image: np.ndarray) -> Pixel:
             image,
         )
     return _clip_pixel(round(point.x), round(point.y), image)
-
-
-def _draw_eye_corner(image: np.ndarray, bbox: BBox, color: Color) -> None:
-    top_left, bottom_right = _bbox_pixels(bbox, image)
-    _draw_corner_box(
-        image,
-        top_left,
-        bottom_right,
-        color,
-        thickness=1,
-        corners=("top_left",),
-        corner_length=8,
-    )
-
-
-def _draw_corner_box(
-    image: np.ndarray,
-    top_left: Pixel,
-    bottom_right: Pixel,
-    color: Color,
-    *,
-    thickness: int,
-    corners: tuple[str, ...] = ("top_left", "top_right", "bottom_left", "bottom_right"),
-    corner_length: int | None = None,
-) -> None:
-    width = max(1, bottom_right[0] - top_left[0])
-    height = max(1, bottom_right[1] - top_left[1])
-    length = corner_length or max(8, min(width, height) // 5)
-    length = min(length, width, height)
-
-    if "top_left" in corners:
-        cv2.line(
-            image,
-            top_left,
-            _clip_pixel(top_left[0] + length, top_left[1], image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-        cv2.line(
-            image,
-            top_left,
-            _clip_pixel(top_left[0], top_left[1] + length, image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-    if "top_right" in corners:
-        corner = bottom_right[0], top_left[1]
-        cv2.line(
-            image,
-            corner,
-            _clip_pixel(corner[0] - length, corner[1], image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-        cv2.line(
-            image,
-            corner,
-            _clip_pixel(corner[0], corner[1] + length, image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-    if "bottom_left" in corners:
-        corner = top_left[0], bottom_right[1]
-        cv2.line(
-            image,
-            corner,
-            _clip_pixel(corner[0] + length, corner[1], image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-        cv2.line(
-            image,
-            corner,
-            _clip_pixel(corner[0], corner[1] - length, image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-    if "bottom_right" in corners:
-        corner = bottom_right
-        cv2.line(
-            image,
-            corner,
-            _clip_pixel(corner[0] - length, corner[1], image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
-        cv2.line(
-            image,
-            corner,
-            _clip_pixel(corner[0], corner[1] - length, image),
-            color,
-            thickness,
-            lineType=cv2.LINE_AA,
-        )
 
 
 def _backstep_arrow(start: Pixel, end: Pixel, image: np.ndarray) -> tuple[Pixel, Pixel]:

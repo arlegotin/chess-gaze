@@ -521,7 +521,10 @@ def test_model_backed_frame_observer_records_missing_face_without_later_models(
     assert record.face.reason_invalid is ErrorCode.FACE_NOT_FOUND
     assert record.left_eye.present is False
     assert record.right_eye.present is False
+    assert record.geometric_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
+    assert record.appearance_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
     assert record.recommended_gaze.valid is False
+    assert record.recommended_gaze == record.appearance_gaze
     assert ErrorCode.FACE_NOT_FOUND in {error.code for error in record.errors}
 
 

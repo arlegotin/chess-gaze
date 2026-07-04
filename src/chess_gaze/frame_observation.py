@@ -326,7 +326,7 @@ def _missing_face_record(
     errors: list[ErrorRecord],
 ) -> FrameRecord:
     reason = observation.selection.reason_invalid or ErrorCode.FACE_NOT_FOUND
-    invalid_gaze = _invalid_gaze(reason)
+    invalid_gaze = _invalid_gaze(ErrorCode.GAZE_MODEL_FAILED)
     return FrameRecord(
         frame_id=frame.frame_id,
         frame_index=frame.frame_index,
@@ -348,7 +348,7 @@ def _missing_face_record(
             reason_invalid=ErrorCode.HEAD_POSE_INVALID,
         ),
         geometric_gaze=invalid_gaze,
-        appearance_gaze=_invalid_gaze(ErrorCode.GAZE_MODEL_FAILED),
+        appearance_gaze=invalid_gaze,
         recommended_gaze=invalid_gaze,
         errors=errors,
     )

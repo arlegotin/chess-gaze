@@ -15,6 +15,7 @@ from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.visualization import (
     _APPEARANCE_GAZE_COLOR,
     _GEOMETRIC_GAZE_COLOR,
+    _IRIS_LANDMARK_COLOR,
     _RECOMMENDED_GAZE_COLOR,
     render_processed_frame,
 )
@@ -233,6 +234,7 @@ def test_render_processed_frame_writes_ok_jpeg_with_current_schema_overlays(
     rendered = _rgb_jpeg(output_path)
     assert rendered.shape == frame.shape
     assert _nonzero_near(rendered, x=40, y=28) > 0
+    assert _nonzero_near(rendered, x=105, y=140, radius=2) > 0
     assert _nonzero_near(rendered, x=80, y=67) > 0
     assert _nonzero_near(rendered, x=135, y=68) > 0
     assert _nonzero_near(rendered, x=105, y=102) > 0
@@ -287,6 +289,14 @@ def test_left_and_right_iris_centers_are_rendered_independently(
     rendered = _rgb_jpeg(output_path)
     assert _nonzero_near(rendered, x=80, y=67, radius=2) > 0
     assert _nonzero_near(rendered, x=135, y=68, radius=2) > 0
+    assert (
+        _dominant_color_count_near(
+            rendered, x=128, y=68, color=_IRIS_LANDMARK_COLOR, radius=2
+        )
+        > 0
+    )
+    assert _nonzero_near(rendered, x=144, y=72, radius=2) > 0
+    assert _nonzero_near(rendered, x=89, y=71, radius=2) > 0
 
 
 def test_eye_overlay_colors_follow_streamer_anatomical_sides(
@@ -333,8 +343,12 @@ def test_processed_frame_does_not_draw_unigaze_label_text(tmp_path: Path) -> Non
     render_processed_frame(frame, record, output_path, quality=100)
 
     rendered = _rgb_jpeg(output_path)
-    label_region = rendered[76:96, 110:170]
-    assert int(np.count_nonzero(label_region)) < 80
+    assert (
+        _dominant_color_count_near(
+            rendered, x=148, y=78, color=_APPEARANCE_GAZE_COLOR, radius=6
+        )
+        == 0
+    )
 
 
 def test_current_frame_record_rejects_unvalidated_candidate_overlay_fields() -> None:
