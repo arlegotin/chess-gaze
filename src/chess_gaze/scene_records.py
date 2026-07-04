@@ -754,7 +754,7 @@ class SceneSummary(SceneSchemaModel):
 
 
 class ViewerSceneData(SceneSchemaModel):
-    schema_version: Literal["gaze-scene-viewer-data-v2"] = "gaze-scene-viewer-data-v2"
+    schema_version: Literal["gaze-scene-viewer-data-v3"] = "gaze-scene-viewer-data-v3"
     run_id: str
     source_video_stem: str
     frame_count: int

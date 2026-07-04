@@ -196,11 +196,11 @@ Persisted scene assumptions include:
 - head ellipsoid radii: `0.090 m, 0.120 m, 0.100 m`
 - eye sphere radius: `0.012 m`
 
-Every decoded frame produces one `records/scene_frames.jsonl` record. Every
-valid forward ray-sphere intersection produces one persisted gaze hit point on
-the gaze sphere centered at the robust eye-midpoint scene center. Hit points are
-not merged, sampled, smoothed, clamped to a display rectangle, clustered, or
-replaced by a heatmap.
+Every decoded frame produces one `records/scene_frames.jsonl` record. Valid
+forward ray-sphere intersections are persisted on each frame as
+`sphere_hit` data on the gaze sphere centered at the robust eye-midpoint scene
+center. The viewer derives Hit Area patches from those per-frame sphere hits;
+it does not persist a separate viewer hit-point collection.
 
 ## Model Policy
 

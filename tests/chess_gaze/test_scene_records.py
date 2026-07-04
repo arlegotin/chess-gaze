@@ -911,7 +911,7 @@ def test_manifest_and_viewer_data_use_gaze_sphere() -> None:
         == CoordinateFrame3D.GAZE_SPHERE_PSEUDO_M
     )
     assert manifest.gaze_sphere.radius_m == 0.7
-    assert viewer_data.schema_version == "gaze-scene-viewer-data-v2"
+    assert viewer_data.schema_version == "gaze-scene-viewer-data-v3"
     assert viewer_data.gaze_sphere == manifest.gaze_sphere
     assert "monitor_plane" not in viewer_data.model_dump()
     assert "valid_hit_points" not in viewer_data.model_dump()
@@ -1043,6 +1043,6 @@ def test_viewer_scene_data_serializes_schema_version_without_hit_points() -> Non
 
     payload = viewer_data.model_dump()
 
-    assert payload["schema_version"] == "gaze-scene-viewer-data-v2"
+    assert payload["schema_version"] == "gaze-scene-viewer-data-v3"
     assert len(payload["frames"]) == 1
     assert "valid_hit_points" not in payload

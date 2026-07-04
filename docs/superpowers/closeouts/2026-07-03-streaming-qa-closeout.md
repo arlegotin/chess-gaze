@@ -49,6 +49,10 @@ server, or a progress-thread leak.
   `SceneFrameRecord`, validates each `valid_hit_points` item as a
   `ViewerHitPoint`, validates the small envelope with Pydantic, and cross-checks
   it against `run_manifest`, `video_manifest`, and `scene_summary`.
+  Historical note, 2026-07-04: the hit-area-only viewer-data follow-up removed
+  top-level `valid_hit_points`. Current streaming QA validation counts
+  `frames` and valid `frames[*].sphere_hit` records in
+  `gaze-scene-viewer-data-v3`.
 - `write_qa_summary()` accepts an already-built `QASummary` so pipeline closeout
   no longer reparses the whole run a second time.
 - `AnalysisState.status` now includes `revalidating`.

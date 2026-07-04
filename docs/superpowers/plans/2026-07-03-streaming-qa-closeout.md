@@ -102,6 +102,11 @@ Create internal dataclasses for frame, error, and scene-frame summaries. Iterate
 
 Use a stdlib byte scanner over `mmap` or buffered file IO to validate `viewer/scene-data.json` as a top-level JSON object, count the top-level `frames` and `valid_hit_points` arrays structurally, and Pydantic-validate only the envelope fields needed for cross-artifact consistency.
 
+Historical note, 2026-07-04: the hit-area-only viewer-data follow-up removed
+top-level `valid_hit_points`. Current streaming QA validation counts
+`frames` and valid `frames[*].sphere_hit` records in
+`gaze-scene-viewer-data-v3`.
+
 - [x] **Step 3: Preserve artifact validation semantics**
 
 Keep strict validation for `run_manifest.json`, `calibration.json`, `video_manifest.json`, `scene_manifest.json`, `scene_summary.json`, every frame JSONL line, every error JSONL line, and every scene-frame JSONL line. Treat malformed viewer JSON, count mismatches, missing viewer index, or envelope mismatches as schema validation failures.

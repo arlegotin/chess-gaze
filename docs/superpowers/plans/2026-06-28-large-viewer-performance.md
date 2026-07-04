@@ -6,6 +6,10 @@
 
 **Architecture:** Keep the strict scene data contract intact. Change the viewer from per-frame object recreation to cached GPU-friendly collections: accumulated hit points become one `THREE.Points` object backed by `BufferGeometry`, and accumulated hit areas become one reusable indexed `BufferGeometry` whose draw range exposes a prefix of precomputed per-frame patch vertices. Keep direct `file://` compatibility for generated `index.html` by leaving it embedded, and stop paying that duplicate parse cost over localhost by adding a lightweight `served.html` that fetches `scene-data.json`.
 
+Historical note, 2026-07-04: the hit-area-only viewer-data follow-up supersedes
+this plan's old `valid_hit_points[]` contract. Current viewer data uses
+`gaze-scene-viewer-data-v3` and derives Hit Area from `frames[*].sphere_hit`.
+
 **Tech Stack:** Python 3.12, pytest, generated static HTML/CSS/JS viewer assets, browser smoke tests, Three.js `0.185.0` from the existing ADR-0003 import map.
 
 ## Global Constraints

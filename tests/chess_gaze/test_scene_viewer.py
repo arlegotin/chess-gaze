@@ -527,7 +527,7 @@ def test_build_scene_viewer_writes_embedded_index_and_served_entrypoint(
     assert (layout.viewer_dir / "index.html").is_file()
     assert (layout.viewer_dir / "served.html").is_file()
     assert (layout.viewer_dir / "scene-data.json").is_file()
-    assert viewer_data.schema_version == "gaze-scene-viewer-data-v2"
+    assert viewer_data.schema_version == "gaze-scene-viewer-data-v3"
 
 
 def test_build_scene_viewer_writes_app_assets_without_local_vendor_modules(
@@ -572,7 +572,7 @@ def test_scene_data_is_strict_schema_versioned_viewer_scene_data(
     layout, viewer_data = built_viewer
     payload = json.loads((layout.viewer_dir / "scene-data.json").read_text("utf-8"))
 
-    assert payload["schema_version"] == "gaze-scene-viewer-data-v2"
+    assert payload["schema_version"] == "gaze-scene-viewer-data-v3"
     assert "valid_hit_points" not in payload
     assert viewer_data.run_id == "20260626T120000Z-scene"
     assert payload["gaze_sphere"]["radius_m"] == pytest.approx(
@@ -612,9 +612,7 @@ def test_scene_data_uses_sphere_hits_as_the_only_hit_area_data(
     assert duplicate_hits[0].theta_radians == pytest.approx(
         duplicate_hits[1].theta_radians
     )
-    assert duplicate_hits[0].phi_radians == pytest.approx(
-        duplicate_hits[1].phi_radians
-    )
+    assert duplicate_hits[0].phi_radians == pytest.approx(duplicate_hits[1].phi_radians)
     assert duplicate_hits[0].hemisphere == duplicate_hits[1].hemisphere
 
 

@@ -547,7 +547,7 @@ def test_compare_runs_rejects_qa_count_and_viewer_frame_count_mismatches(
     ]
 
 
-def test_compare_runs_rejects_non_v2_viewer_data(tmp_path: Path) -> None:
+def test_compare_runs_rejects_non_v3_viewer_data(tmp_path: Path) -> None:
     baseline = tmp_path / "baseline"
     candidate = tmp_path / "candidate"
     _write_minimal_run(baseline)
@@ -558,7 +558,7 @@ def test_compare_runs_rejects_non_v2_viewer_data(tmp_path: Path) -> None:
     candidate_viewer_path.write_text(
         json.dumps(
             {
-                "schema_version": "gaze-scene-viewer-data-v1",
+                "schema_version": "gaze-scene-viewer-data-v2",
                 "frame_count": candidate_viewer_payload["frame_count"],
                 "frames": candidate_viewer_payload["frames"],
             },

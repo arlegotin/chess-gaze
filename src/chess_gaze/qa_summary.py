@@ -176,11 +176,12 @@ class _SceneFrameSummary:
 
 
 class _ViewerSceneDataEnvelope(StrictSchemaModel):
-    schema_version: Literal["gaze-scene-viewer-data-v2"]
+    schema_version: Literal["gaze-scene-viewer-data-v3"]
     run_id: str
     source_video_stem: str
     frame_count: int
     frames_count: int
+    valid_sphere_hit_frames_count: int
     gaze_sphere: SceneGazeSphereRecord
     axis_basis: SceneAxisBasisRecord
     assumptions: list[SceneAssumptionRecord]
@@ -578,6 +579,16 @@ def _viewer_scene_data_validation_errors(
     if scene_summary is not None:
         if envelope.summary != scene_summary:
             errors.append("viewer scene data summary does not match scene summary")
+        if (
+            envelope.valid_sphere_hit_frames_count
+            != scene_summary.valid_sphere_hit_frames
+        ):
+            errors.append(
+                "viewer scene data valid sphere hit count does not match scene "
+                "summary: "
+                f"{envelope.valid_sphere_hit_frames_count} != "
+                f"{scene_summary.valid_sphere_hit_frames}"
+            )
     if errors:
         return [
             (
@@ -611,6 +622,7 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
     }
     payload: dict[str, object] = {}
     array_counts: dict[str, int] = {}
+    valid_sphere_hit_frame_counts: dict[str, int] = {}
     index = _skip_json_whitespace(data, 0)
     index = _expect_json_byte(data, index, ord("{"))
     index = _skip_json_whitespace(data, index)
@@ -626,8 +638,11 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
         if key == "frames":
             if key in array_counts:
                 raise ValueError(f"duplicate top-level key: {key}")
-            count, index = _count_and_validate_viewer_array(data, index, key)
+            count, valid_sphere_hit_count, index = _count_and_validate_viewer_array(
+                data, index, key
+            )
             array_counts[key] = count
+            valid_sphere_hit_frame_counts[key] = valid_sphere_hit_count
         elif key in envelope_keys:
             if key in payload:
                 raise ValueError(f"duplicate top-level key: {key}")
@@ -661,6 +676,7 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
     if missing:
         raise ValueError(f"missing top-level keys: {', '.join(sorted(missing))}")
     payload["frames_count"] = array_counts["frames"]
+    payload["valid_sphere_hit_frames_count"] = valid_sphere_hit_frame_counts["frames"]
     return payload
 
 
@@ -722,17 +738,20 @@ def _parse_json_string(data: mmap.mmap, index: int) -> tuple[str, int]:
 
 def _count_and_validate_viewer_array(
     data: mmap.mmap, index: int, key: str
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     index = _expect_json_byte(data, index, ord("["))
     index = _skip_json_whitespace(data, index)
     if _json_byte(data, index) == ord("]"):
-        return 0, index + 1
+        return 0, 0, index + 1
 
     count = 0
+    valid_sphere_hit_count = 0
     while True:
         value_start = index
         index = _skip_json_value(data, index)
-        _validate_viewer_array_item(data, value_start, index, key, count)
+        valid_sphere_hit_count += _validate_viewer_array_item(
+            data, value_start, index, key, count
+        )
         count += 1
         index = _skip_json_whitespace(data, index)
         byte = _json_byte(data, index)
@@ -740,20 +759,20 @@ def _count_and_validate_viewer_array(
             index = _skip_json_whitespace(data, index + 1)
             continue
         if byte == ord("]"):
-            return count, index + 1
+            return count, valid_sphere_hit_count, index + 1
         raise ValueError("expected ',' or ']' in viewer scene data array")
 
 
 def _validate_viewer_array_item(
     data: mmap.mmap, value_start: int, value_end: int, key: str, index: int
-) -> None:
+) -> int:
     raw = bytes(data[value_start:value_end])
     if key == "frames":
         try:
-            SceneFrameRecord.model_validate_json(raw)
+            frame = SceneFrameRecord.model_validate_json(raw)
         except ValueError as exc:
             raise ValueError(f"invalid viewer frame at index {index}: {exc}") from exc
-        return
+        return int(frame.sphere_hit.valid)
     raise ValueError(f"unexpected viewer array key: {key}")
 
 

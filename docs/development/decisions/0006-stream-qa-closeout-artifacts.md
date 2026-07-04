@@ -45,7 +45,7 @@ Primary sources checked on 2026-07-03:
 | --- | --- | --- |
 | Keep whole-run Pydantic materialization | Directly measured 8.39 GB max RSS on the interrupted run. It preserves strict validation but makes closeout fragile for large runs. | Rejected. |
 | Add a streaming JSON dependency such as `ijson` | Would reduce custom scanner code, but adds a core dependency solely for closeout and triggers dependency-selection overhead. `ijson` is not already installed locally. | Rejected for this repair. |
-| Stream JSONL records and structurally validate viewer data while validating each large array element incrementally | Keeps strict validation for manifests, frame JSONL, error JSONL, scene-frame JSONL, viewer frames, and viewer hit points while avoiding full `ViewerSceneData` materialization. | Accepted. |
+| Stream JSONL records and structurally validate viewer data while validating each large array element incrementally | Keeps strict validation for manifests, frame JSONL, error JSONL, scene-frame JSONL, and viewer frames while avoiding full `ViewerSceneData` materialization. | Accepted. Updated on 2026-07-04 after viewer hit-point data was removed. |
 | Mark `analysis_state` complete only after `qa_summary.json` exists | Avoids complete state without seal, but violates the prior final-state-before-seal regression and can leave a complete seal with stale state if interrupted. | Rejected. |
 | Add `revalidating` state and revert on in-process QA write failure | Preserves `qa_summary.json` as the completion seal, reduces the complete-without-seal window to the final atomic write path, and makes in-process write failures visibly nonterminal. | Accepted. |
 
@@ -62,9 +62,13 @@ whole-file reads for:
 
 `viewer/scene-data.json` is validated with a standard-library structural
 scanner. The scanner rejects unexpected top-level keys, validates every `frames`
-item as `SceneFrameRecord`, validates every `valid_hit_points` item as
-`ViewerHitPoint`, validates the small envelope with Pydantic, and cross-checks
-it against `run_manifest`, `video_manifest`, and `scene_summary`.
+item as `SceneFrameRecord`, validates the small envelope with Pydantic, and
+cross-checks it against `run_manifest`, `video_manifest`, and `scene_summary`.
+For `gaze-scene-viewer-data-v3`, it also counts valid `frames[*].sphere_hit`
+records while streaming and compares that count to
+`SceneSummary.valid_sphere_hit_frames`. The 2026-07-04 hit-area-only
+viewer-data follow-up removed the former top-level `valid_hit_points`
+collection.
 
 `AnalysisState.status` includes `revalidating`. The analyzer writes
 `revalidating` before QA closeout, writes the terminal state before the QA seal,

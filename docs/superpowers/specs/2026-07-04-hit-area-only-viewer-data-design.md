@@ -8,6 +8,9 @@ Approved by direct user correction on 2026-07-04: Hit Points must be removed
 from viewer data as well as from visualization. This spec supersedes the
 schema-preservation clause in
 `docs/superpowers/specs/2026-07-04-visualization-redo-design.md`.
+Because the generated viewer data contract removes a top-level field, the
+viewer scene-data schema version is bumped from
+`gaze-scene-viewer-data-v2` to `gaze-scene-viewer-data-v3`.
 
 ## Goal
 
@@ -29,6 +32,8 @@ Make Hit Area the only gaze-hit viewer artifact surface. The generated
 - Update QA streaming validation so `viewer/scene-data.json` validates only the
   `frames` array plus the small envelope; it should still reject unexpected
   top-level keys.
+- While streaming `frames`, count valid `frames[*].sphere_hit` records and
+  cross-check that count against `SceneSummary.valid_sphere_hit_frames`.
 - Update run equivalence fixtures and active docs to use the slimmer viewer
   data contract.
 
@@ -60,6 +65,8 @@ Focused RED tests should require:
 - `build_viewer_scene_data()` preserves frames and valid sphere-hit summaries
   without emitting duplicated hit points.
 - QA summary rejects unexpected `valid_hit_points` top-level data.
+- QA summary rejects viewer data whose valid `frames[*].sphere_hit` count does
+  not match `SceneSummary.valid_sphere_hit_frames`.
 - Run-equivalence fixtures validate with the slimmer viewer payload.
 
 Required gates:
@@ -74,14 +81,17 @@ UV_CACHE_DIR=.uv-cache uv run mypy
 
 ## Acceptance Criteria
 
-1. New generated viewer scene data has no `valid_hit_points` key.
-2. The Python viewer schema has no `valid_hit_points` field.
-3. The Python codebase has no active `ViewerHitPoint` type or viewer
+1. New generated viewer scene data uses schema version
+   `gaze-scene-viewer-data-v3`.
+2. New generated viewer scene data has no `valid_hit_points` key.
+3. The Python viewer schema has no `valid_hit_points` field.
+4. The Python codebase has no active `ViewerHitPoint` type or viewer
    hit-point validator path.
-4. Hit Area still renders from `frames[*].sphere_hit`.
-5. QA summary still validates viewer scene data without materializing the whole
+5. Hit Area still renders from `frames[*].sphere_hit`.
+6. QA summary still validates viewer scene data without materializing the whole
    file.
-6. Active docs describe Hit Area and sphere hits, not viewer hit-point data.
-7. Focused and broad non-native verification pass, or blockers are recorded
+7. QA summary cross-checks the valid `frames[*].sphere_hit` count against the
+   scene summary.
+8. Active docs describe Hit Area and sphere hits, not viewer hit-point data.
+9. Focused and broad non-native verification pass, or blockers are recorded
    with exact output.
-

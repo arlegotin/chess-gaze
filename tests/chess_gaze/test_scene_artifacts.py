@@ -400,7 +400,9 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
     assert len(viewer_data.frames) == 7
     assert viewer_data.gaze_sphere == result.manifest.gaze_sphere
     assert not hasattr(viewer_data, "valid_hit_points")
-    valid_viewer_frames = [frame for frame in viewer_data.frames if frame.sphere_hit.valid]
+    valid_viewer_frames = [
+        frame for frame in viewer_data.frames if frame.sphere_hit.valid
+    ]
     assert len(valid_viewer_frames) == result.valid_sphere_hit_count
     assert [frame.frame_index for frame in valid_viewer_frames] == [
         frame.frame_index for frame in records if frame.sphere_hit.valid

@@ -26,6 +26,11 @@ The durable runtime surface is the generated viewer asset bundle under
 
 No persisted scene schema or run artifact format changed.
 
+Follow-up: `docs/superpowers/closeouts/2026-07-04-hit-area-only-viewer-data.md`
+supersedes this statement for `viewer/scene-data.json`; the duplicated
+`valid_hit_points` payload was removed after the user clarified that Hit Points
+should not remain as data.
+
 ## Root Cause
 
 The previous viewer contract exposed two visualization concepts, Hit Points and

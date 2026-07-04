@@ -642,6 +642,34 @@ def test_qa_summary_rejects_malformed_viewer_frames(
     )
 
 
+def test_qa_summary_rejects_viewer_sphere_hit_count_mismatch(
+    tmp_path: Path,
+) -> None:
+    layout = _write_fixture_run(tmp_path)
+    viewer_path = layout.viewer_dir / "scene-data.json"
+    payload = json.loads(viewer_path.read_text(encoding="utf-8"))
+    mismatched_count = payload["summary"]["valid_sphere_hit_frames"] + 1
+    payload["summary"]["valid_sphere_hit_frames"] = mismatched_count
+    viewer_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    scene_summary_path = layout.scene_dir / "scene_summary.json"
+    scene_summary = json.loads(scene_summary_path.read_text(encoding="utf-8"))
+    scene_summary["valid_sphere_hit_frames"] = mismatched_count
+    scene_summary_path.write_text(
+        json.dumps(scene_summary),
+        encoding="utf-8",
+    )
+
+    summary = build_qa_summary(layout)
+
+    assert summary.final_status == "failed"
+    assert summary.artifact_validation.schema_validation_passed is False
+    assert any(
+        "viewer scene data valid sphere hit count does not match scene summary" in error
+        for error in summary.artifact_validation.validation_errors
+    )
+
+
 def test_build_qa_summary_does_not_treat_warning_only_records_as_failures(
     tmp_path: Path,
 ) -> None:
