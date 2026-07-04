@@ -463,9 +463,7 @@ def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
     assert record.appearance_gaze.valid is True
     assert record.recommended_gaze.valid is True
     assert record.recommended_gaze.yaw_radians == record.appearance_gaze.yaw_radians
-    assert (
-        record.recommended_gaze.pitch_radians == record.appearance_gaze.pitch_radians
-    )
+    assert record.recommended_gaze.pitch_radians == record.appearance_gaze.pitch_radians
     assert record.errors == []
 
 
@@ -628,7 +626,9 @@ def test_model_backed_observer_marks_multiple_candidates_without_gaze_warning(
     assert record.appearance_gaze.valid is True
     assert record.recommended_gaze == record.appearance_gaze
     assert record.status is FrameStatus.WARNING
-    assert [error.code for error in record.errors] == [ErrorCode.MULTIPLE_FACE_CANDIDATES]
+    assert [error.code for error in record.errors] == [
+        ErrorCode.MULTIPLE_FACE_CANDIDATES
+    ]
 
 
 def test_model_backed_frame_observer_batch_maps_model_rows_to_frames(

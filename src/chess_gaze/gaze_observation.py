@@ -14,8 +14,7 @@ import numpy.typing as npt
 import torch
 
 from chess_gaze.errors import ErrorCode
-from chess_gaze.frame_records import GazeAngles
-from chess_gaze.geometry import BBox, CoordinateSpace, Point2D, Transform2D
+from chess_gaze.geometry import BBox, CoordinateSpace, Transform2D
 from chess_gaze.model_assets import ResolvedModelAsset
 
 UNIGAZE_MODEL_ID = "unigaze-h14-joint"
