@@ -77,7 +77,7 @@ def _failure_payload(frame_id: str, frame_index: int) -> dict[str, Any]:
             "valid": False,
             "yaw_radians": None,
             "pitch_radians": None,
-            "reason_invalid": "GAZE_ESTIMATORS_DISAGREE",
+            "reason_invalid": "GAZE_MODEL_FAILED",
         },
         "errors": [
             {
