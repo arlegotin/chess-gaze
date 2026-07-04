@@ -117,7 +117,6 @@
             <span data-testid="sphere-radius-label">0.70 m</span>
           </label>
           <label><input data-testid="toggle-axes" type="checkbox" checked> Axes</label>
-          <label><input data-testid="toggle-hit-points" type="checkbox" checked> Hit Points</label>
           <label><input data-testid="toggle-hit-area" type="checkbox" checked> Hit Area</label>
           <div class="hit-area-error-row">
             <label for="hit-area-error-degrees">Angular Error</label>
@@ -125,12 +124,12 @@
               id="hit-area-error-degrees"
               data-testid="hit-area-error-degrees"
               type="range"
-              min="0"
+              min="0.5"
               max="12"
-              value="8"
+              value="0.5"
               step="0.5"
             >
-            <output data-testid="hit-area-error-label" for="hit-area-error-degrees">8 deg</output>
+            <output data-testid="hit-area-error-label" for="hit-area-error-degrees">0.5 deg</output>
           </div>
           <div class="hit-area-opacity-row">
             <label for="hit-area-opacity">Opacity</label>
@@ -140,10 +139,10 @@
               type="range"
               min="0"
               max="1"
-              value="0.24"
+              value="0.04"
               step="0.01"
             >
-            <output data-testid="hit-area-opacity-label" for="hit-area-opacity">24%</output>
+            <output data-testid="hit-area-opacity-label" for="hit-area-opacity">4%</output>
           </div>
         </fieldset>
 

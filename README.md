@@ -163,13 +163,12 @@ execute in the same page as embedded scene data and must be trusted. Offline
 viewing requires those pinned modules to already be present in the browser
 cache.
 
-The viewer also includes a `Hit Area` layer. It keeps the hit point as the point
-estimate and overlays translucent angular-error patches on the gaze sphere. In
-`Accumulated` mode, hit-area patches accumulate like hit points but remain
-controlled by the separate `Hit Area` toggle. The default typical angular error
-is 8 degrees and can be adjusted from 0 to 12 degrees in the viewer. Hit-area
-opacity defaults to 24% and is adjustable in the same control group. This is a
-display assumption, not per-frame UniGaze confidence.
+The viewer includes a `Hit Area` layer that overlays translucent angular-error
+patches on the gaze sphere. In `Accumulated` mode, hit-area patches accumulate
+through the selected frame. The default typical angular error is `0.5` degrees
+and can be adjusted from `0.5` to `12` degrees in the viewer. Hit-area opacity
+defaults to `4%` and is adjustable in the same control group. This is a display
+assumption, not per-frame UniGaze confidence.
 
 The persisted artifacts use a default gaze-sphere radius of `0.700 m`, matching
 the previous plausible desktop display distance assumption. The viewer exposes a

@@ -100,7 +100,6 @@ def _run_viewer_math_probe(body: str) -> dict[str, object]:
             "sphereHitAreaPatchBasis",
             "writeSphereHitAreaPatchPositions",
             "hitAreaGeometry",
-            "updateAccumulatedHitPoints",
             "updateAccumulatedHitAreaPositions",
         ]
     )
@@ -174,8 +173,8 @@ const DEFAULT_SPHERE_RADIUS_M = 0.7;
 const SPHERE_MIN_RADIUS_M = 0.35;
 const SPHERE_MAX_RADIUS_M = 1.2;
 const SPHERE_SURFACE_OFFSET_M = 0.002;
-const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8;
-const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0;
+const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 0.5;
+const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0.5;
 const HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12;
 const HIT_AREA_SEGMENTS = 72;
 const HIT_AREA_VERTEX_COUNT = HIT_AREA_SEGMENTS + 1;
@@ -190,7 +189,7 @@ const HIT_AREA_UNIT_CIRCLE = Array.from(
 );
 const elements = {{
   controls: {{ sphereRadius: {{ value: "0.35" }} }},
-  hitAreaErrorDegrees: {{ value: "8" }},
+  hitAreaErrorDegrees: {{ value: "0.5" }},
 }};
 const state = {{
   sceneData: {{
@@ -200,10 +199,6 @@ const state = {{
     }},
   }},
   renderCache: {{
-    hitPointFrameIndices: [],
-    hitPointRecords: [],
-    hitPointPositionAttribute: null,
-    hitPointRadius: null,
     hitAreaPatchFrameIndices: [],
     hitAreaPatchBases: [],
     hitAreaPositionAttribute: null,
@@ -570,7 +565,6 @@ def test_generated_html_includes_required_selectors(
         'data-testid="sphere-radius-m"',
         'data-testid="sphere-radius-label"',
         'data-testid="toggle-axes"',
-        'data-testid="toggle-hit-points"',
         'data-testid="toggle-hit-area"',
         'data-testid="hit-area-error-degrees"',
         'data-testid="hit-area-error-label"',
@@ -580,6 +574,8 @@ def test_generated_html_includes_required_selectors(
     ):
         assert selector in html
 
+    assert 'data-testid="toggle-hit-points"' not in html
+    assert "Hit Points" not in html
     assert "Sphere Radius" in html
     assert "Monitor Plane" not in html
     assert "Monitor Rectangle" not in html
@@ -596,6 +592,7 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     css = (layout.viewer_dir / "styles.css").read_text(encoding="utf-8")
 
     assert "Hit Area" in html
+    assert "Hit Points" not in html
     assert "Angular Error" in html
     assert "Opacity" in html
     mode_instant = re.search(
@@ -610,14 +607,14 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "checked" in mode_accumulated.group(0)
     assert re.search(
         r'id="hit-area-error-degrees"[^>]*data-testid="hit-area-error-degrees"'
-        r'[^>]*type="range"[^>]*min="0"[^>]*max="12"[^>]*value="8"'
+        r'[^>]*type="range"[^>]*min="0.5"[^>]*max="12"[^>]*value="0.5"'
         r'[^>]*step="0.5"',
         html,
         flags=re.DOTALL,
     )
     assert re.search(
         r'id="hit-area-opacity"[^>]*data-testid="hit-area-opacity"'
-        r'[^>]*type="range"[^>]*min="0"[^>]*max="1"[^>]*value="0.24"'
+        r'[^>]*type="range"[^>]*min="0"[^>]*max="1"[^>]*value="0.04"'
         r'[^>]*step="0.01"',
         html,
         flags=re.DOTALL,
@@ -631,9 +628,12 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     )
     assert 'max="12"' in html
     assert 'step="0.5"' in html
-    assert 'value="8"' in html
-    assert "DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8" in js
-    assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0" in js
+    assert 'value="0.5"' in html
+    assert "0.5 deg" in html
+    assert 'value="0.04"' in html
+    assert "4%" in html
+    assert "DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 0.5" in js
+    assert "HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0.5" in js
     assert "HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12" in js
     assert "DEFAULT_SPHERE_RADIUS_M = 0.7" in js
     assert "SPHERE_MIN_RADIUS_M = 0.35" in js
@@ -641,7 +641,7 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "SPHERE_RADIUS_STEP_M = 0.01" in js
     assert "SPHERE_SURFACE_OFFSET_M = 0.002" in js
     assert 'mode: "accumulated"' in js
-    assert "DEFAULT_HIT_AREA_OPACITY = 0.24" in js
+    assert "DEFAULT_HIT_AREA_OPACITY = 0.04" in js
     assert "HIT_AREA_MIN_OPACITY = 0" in js
     assert "HIT_AREA_MAX_OPACITY = 1" in js
     assert "updateHitAreaOpacityLabel" in js
@@ -670,9 +670,55 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "frame?.unigaze_ray?.valid" in js
     assert "renderCurrentHitArea" in js
     assert "updateAccumulatedHitAreasForAngularError" in js
+    assert "setFrameIndex(maxIndex)" in js
+    assert "setFrameIndex(0)" not in js
     assert "--color-hit-area:" in css
     assert ".hit-area-error-row" in css
     assert ".hit-area-opacity-row" in css
+
+
+def test_generated_viewer_removes_hit_point_visualization(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    css = (layout.viewer_dir / "styles.css").read_text(encoding="utf-8")
+
+    assert 'data-testid="toggle-hit-points"' not in html
+    assert "Hit Points" not in html
+    assert "hitPoints" not in js
+    assert "buildAccumulatedHitPoints" not in js
+    assert "updateAccumulatedHitPoints" not in js
+    assert "visibleHitPointCount" not in js
+    assert "accumulatedHitPoints" not in js
+    assert "currentHit" not in js
+    assert "new THREE.Points(" not in js
+    assert "new THREE.PointsMaterial(" not in js
+    assert "--color-current-hit:" not in css
+    assert "--color-accumulated-hit:" not in css
+
+
+def test_generated_viewer_removes_success_frame_status_sentence(
+    built_viewer: tuple[RunLayout, ViewerSceneData],
+) -> None:
+    layout, _viewer_data = built_viewer
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
+    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    bootstrap = scene_viewer._file_url_bootstrap_script()
+
+    status_body = js.split("function updateStatusPanel() {", 1)[1].split(
+        "\nfunction ",
+        1,
+    )[0]
+    assert "setStatus(" not in status_body
+    assert "MODE_NAMES" not in js
+    assert "sphere hit is valid" not in js
+    assert "Frame ${state.frameIndex + 1} of" not in js
+    assert "Loading local scene data..." in html
+    assert "Waiting for local scene data." in html
+    assert "Scene data unavailable:" in js
+    assert "Scene viewer unavailable:" in bootstrap
 
 
 def test_viewer_live_radius_hit_omits_persisted_fallback() -> None:
@@ -726,55 +772,6 @@ console.log(JSON.stringify({ omitted: geometry === null }));
     assert result == {"omitted": True}
 
 
-def test_viewer_accumulated_hit_points_use_live_radius_valid_hits() -> None:
-    result = _run_viewer_math_probe(
-        """
-const missedAtSelectedRadius = {
-  frame_index: 0,
-  sphere_hit: {
-    valid: true,
-    point_scene_m: { x: 0.5, y: 0, z: 0.4898979485566356 },
-  },
-  unigaze_ray: {
-    valid: true,
-    origin_scene_m: { x: 0.5, y: 0, z: 1 },
-    direction_scene: { x: 0, y: 0, z: -1 },
-  },
-};
-const validAtSelectedRadius = {
-  frame_index: 1,
-  sphere_hit: {
-    valid: true,
-    point_scene_m: { x: 0, y: 0, z: 0.7 },
-  },
-  unigaze_ray: {
-    valid: true,
-    origin_scene_m: { x: 0, y: 0, z: 1 },
-    direction_scene: { x: 0, y: 0, z: -1 },
-  },
-};
-state.renderCache.hitPointRecords = [
-  missedAtSelectedRadius,
-  validAtSelectedRadius,
-];
-state.renderCache.hitPointPositionAttribute = {
-  array: new Float32Array(6),
-  needsUpdate: false,
-};
-updateAccumulatedHitPoints();
-console.log(JSON.stringify({
-  frameIndices: state.renderCache.hitPointFrameIndices,
-  firstPoint: Array.from(
-    state.renderCache.hitPointPositionAttribute.array.slice(0, 3),
-  ),
-}));
-"""
-    )
-
-    assert result["frameIndices"] == [1]
-    assert result["firstPoint"] == [0, 0, pytest.approx(0.352)]
-
-
 def test_viewer_accumulated_hit_areas_use_complete_live_radius_patches() -> None:
     result = _run_viewer_math_probe(
         """
@@ -810,6 +807,7 @@ state.renderCache.hitAreaPositionAttribute = {
   array: new Float32Array(2 * HIT_AREA_VERTEX_COUNT * 3),
   needsUpdate: false,
 };
+elements.hitAreaErrorDegrees.value = "8";
 updateAccumulatedHitAreaPositions();
 console.log(JSON.stringify({
   frameIndices: state.renderCache.hitAreaPatchFrameIndices,
@@ -830,9 +828,6 @@ def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
     layout, _viewer_data = built_viewer
     js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
 
-    assert "new THREE.Points(" in js
-    assert "new THREE.PointsMaterial(" in js
-    assert "buildAccumulatedHitPoints" in js
     assert "buildAccumulatedHitAreaMesh" in js
     assert "hitAreaPatchBases" in js
     assert "hitAreaPositionAttribute" in js
@@ -841,7 +836,6 @@ def test_generated_viewer_caches_accumulated_geometry_for_large_runs(
     assert "new Float32Array(" in js
     assert "new Uint32Array(" in js
     assert "setDrawRange(0, visibleHitAreaTriangleIndexCount" in js
-    assert "hitPointFrameIndices" in js
     assert "hitAreaPatchFrameIndices" in js
     assert "upperBoundFrameIndex" in js
     assert "computeVertexNormals()" not in js
@@ -870,7 +864,7 @@ def test_generated_viewer_updates_accumulated_hit_area_without_rebuilds(
     assert "buildAccumulatedHitAreaMesh()" in update_body
 
 
-def test_generated_viewer_keeps_accumulated_layers_independent(
+def test_generated_viewer_keeps_accumulated_hit_area_toggle_scoped(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
@@ -879,9 +873,8 @@ def test_generated_viewer_keeps_accumulated_layers_independent(
     visibility_body = js.split("function updateAccumulatedVisibility() {", 1)[1].split(
         "\nfunction ", 1
     )[0]
-    assert "elements.toggles.hitPoints.checked" in visibility_body
     assert "elements.toggles.hitArea.checked" in visibility_body
-    assert "hitPoints.checked && hitArea.checked" not in visibility_body
+    assert "elements.toggles.hitPoints" not in visibility_body
 
 
 def test_generated_viewer_renders_on_demand_and_uses_prefix_counts(
@@ -896,7 +889,7 @@ def test_generated_viewer_renders_on_demand_and_uses_prefix_counts(
     assert 'controls.addEventListener("change", requestRender)' in js
     assert "window.requestAnimationFrame(renderFrame)" in js
     assert "state.sceneData?.valid_hit_points.filter" not in js
-    assert "validHitsToFrame = visibleHitPointCount()" in js
+    assert "validHitAreasToFrame = visibleHitAreaPatchCount()" in js
     assert (
         "resizeRenderer();"
         not in js.split("function renderFrame()", 1)[1].split("\n}", 1)[0]
@@ -1008,8 +1001,6 @@ def test_generated_css_uses_light_theme_and_semantic_color_roles(
         "--color-left-eye:",
         "--color-right-eye:",
         "--color-unigaze-ray:",
-        "--color-current-hit:",
-        "--color-accumulated-hit:",
         "--color-gaze-sphere:",
         "--color-warning:",
     ):
@@ -1017,14 +1008,14 @@ def test_generated_css_uses_light_theme_and_semantic_color_roles(
     assert "--color-monitor-plane:" not in css
 
 
-def test_generated_js_contains_mode_names(
+def test_generated_html_contains_mode_labels(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     layout, _viewer_data = built_viewer
-    js = (layout.viewer_dir / "scene_viewer.js").read_text(encoding="utf-8")
+    html = (layout.viewer_dir / "index.html").read_text(encoding="utf-8")
 
-    assert "Instant" in js
-    assert "Accumulated" in js
+    assert "Instant" in html
+    assert "Accumulated" in html
 
 
 def test_generated_viewer_uses_front_camera_and_anatomical_axis_labels(

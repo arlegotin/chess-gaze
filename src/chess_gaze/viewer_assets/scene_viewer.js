@@ -1,21 +1,16 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const MODE_NAMES = {
-  instant: "Instant",
-  accumulated: "Accumulated",
-};
-
 const DEFAULT_SPHERE_RADIUS_M = 0.7;
 const SPHERE_MIN_RADIUS_M = 0.35;
 const SPHERE_MAX_RADIUS_M = 1.2;
 const SPHERE_RADIUS_STEP_M = 0.01;
 const SPHERE_SURFACE_OFFSET_M = 0.002;
 
-const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 8;
-const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0;
+const DEFAULT_HIT_AREA_ANGULAR_ERROR_DEGREES = 0.5;
+const HIT_AREA_MIN_ANGULAR_ERROR_DEGREES = 0.5;
 const HIT_AREA_MAX_ANGULAR_ERROR_DEGREES = 12;
-const DEFAULT_HIT_AREA_OPACITY = 0.24;
+const DEFAULT_HIT_AREA_OPACITY = 0.04;
 const HIT_AREA_MIN_OPACITY = 0;
 const HIT_AREA_MAX_OPACITY = 1;
 const HIT_AREA_SEGMENTS = 72;
@@ -37,8 +32,6 @@ const COLORS = {
   leftEye: 0x2f80c2,
   rightEye: 0xd46a5b,
   unigazeRay: 0x006d6f,
-  currentHit: 0x4c1d95,
-  accumulatedHit: 0xb7791f,
   hitArea: 0xc43d7a,
   gazeSphere: 0xd8dde5,
   warning: 0xb5532f,
@@ -79,7 +72,6 @@ const elements = {
     eyes: document.querySelector('[data-testid="toggle-eyes"]'),
     ray: document.querySelector('[data-testid="toggle-ray"]'),
     axes: document.querySelector('[data-testid="toggle-axes"]'),
-    hitPoints: document.querySelector('[data-testid="toggle-hit-points"]'),
     hitArea: document.querySelector('[data-testid="toggle-hit-area"]'),
   },
 };
@@ -92,11 +84,6 @@ const state = {
   playTimer: null,
   renderCache: {
     gazeSphere: null,
-    hitPoints: null,
-    hitPointFrameIndices: [],
-    hitPointRecords: [],
-    hitPointPositionAttribute: null,
-    hitPointRadius: null,
     hitAreas: null,
     hitAreaPatchFrameIndices: [],
     hitAreaPatchBases: [],
@@ -155,15 +142,6 @@ const materials = {
   }),
   ray: new THREE.LineBasicMaterial({ color: COLORS.unigazeRay, linewidth: 2 }),
   warningRay: new THREE.LineBasicMaterial({ color: COLORS.warning, linewidth: 2 }),
-  currentHit: new THREE.MeshStandardMaterial({
-    color: COLORS.currentHit,
-    roughness: 0.42,
-  }),
-  accumulatedHitPoints: new THREE.PointsMaterial({
-    color: COLORS.accumulatedHit,
-    size: 0.016,
-    sizeAttenuation: true,
-  }),
   gazeSphere: new THREE.MeshBasicMaterial({
     color: COLORS.gazeSphere,
     transparent: true,
@@ -184,6 +162,7 @@ function setStatus(message, isError = false) {
   elements.frameStatus.textContent = message;
   elements.fallbackStatus.textContent = message;
   elements.fallbackStatus.dataset.state = isError ? "error" : "ready";
+  elements.fallbackStatus.hidden = message.length === 0;
 }
 
 function setControlState(disabled) {
@@ -573,40 +552,6 @@ function buildGazeSphere() {
   return mesh;
 }
 
-function buildAccumulatedHitPoints() {
-  removeAccumulatedObject(state.renderCache.hitPoints);
-  state.renderCache.hitPoints = null;
-  state.renderCache.hitPointFrameIndices = [];
-  state.renderCache.hitPointRecords = [];
-  state.renderCache.hitPointPositionAttribute = null;
-  state.renderCache.hitPointRadius = null;
-
-  const hitPointRecords = [];
-  for (const frame of state.sceneData?.frames || []) {
-    if (!frame?.sphere_hit?.valid || !Number.isInteger(frame.frame_index)) {
-      continue;
-    }
-    hitPointRecords.push(frame);
-  }
-
-  const positions = new Float32Array(hitPointRecords.length * 3);
-  const geometry = new THREE.BufferGeometry();
-  const positionAttribute = new THREE.BufferAttribute(positions, 3);
-  geometry.setAttribute("position", positionAttribute);
-  geometry.setDrawRange(0, 0);
-
-  const points = new THREE.Points(geometry, materials.accumulatedHitPoints);
-  points.userData.layer = "hitPoints";
-  points.visible = false;
-  groups.accumulated.add(points);
-
-  state.renderCache.hitPoints = points;
-  state.renderCache.hitPointFrameIndices = hitPointRecords.map((frame) => frame.frame_index);
-  state.renderCache.hitPointRecords = hitPointRecords;
-  state.renderCache.hitPointPositionAttribute = positionAttribute;
-  updateAccumulatedHitPoints();
-}
-
 function buildAccumulatedHitAreaMesh() {
   removeAccumulatedObject(state.renderCache.hitAreas);
   state.renderCache.hitAreas = null;
@@ -657,38 +602,22 @@ function buildAccumulatedHitAreaMesh() {
   updateAccumulatedHitAreaPositions();
 }
 
-function visibleHitPointCount() {
+function visibleHitAreaPatchCount() {
+  if (!hitAreaRadiusScale(angularErrorDegrees())) {
+    return 0;
+  }
   return upperBoundFrameIndex(
-    state.renderCache.hitPointFrameIndices,
+    state.renderCache.hitAreaPatchFrameIndices,
     state.frameIndex,
   );
 }
 
 function visibleHitAreaTriangleIndexCount() {
-  if (!hitAreaRadiusScale(angularErrorDegrees())) {
-    return 0;
-  }
-  const visiblePatchCount = upperBoundFrameIndex(
-    state.renderCache.hitAreaPatchFrameIndices,
-    state.frameIndex,
-  );
-  return visiblePatchCount * HIT_AREA_INDEX_COUNT;
+  return visibleHitAreaPatchCount() * HIT_AREA_INDEX_COUNT;
 }
 
 function updateAccumulatedVisibility() {
   const accumulatedVisible = state.mode === "accumulated";
-
-  if (state.renderCache.hitPoints) {
-    const visibleHitPointCountValue =
-      accumulatedVisible && elements.toggles.hitPoints.checked
-        ? visibleHitPointCount()
-        : 0;
-    state.renderCache.hitPoints.geometry.setDrawRange(0, visibleHitPointCountValue);
-    state.renderCache.hitPoints.visible =
-      accumulatedVisible &&
-      elements.toggles.hitPoints.checked &&
-      visibleHitPointCountValue > 0;
-  }
 
   if (state.renderCache.hitAreas) {
     const visibleHitAreaTriangleIndexCountValue =
@@ -701,36 +630,6 @@ function updateAccumulatedVisibility() {
       elements.toggles.hitArea.checked &&
       visibleHitAreaTriangleIndexCountValue > 0;
   }
-}
-
-function updateAccumulatedHitPoints() {
-  const attribute = state.renderCache.hitPointPositionAttribute;
-  if (!attribute) {
-    return;
-  }
-  const radius = sphereRadiusMeters();
-  if (state.renderCache.hitPointRadius === radius) {
-    return;
-  }
-
-  const positions = attribute.array;
-  let index = 0;
-  const validFrameIndices = [];
-  for (const frame of state.renderCache.hitPointRecords) {
-    const hitResult = sphereHitForFrame(frame);
-    const hitPoint = hitResult.valid ? surfaceOffsetPoint(hitResult.point) : null;
-    if (!hitPoint || !Number.isInteger(frame.frame_index)) {
-      continue;
-    }
-    positions[index] = hitPoint.x;
-    positions[index + 1] = hitPoint.y;
-    positions[index + 2] = hitPoint.z;
-    validFrameIndices.push(frame.frame_index);
-    index += 3;
-  }
-  attribute.needsUpdate = true;
-  state.renderCache.hitPointFrameIndices = validFrameIndices;
-  state.renderCache.hitPointRadius = radius;
 }
 
 function updateAccumulatedHitAreaPositions() {
@@ -896,9 +795,6 @@ function renderCurrentFrame() {
 
   renderCurrentHitArea(frame);
 
-  if (elements.toggles.hitPoints.checked && hitPoint) {
-    addSphere(groups.current, hitPoint, 0.014, materials.currentHit);
-  }
 }
 
 function rebuildCurrentFrame() {
@@ -908,12 +804,13 @@ function rebuildCurrentFrame() {
 function updateStatusPanel() {
   const frame = currentFrame();
   const total = state.sceneData?.frame_count || 0;
-  let validHitsToFrame = 0;
+  let validHitAreasToFrame = 0;
   if (state.sceneData) {
-    validHitsToFrame = visibleHitPointCount();
+    validHitAreasToFrame = visibleHitAreaPatchCount();
   }
   const totalValidHits =
-    state.renderCache.hitPointFrameIndices.length || 0;
+    state.sceneData?.frames?.filter((candidate) => candidate?.sphere_hit?.valid).length || 0;
+  const totalValidHitAreas = state.renderCache.hitAreaPatchFrameIndices.length || 0;
 
   elements.frameLabel.textContent =
     total > 0 ? `${state.frameIndex + 1} / ${total}` : "0 / 0";
@@ -927,16 +824,8 @@ function updateStatusPanel() {
   elements.hitStatus.textContent = hitResult.valid
     ? "valid sphere hit"
     : hitResult.reason || "invalid";
-  elements.accumulatedStatus.textContent = `${validHitsToFrame} of ${totalValidHits}`;
+  elements.accumulatedStatus.textContent = `${validHitAreasToFrame} of ${totalValidHitAreas}`;
   elements.hitCount.textContent = String(totalValidHits);
-
-  const reason = hitResult.valid
-    ? "sphere hit is valid"
-    : hitResult.reason || "sphere hit is invalid";
-  setStatus(
-    `${MODE_NAMES[state.mode]} mode. Frame ${state.frameIndex + 1} of ${total}: ${reason}.`,
-    false,
-  );
 }
 
 function setFrameIndex(index) {
@@ -1053,7 +942,6 @@ function bindControls() {
     updateSphereRadiusLabel();
     rebuildStaticProjectionSurface();
     rebuildCurrentFrame();
-    updateAccumulatedHitPoints();
     updateHitAreaPatches();
     updateStatusPanel();
     render();
@@ -1095,10 +983,10 @@ function applySceneData(sceneData) {
   updateHitAreaErrorLabel();
   updateHitAreaOpacityLabel();
   applyHitAreaOpacity();
-  buildAccumulatedHitPoints();
   updateAccumulatedHitAreasForAngularError();
   resizeRenderer();
-  setFrameIndex(0);
+  setStatus("", false);
+  setFrameIndex(maxIndex);
   requestRender();
 }
 

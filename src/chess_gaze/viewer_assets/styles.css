@@ -10,8 +10,6 @@
   --color-left-eye: #2f80c2;
   --color-right-eye: #d46a5b;
   --color-unigaze-ray: #006d6f;
-  --color-current-hit: #4c1d95;
-  --color-accumulated-hit: #b7791f;
   --color-hit-area: #c43d7a;
   --color-gaze-sphere: #d8dde5;
   --color-warning: #b5532f;
@@ -158,6 +156,10 @@ canvas {
   border-color: #e6a18d;
   color: var(--color-warning);
   background: #fff4ef;
+}
+
+.fallback-status[hidden] {
+  display: none;
 }
 
 .control-panel {
