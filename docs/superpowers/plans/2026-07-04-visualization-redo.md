@@ -6,6 +6,10 @@
 
 **Architecture:** Keep the existing static viewer package and scene-data schema. Change only the generated viewer UI/runtime and its direct documentation/tests; preserve cached accumulated hit-area geometry and the file-url/served viewer split.
 
+Follow-up correction: `docs/superpowers/plans/2026-07-04-hit-area-only-viewer-data.md`
+supersedes the schema-preservation part of this plan and removes duplicated
+viewer hit-point data.
+
 **Tech Stack:** Python 3.12, pytest, generated static HTML/CSS/JS viewer assets, Three.js `0.185.0` from the existing ADR-0003 import map.
 
 ## Global Constraints

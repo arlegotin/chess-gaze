@@ -15,6 +15,10 @@ This spec supersedes the viewer-control portions of:
 Historical specs and closeouts may keep their historical facts, but current
 viewer behavior is defined here.
 
+Follow-up correction: the user clarified on 2026-07-04 that Hit Points must be
+removed from viewer data as well. The active data-contract design is
+`docs/superpowers/specs/2026-07-04-hit-area-only-viewer-data-design.md`.
+
 ## Goal
 
 Simplify the 3D scene viewer's gaze-hit visualization so the gaze sphere shows
@@ -36,7 +40,9 @@ sentences over the scene.
   `Accumulated mode. Frame 1 of 16050: sphere hit is valid.`
 - Keep genuine loading and error messages visible, including missing scene-data
   and module-import failures.
-- Do not change persisted scene/viewer schemas or introduce any dependency.
+- The original visualization-only request did not change persisted
+  scene/viewer schemas. The follow-up hit-area-only data contract supersedes
+  that constraint for `viewer/scene-data.json`.
 
 ## Implementation Surface
 
@@ -55,11 +61,10 @@ new frontend module or build pipeline.
 
 ## Design Notes
 
-Hit points are removed from the visualization surface, not from persisted
-artifact data. The existing `ViewerSceneData.valid_hit_points` contract remains
-available for summaries and compatibility, but the browser no longer draws
-current-hit spheres or accumulated point clouds and no longer exposes
-`toggle-hit-points`.
+Hit points were initially removed from the visualization surface only. The
+follow-up hit-area-only data spec supersedes that decision and removes the
+duplicated `ViewerSceneData.valid_hit_points` payload too. Per-frame
+`sphere_hit` records remain because Hit Area derives from them.
 
 Accumulated hit-area prefix counts should continue to use the cached
 `hitAreaPatchFrameIndices` array. The top-bar `Hits` metric can continue to
