@@ -753,34 +753,12 @@ class SceneSummary(SceneSchemaModel):
         return _coerce_invalid_reason_counts(value)
 
 
-class ViewerHitPoint(SceneSchemaModel):
-    frame_id: str
-    frame_index: int
-    point_scene_m: Vector3D
-    radius_m: float
-    theta_radians: float
-    phi_radians: float
-    hemisphere: Literal["front", "rear", "equator"]
-
-    @model_validator(mode="after")
-    def validate_spaces(self) -> ViewerHitPoint:
-        _require_vector_space(
-            self.point_scene_m,
-            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
-            field_name="point_scene_m",
-        )
-        if self.radius_m <= 0:
-            raise ValueError("viewer hit point radius_m must be > 0")
-        return self
-
-
 class ViewerSceneData(SceneSchemaModel):
     schema_version: Literal["gaze-scene-viewer-data-v2"] = "gaze-scene-viewer-data-v2"
     run_id: str
     source_video_stem: str
     frame_count: int
     frames: list[SceneFrameRecord]
-    valid_hit_points: list[ViewerHitPoint]
     gaze_sphere: SceneGazeSphereRecord
     axis_basis: SceneAxisBasisRecord
     assumptions: list[SceneAssumptionRecord]

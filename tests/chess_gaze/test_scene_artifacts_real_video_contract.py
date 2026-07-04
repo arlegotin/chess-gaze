@@ -145,19 +145,19 @@ def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> No
     assert pipeline_result.viewer_scene_data_path.is_file()
     assert generated_viewer_data.frame_count == expected_frame_count
     assert len(generated_viewer_data.frames) == expected_frame_count
-    assert len(generated_viewer_data.valid_hit_points) == expected_frame_count
+    assert not hasattr(generated_viewer_data, "valid_hit_points")
     assert generated_viewer_data.gaze_sphere.radius_m == pytest.approx(0.7)
     assert generated_viewer_data.summary.artifact_validation.viewer_exists is True
     assert scene_result.scene_frame_count == expected_frame_count
     assert viewer_data.frame_count == expected_frame_count
     assert len(viewer_data.frames) == expected_frame_count
-    assert len(viewer_data.valid_hit_points) == expected_frame_count
-    assert [point.frame_index for point in viewer_data.valid_hit_points[:3]] == [
+    assert not hasattr(viewer_data, "valid_hit_points")
+    assert [frame.frame_index for frame in viewer_data.frames[:3]] == [
         0,
         1,
         2,
     ]
-    assert viewer_data.valid_hit_points[-1].frame_index == expected_frame_count - 1
+    assert viewer_data.frames[-1].frame_index == expected_frame_count - 1
     assert all(frame.sphere_hit.valid for frame in generated_viewer_data.frames)
     valid_frame = next(frame for frame in viewer_data.frames if frame.sphere_hit.valid)
     assert valid_frame.sphere_hit.ray_t_m is not None

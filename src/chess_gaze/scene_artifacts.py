@@ -56,7 +56,6 @@ from chess_gaze.scene_records import (
     SceneViewerDependencyRecord,
     UnitVector3D,
     Vector3D,
-    ViewerHitPoint,
     ViewerSceneData,
 )
 from chess_gaze.sphere_projection import (
@@ -592,40 +591,11 @@ def _viewer_scene_data_from_parts(
         source_video_stem=Path(source_video_path).stem,
         frame_count=len(frames),
         frames=frames,
-        valid_hit_points=_valid_hit_points(frames),
         gaze_sphere=gaze_sphere,
         axis_basis=axis_basis,
         assumptions=assumptions,
         summary=summary,
     )
-
-
-def _valid_hit_points(frames: list[SceneFrameRecord]) -> list[ViewerHitPoint]:
-    hit_points: list[ViewerHitPoint] = []
-    for frame in frames:
-        hit = frame.sphere_hit
-        if not hit.valid:
-            continue
-        if (
-            hit.point_scene_m is None
-            or hit.radius_m is None
-            or hit.theta_radians is None
-            or hit.phi_radians is None
-            or hit.hemisphere is None
-        ):
-            raise ValueError("valid sphere hit is missing persisted viewer fields")
-        hit_points.append(
-            ViewerHitPoint(
-                frame_id=frame.frame_id,
-                frame_index=frame.frame_index,
-                point_scene_m=hit.point_scene_m,
-                radius_m=hit.radius_m,
-                theta_radians=hit.theta_radians,
-                phi_radians=hit.phi_radians,
-                hemisphere=hit.hemisphere,
-            )
-        )
-    return hit_points
 
 
 def _sphere_hit_angle_bounds(

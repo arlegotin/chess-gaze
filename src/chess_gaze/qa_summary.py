@@ -35,7 +35,6 @@ from chess_gaze.scene_records import (
     SceneGazeSphereRecord,
     SceneManifest,
     SceneSummary,
-    ViewerHitPoint,
 )
 
 QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
@@ -182,7 +181,6 @@ class _ViewerSceneDataEnvelope(StrictSchemaModel):
     source_video_stem: str
     frame_count: int
     frames_count: int
-    valid_hit_points_count: int
     gaze_sphere: SceneGazeSphereRecord
     axis_basis: SceneAxisBasisRecord
     assumptions: list[SceneAssumptionRecord]
@@ -580,13 +578,6 @@ def _viewer_scene_data_validation_errors(
     if scene_summary is not None:
         if envelope.summary != scene_summary:
             errors.append("viewer scene data summary does not match scene summary")
-        if envelope.valid_hit_points_count != scene_summary.valid_sphere_hit_frames:
-            errors.append(
-                "viewer scene data valid hit point count does not match scene "
-                "summary: "
-                f"{envelope.valid_hit_points_count} != "
-                f"{scene_summary.valid_sphere_hit_frames}"
-            )
     if errors:
         return [
             (
@@ -632,7 +623,7 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
         index = _expect_json_byte(data, index, ord(":"))
         index = _skip_json_whitespace(data, index)
 
-        if key in {"frames", "valid_hit_points"}:
+        if key == "frames":
             if key in array_counts:
                 raise ValueError(f"duplicate top-level key: {key}")
             count, index = _count_and_validate_viewer_array(data, index, key)
@@ -665,13 +656,11 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
         envelope_keys
         | {
             "frames",
-            "valid_hit_points",
         }
     ) - (set(payload) | set(array_counts))
     if missing:
         raise ValueError(f"missing top-level keys: {', '.join(sorted(missing))}")
     payload["frames_count"] = array_counts["frames"]
-    payload["valid_hit_points_count"] = array_counts["valid_hit_points"]
     return payload
 
 
@@ -764,14 +753,6 @@ def _validate_viewer_array_item(
             SceneFrameRecord.model_validate_json(raw)
         except ValueError as exc:
             raise ValueError(f"invalid viewer frame at index {index}: {exc}") from exc
-        return
-    if key == "valid_hit_points":
-        try:
-            ViewerHitPoint.model_validate_json(raw)
-        except ValueError as exc:
-            raise ValueError(
-                f"invalid viewer hit point at index {index}: {exc}"
-            ) from exc
         return
     raise ValueError(f"unexpected viewer array key: {key}")
 

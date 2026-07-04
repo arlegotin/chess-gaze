@@ -589,7 +589,7 @@ def test_qa_summary_rejects_unexpected_viewer_scene_data_top_level_key(
     )
 
 
-def test_qa_summary_rejects_malformed_viewer_hit_points(
+def test_qa_summary_rejects_viewer_hit_points_top_level_data(
     tmp_path: Path,
 ) -> None:
     layout = _write_fixture_run(tmp_path)
@@ -618,7 +618,7 @@ def test_qa_summary_rejects_malformed_viewer_hit_points(
     assert summary.final_status == "failed"
     assert summary.artifact_validation.schema_validation_passed is False
     assert any(
-        "viewer hit point" in error
+        "unexpected top-level key: valid_hit_points" in error
         for error in summary.artifact_validation.validation_errors
     )
 

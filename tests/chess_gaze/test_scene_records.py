@@ -887,17 +887,6 @@ def test_manifest_and_viewer_data_use_gaze_sphere() -> None:
             "source_video_stem": "nakamura_short",
             "frame_count": 1,
             "frames": [_scene_frame_payload()],
-            "valid_hit_points": [
-                {
-                    "frame_id": "frame-0001",
-                    "frame_index": 1,
-                    "point_scene_m": _scene_vector(0.0, 0.0, -0.7),
-                    "radius_m": 0.7,
-                    "theta_radians": 0.0,
-                    "phi_radians": 0.0,
-                    "hemisphere": "front",
-                }
-            ],
             "gaze_sphere": _gaze_sphere_payload(),
             "axis_basis": _axis_basis_payload(),
             "assumptions": [
@@ -925,6 +914,7 @@ def test_manifest_and_viewer_data_use_gaze_sphere() -> None:
     assert viewer_data.schema_version == "gaze-scene-viewer-data-v2"
     assert viewer_data.gaze_sphere == manifest.gaze_sphere
     assert "monitor_plane" not in viewer_data.model_dump()
+    assert "valid_hit_points" not in viewer_data.model_dump()
 
 
 def test_structured_nested_models_reject_non_finite_values_and_unknown_keys() -> None:
@@ -1026,24 +1016,13 @@ def test_summary_reports_sphere_hit_bounds_and_reasons() -> None:
     assert payload["sphere_hit_angle_bounds"]["phi_max_radians"] == 0.2
 
 
-def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> None:
+def test_viewer_scene_data_serializes_schema_version_without_hit_points() -> None:
     viewer_data = ViewerSceneData.model_validate(
         {
             "run_id": "run-123",
             "source_video_stem": "nakamura_short",
             "frame_count": 1,
             "frames": [_scene_frame_payload()],
-            "valid_hit_points": [
-                {
-                    "frame_id": "frame-0001",
-                    "frame_index": 1,
-                    "point_scene_m": _scene_vector(0.0, 0.0, -0.7),
-                    "radius_m": 0.7,
-                    "theta_radians": 0.0,
-                    "phi_radians": 0.0,
-                    "hemisphere": "front",
-                }
-            ],
             "gaze_sphere": _gaze_sphere_payload(),
             "axis_basis": _axis_basis_payload(),
             "assumptions": [
@@ -1066,19 +1045,4 @@ def test_viewer_scene_data_serializes_schema_version_and_hit_identities() -> Non
 
     assert payload["schema_version"] == "gaze-scene-viewer-data-v2"
     assert len(payload["frames"]) == 1
-    assert payload["valid_hit_points"] == [
-        {
-            "frame_id": "frame-0001",
-            "frame_index": 1,
-            "point_scene_m": {
-                "space": "scene_pseudo_m",
-                "x": 0.0,
-                "y": 0.0,
-                "z": -0.7,
-            },
-            "radius_m": 0.7,
-            "theta_radians": 0.0,
-            "phi_radians": 0.0,
-            "hemisphere": "front",
-        }
-    ]
+    assert "valid_hit_points" not in payload

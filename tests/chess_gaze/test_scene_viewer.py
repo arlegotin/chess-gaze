@@ -573,6 +573,7 @@ def test_scene_data_is_strict_schema_versioned_viewer_scene_data(
     payload = json.loads((layout.viewer_dir / "scene-data.json").read_text("utf-8"))
 
     assert payload["schema_version"] == "gaze-scene-viewer-data-v2"
+    assert "valid_hit_points" not in payload
     assert viewer_data.run_id == "20260626T120000Z-scene"
     assert payload["gaze_sphere"]["radius_m"] == pytest.approx(
         viewer_data.gaze_sphere.radius_m
@@ -592,31 +593,29 @@ def test_scene_data_includes_all_frames_in_slider_order(
     assert viewer_data.frames[-1].sphere_hit.valid is False
 
 
-def test_scene_data_keeps_one_hit_identity_per_valid_sphere_hit_frame(
+def test_scene_data_uses_sphere_hits_as_the_only_hit_area_data(
     built_viewer: tuple[RunLayout, ViewerSceneData],
 ) -> None:
     _layout, viewer_data = built_viewer
-    valid_frame_count = sum(1 for frame in viewer_data.frames if frame.sphere_hit.valid)
+    valid_frames = [frame for frame in viewer_data.frames if frame.sphere_hit.valid]
 
-    assert len(viewer_data.valid_hit_points) == valid_frame_count
-    assert [point.frame_index for point in viewer_data.valid_hit_points] == [
-        frame.frame_index for frame in viewer_data.frames if frame.sphere_hit.valid
-    ]
+    assert len(valid_frames) == viewer_data.summary.valid_sphere_hit_frames
+    assert not hasattr(viewer_data, "valid_hit_points")
+    assert [frame.frame_index for frame in valid_frames] == [0, 1, 2, 3, 4, 5]
 
-    duplicate_points = [
-        point for point in viewer_data.valid_hit_points if point.frame_index in (2, 3)
+    duplicate_hits = [
+        frame.sphere_hit for frame in viewer_data.frames if frame.frame_index in (2, 3)
     ]
-    assert len(duplicate_points) == 2
-    assert duplicate_points[0].point_scene_m == duplicate_points[1].point_scene_m
-    assert duplicate_points[0].radius_m == pytest.approx(duplicate_points[1].radius_m)
-    assert duplicate_points[0].theta_radians == pytest.approx(
-        duplicate_points[1].theta_radians
+    assert len(duplicate_hits) == 2
+    assert duplicate_hits[0].point_scene_m == duplicate_hits[1].point_scene_m
+    assert duplicate_hits[0].radius_m == pytest.approx(duplicate_hits[1].radius_m)
+    assert duplicate_hits[0].theta_radians == pytest.approx(
+        duplicate_hits[1].theta_radians
     )
-    assert duplicate_points[0].phi_radians == pytest.approx(
-        duplicate_points[1].phi_radians
+    assert duplicate_hits[0].phi_radians == pytest.approx(
+        duplicate_hits[1].phi_radians
     )
-    assert duplicate_points[0].hemisphere == duplicate_points[1].hemisphere
-    assert duplicate_points[0].frame_id != duplicate_points[1].frame_id
+    assert duplicate_hits[0].hemisphere == duplicate_hits[1].hemisphere
 
 
 def test_generated_html_includes_required_selectors(
@@ -1139,6 +1138,7 @@ def test_generated_index_embeds_file_url_bootstrap_and_scene_data(
     assert 'id="scene-viewer-source"' in html
     assert "window.__CHESS_GAZE_SCENE_DATA__" in html
     assert viewer_data.run_id in html
+    assert '"valid_hit_points"' not in html
 
 
 def test_generated_served_html_fetches_scene_data_without_embedding_payload(

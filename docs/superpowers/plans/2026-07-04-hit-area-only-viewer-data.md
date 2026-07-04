@@ -38,18 +38,18 @@
 - Produces: failing tests that require `valid_hit_points` to be absent and
   rejected.
 
-- [ ] Update viewer schema tests to build `ViewerSceneData` without
+- [x] Update viewer schema tests to build `ViewerSceneData` without
   `valid_hit_points`.
-- [ ] Add a strict-schema assertion that a payload containing
+- [x] Add a strict-schema assertion that a payload containing
   `valid_hit_points` raises an unexpected-key validation error.
-- [ ] Update scene-artifact tests to compare valid sphere-hit frames from
+- [x] Update scene-artifact tests to compare valid sphere-hit frames from
   `viewer_data.frames`, not duplicated hit-point records.
-- [ ] Update generated viewer tests to assert serialized `scene-data.json` and
+- [x] Update generated viewer tests to assert serialized `scene-data.json` and
   embedded file-url JSON omit top-level `valid_hit_points`.
-- [ ] Replace the QA malformed-hit-point test with a test that
+- [x] Replace the QA malformed-hit-point test with a test that
   `valid_hit_points` is rejected as an unexpected top-level key.
-- [ ] Update run-equivalence fixture payloads to omit `valid_hit_points`.
-- [ ] Run the focused tests and confirm RED failures are caused by the old
+- [x] Update run-equivalence fixture payloads to omit `valid_hit_points`.
+- [x] Run the focused tests and confirm RED failures are caused by the old
   required/emitted hit-point data.
 
 ### Task 2: Remove Hit-Point Data From Production Code
@@ -65,16 +65,16 @@
 - Consumes: RED tests from Task 1.
 - Produces: `ViewerSceneData` without duplicated hit-point data.
 
-- [ ] Delete `ViewerHitPoint` from `scene_records.py`.
-- [ ] Delete `ViewerSceneData.valid_hit_points`.
-- [ ] Remove `_valid_hit_points()` and the `valid_hit_points=` constructor
+- [x] Delete `ViewerHitPoint` from `scene_records.py`.
+- [x] Delete `ViewerSceneData.valid_hit_points`.
+- [x] Remove `_valid_hit_points()` and the `valid_hit_points=` constructor
   argument in `scene_artifacts.py`.
-- [ ] Remove `_ViewerSceneDataEnvelope.valid_hit_points_count`.
-- [ ] Make `_scan_viewer_scene_data_payload()` count and validate only the
+- [x] Remove `_ViewerSceneDataEnvelope.valid_hit_points_count`.
+- [x] Make `_scan_viewer_scene_data_payload()` count and validate only the
   `frames` array.
-- [ ] Make `valid_hit_points` fail through the existing unexpected top-level
+- [x] Make `valid_hit_points` fail through the existing unexpected top-level
   key path.
-- [ ] Run the focused tests and iterate to green.
+- [x] Run the focused tests and iterate to green.
 
 ### Task 3: Update Active Documentation And Close Out
 
@@ -108,4 +108,3 @@
   and required assertions.
 - Type/name consistency: `valid_hit_points` is removed only from viewer data;
   `sphere_hit` remains the canonical per-frame source for Hit Area.
-

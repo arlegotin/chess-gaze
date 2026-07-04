@@ -399,17 +399,19 @@ def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hit
     assert viewer_data.frame_count == 7
     assert len(viewer_data.frames) == 7
     assert viewer_data.gaze_sphere == result.manifest.gaze_sphere
-    assert len(viewer_data.valid_hit_points) == result.valid_sphere_hit_count
-    assert [point.frame_index for point in viewer_data.valid_hit_points] == [
+    assert not hasattr(viewer_data, "valid_hit_points")
+    valid_viewer_frames = [frame for frame in viewer_data.frames if frame.sphere_hit.valid]
+    assert len(valid_viewer_frames) == result.valid_sphere_hit_count
+    assert [frame.frame_index for frame in valid_viewer_frames] == [
         frame.frame_index for frame in records if frame.sphere_hit.valid
     ]
     assert [
-        (point.frame_id, point.frame_index)
-        for point in viewer_data.valid_hit_points
-        if point.frame_index in (2, 3)
+        (frame.frame_id, frame.frame_index)
+        for frame in valid_viewer_frames
+        if frame.frame_index in (2, 3)
     ] == [("f000000002", 2), ("f000000003", 3)]
     assert all(
-        point.radius_m == pytest.approx(0.7) for point in viewer_data.valid_hit_points
+        frame.sphere_hit.radius_m == pytest.approx(0.7) for frame in valid_viewer_frames
     )
     assert viewer_data.axis_basis == result.manifest.axis_basis
     assert viewer_data.summary.valid_sphere_hit_frames == 6

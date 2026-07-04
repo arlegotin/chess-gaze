@@ -327,21 +327,7 @@ def _viewer_data_payload(
     scene_frame: dict[str, Any],
     viewer_frame_count: int,
 ) -> dict[str, Any]:
-    valid_hit_points: list[dict[str, Any]] = []
     sphere_hit = scene_frame["sphere_hit"]
-    if sphere_hit["valid"]:
-        valid_hit_points.append(
-            {
-                "frame_id": scene_frame["frame_id"],
-                "frame_index": scene_frame["frame_index"],
-                "point_scene_m": sphere_hit["point_scene_m"],
-                "radius_m": sphere_hit["radius_m"],
-                "theta_radians": sphere_hit["theta_radians"],
-                "phi_radians": sphere_hit["phi_radians"],
-                "hemisphere": sphere_hit["hemisphere"],
-            }
-        )
-
     viewer_data = ViewerSceneData.model_validate_json(
         json.dumps(
             {
@@ -349,7 +335,6 @@ def _viewer_data_payload(
                 "source_video_stem": "synthetic-scene-source",
                 "frame_count": viewer_frame_count,
                 "frames": [scene_frame],
-                "valid_hit_points": valid_hit_points,
                 "gaze_sphere": {
                     "center_scene_m": _vector_payload(
                         x=0.0,
