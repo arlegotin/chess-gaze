@@ -458,10 +458,14 @@ def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
     assert record.right_eye.pupil_center == _point(24.0, 24.0)
     assert record.head_pose.valid is True
     assert record.head_pose.yaw_radians == 0.01
-    assert record.geometric_gaze.valid is True
-    assert record.geometric_gaze.pitch_radians == 0.02
+    assert record.geometric_gaze.valid is False
+    assert record.geometric_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
     assert record.appearance_gaze.valid is True
     assert record.recommended_gaze.valid is True
+    assert record.recommended_gaze.yaw_radians == record.appearance_gaze.yaw_radians
+    assert (
+        record.recommended_gaze.pitch_radians == record.appearance_gaze.pitch_radians
+    )
     assert record.errors == []
 
 
@@ -488,7 +492,7 @@ def test_model_backed_frame_observer_preserves_missing_right_eye_reason(
     assert record.right_eye.present is False
     assert record.right_eye.reason_invalid is ErrorCode.RIGHT_EYE_NOT_FOUND
     assert record.geometric_gaze.valid is False
-    assert record.geometric_gaze.reason_invalid is ErrorCode.RIGHT_EYE_NOT_FOUND
+    assert record.geometric_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
     assert ErrorCode.RIGHT_EYE_NOT_FOUND in {error.code for error in record.errors}
 
 
@@ -521,7 +525,7 @@ def test_model_backed_frame_observer_records_missing_face_without_later_models(
     assert ErrorCode.FACE_NOT_FOUND in {error.code for error in record.errors}
 
 
-def test_model_backed_frame_observer_marks_gaze_disagreement_as_warning(
+def test_model_backed_frame_observer_uses_unigaze_without_disagreement_status(
     tmp_path: Path,
 ) -> None:
     run_layout = _run_layout(tmp_path)
@@ -543,12 +547,9 @@ def test_model_backed_frame_observer_marks_gaze_disagreement_as_warning(
     assert record.right_eye.present is True
     assert record.head_pose.valid is True
     assert record.appearance_gaze.valid is True
-    assert record.recommended_gaze.valid is False
-    assert record.recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
-    assert record.status is FrameStatus.WARNING
-    assert [error.code for error in record.errors] == [
-        ErrorCode.GAZE_ESTIMATORS_DISAGREE
-    ]
+    assert record.recommended_gaze == record.appearance_gaze
+    assert record.status is FrameStatus.OK
+    assert record.errors == []
 
 
 def test_model_backed_frame_observer_marks_multiple_face_candidates_as_warning(
@@ -590,7 +591,7 @@ def test_model_backed_frame_observer_marks_multiple_face_candidates_as_warning(
     ]
 
 
-def test_model_backed_observer_marks_multiple_candidates_and_gaze_disagreement_warning(
+def test_model_backed_observer_marks_multiple_candidates_without_gaze_warning(
     tmp_path: Path,
 ) -> None:
     run_layout = _run_layout(tmp_path)
@@ -622,13 +623,9 @@ def test_model_backed_observer_marks_multiple_candidates_and_gaze_disagreement_w
     assert record.right_eye.present is True
     assert record.head_pose.valid is True
     assert record.appearance_gaze.valid is True
-    assert record.recommended_gaze.valid is False
-    assert record.recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
+    assert record.recommended_gaze == record.appearance_gaze
     assert record.status is FrameStatus.WARNING
-    assert [error.code for error in record.errors] == [
-        ErrorCode.MULTIPLE_FACE_CANDIDATES,
-        ErrorCode.GAZE_ESTIMATORS_DISAGREE,
-    ]
+    assert [error.code for error in record.errors] == [ErrorCode.MULTIPLE_FACE_CANDIDATES]
 
 
 def test_model_backed_frame_observer_batch_maps_model_rows_to_frames(
@@ -663,11 +660,9 @@ def test_model_backed_frame_observer_batch_maps_model_rows_to_frames(
     assert [record.frame_id for record in records] == ["f000000000", "f000000001"]
     assert records[0].appearance_gaze.pitch_radians == 0.02
     assert records[1].appearance_gaze.pitch_radians == 1.02
-    assert records[0].recommended_gaze.valid is True
-    assert records[1].recommended_gaze.valid is False
-    assert (
-        records[1].recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
-    )
+    assert records[0].recommended_gaze == records[0].appearance_gaze
+    assert records[1].recommended_gaze == records[1].appearance_gaze
+    assert records[1].recommended_gaze.valid is True
 
 
 def test_model_backed_frame_observer_batch_preserves_missing_face_record(

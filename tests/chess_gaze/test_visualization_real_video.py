@@ -65,7 +65,7 @@ def _failure_payload(frame_id: str, frame_index: int) -> dict[str, Any]:
             "valid": False,
             "yaw_radians": None,
             "pitch_radians": None,
-            "reason_invalid": "GAZE_ESTIMATORS_DISAGREE",
+            "reason_invalid": "GAZE_MODEL_FAILED",
         },
         "appearance_gaze": {
             "valid": False,
@@ -148,10 +148,10 @@ def _valid_record(
         "reason_invalid": None,
     }
     payload["geometric_gaze"] = {
-        "valid": True,
-        "yaw_radians": 0.05,
-        "pitch_radians": -0.03,
-        "reason_invalid": None,
+        "valid": False,
+        "yaw_radians": None,
+        "pitch_radians": None,
+        "reason_invalid": "GAZE_MODEL_FAILED",
     }
     payload["appearance_gaze"] = {
         "valid": True,
@@ -159,12 +159,7 @@ def _valid_record(
         "pitch_radians": -0.02,
         "reason_invalid": None,
     }
-    payload["recommended_gaze"] = {
-        "valid": True,
-        "yaw_radians": 0.045,
-        "pitch_radians": -0.025,
-        "reason_invalid": None,
-    }
+    payload["recommended_gaze"] = payload["appearance_gaze"]
     payload["errors"] = []
     return FrameRecord.model_validate(payload)
 

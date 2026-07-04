@@ -12,7 +12,12 @@ from pydantic import ValidationError
 from chess_gaze.errors import ErrorCode
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
-from chess_gaze.visualization import render_processed_frame
+from chess_gaze.visualization import (
+    _APPEARANCE_GAZE_COLOR,
+    _GEOMETRIC_GAZE_COLOR,
+    _RECOMMENDED_GAZE_COLOR,
+    render_processed_frame,
+)
 
 
 def _failure_payload(frame_id: str = "f000000001") -> dict[str, Any]:
@@ -192,6 +197,19 @@ def _has_dominant_channel_near(
     return bool(np.any(dominant))
 
 
+def _dominant_color_count_near(
+    image: np.ndarray, *, x: int, y: int, color: tuple[int, int, int], radius: int = 7
+) -> int:
+    y_min = max(0, y - radius)
+    y_max = min(image.shape[0], y + radius + 1)
+    x_min = max(0, x - radius)
+    x_max = min(image.shape[1], x + radius + 1)
+    patch = image[y_min:y_max, x_min:x_max].astype(np.int16)
+    target = np.array(color, dtype=np.int16)
+    distance = np.max(np.abs(patch - target), axis=2)
+    return int(np.count_nonzero(distance <= 45))
+
+
 def test_observed_record_fixture_uses_streamer_anatomical_eye_sides() -> None:
     record = _observed_record()
 
@@ -283,6 +301,40 @@ def test_eye_overlay_colors_follow_streamer_anatomical_sides(
     rendered = _rgb_jpeg(output_path)
     assert _has_dominant_channel_near(rendered, x=120, y=55, channel=2)
     assert _has_dominant_channel_near(rendered, x=65, y=55, channel=0)
+
+
+def test_processed_frame_renders_only_unigaze_gaze_vector(tmp_path: Path) -> None:
+    frame = np.zeros((160, 220, 3), dtype=np.uint8)
+    record = _observed_record()
+    output_path = tmp_path / "unigaze-only.jpg"
+
+    render_processed_frame(frame, record, output_path, quality=100)
+
+    rendered = _rgb_jpeg(output_path)
+    assert _dominant_color_count_near(
+        rendered, x=108, y=85, color=_APPEARANCE_GAZE_COLOR, radius=10
+    ) > 0
+    assert _dominant_color_count_near(
+        rendered, x=84, y=69, color=_GEOMETRIC_GAZE_COLOR, radius=8
+    ) == 0
+    assert _dominant_color_count_near(
+        rendered, x=140, y=70, color=_GEOMETRIC_GAZE_COLOR, radius=8
+    ) == 0
+    assert _dominant_color_count_near(
+        rendered, x=112, y=84, color=_RECOMMENDED_GAZE_COLOR, radius=8
+    ) == 0
+
+
+def test_processed_frame_does_not_draw_unigaze_label_text(tmp_path: Path) -> None:
+    frame = np.zeros((160, 220, 3), dtype=np.uint8)
+    record = _observed_record()
+    output_path = tmp_path / "unlabeled-unigaze.jpg"
+
+    render_processed_frame(frame, record, output_path, quality=100)
+
+    rendered = _rgb_jpeg(output_path)
+    label_region = rendered[76:96, 110:170]
+    assert int(np.count_nonzero(label_region)) < 80
 
 
 def test_current_frame_record_rejects_unvalidated_candidate_overlay_fields() -> None:
