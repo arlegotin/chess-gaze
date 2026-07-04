@@ -396,46 +396,39 @@ def test_processed_frame_unigaze_arrow_extends_as_primary_vector(
     )
 
 
-def test_processed_frame_draws_primary_unigaze_over_overlapping_auxiliary_axis(
+def test_processed_frame_does_not_draw_head_pose_axis_arrows(
     tmp_path: Path,
 ) -> None:
     frame = np.zeros((160, 220, 3), dtype=np.uint8)
-    payload = _observed_record().model_dump()
-    payload["face"]["landmarks"] = [
-        _point(80.0, 60.0),
-        _point(130.0, 60.0),
-        _point(105.0, 84.0),
-    ]
-    payload["appearance_gaze"] = {
-        "valid": True,
-        "yaw_radians": 0.15,
-        "pitch_radians": 0.0,
-        "reason_invalid": None,
-    }
-    payload["head_pose"] = {
-        "valid": True,
-        "yaw_radians": 0.0,
-        "pitch_radians": 0.0,
-        "roll_radians": 0.0,
-        "reason_invalid": None,
-    }
-    record = FrameRecord.model_validate(payload)
-    output_path = tmp_path / "primary-over-axis.jpg"
+    record = _observed_record()
+    output_path = tmp_path / "no-head-axis-arrows.jpg"
 
     render_processed_frame(frame, record, output_path, quality=100)
 
     rendered = _rgb_jpeg(output_path)
     assert (
         _dominant_color_count_near(
-            rendered, x=130, y=84, color=_APPEARANCE_GAZE_COLOR, radius=4
+            rendered, x=128, y=93, color=_APPEARANCE_GAZE_COLOR, radius=5
         )
         > 0
     )
     assert (
         _dominant_color_count_near(
-            rendered, x=105, y=116, color=visualization._HEAD_Y_COLOR, radius=5
+            rendered, x=127, y=103, color=(210, 115, 115), radius=5
         )
-        > 0
+        == 0
+    )
+    assert (
+        _dominant_color_count_near(
+            rendered, x=105, y=116, color=(115, 210, 115), radius=5
+        )
+        == 0
+    )
+    assert (
+        _dominant_color_count_near(
+            rendered, x=111, y=105, color=(115, 155, 220), radius=5
+        )
+        == 0
     )
 
 
@@ -502,7 +495,7 @@ def test_processed_frame_does_not_draw_unigaze_label_text(tmp_path: Path) -> Non
     )
 
 
-def test_processed_frame_arrow_style_prioritizes_unigaze_over_auxiliary_axes() -> None:
+def test_processed_frame_arrow_style_uses_unigaze_without_axis_arrows() -> None:
     assert visualization._APPEARANCE_GAZE_COLOR == (0, 205, 230)
     assert visualization._UNIGAZE_ARROW_THICKNESS == 4
     assert visualization._UNIGAZE_ARROW_OUTLINE_THICKNESS == 5
@@ -512,28 +505,10 @@ def test_processed_frame_arrow_style_prioritizes_unigaze_over_auxiliary_axes() -
     assert visualization._UNIGAZE_ARROW_MAX_FACE_SCALE == pytest.approx(0.55)
     assert visualization._UNIGAZE_ARROW_MIN_LENGTH_PX == pytest.approx(48.0)
     assert visualization._UNIGAZE_ARROW_MAX_LENGTH_PX == pytest.approx(90.0)
-
-    assert visualization._HEAD_X_COLOR == (210, 115, 115)
-    assert visualization._HEAD_Y_COLOR == (115, 210, 115)
-    assert visualization._HEAD_Z_COLOR == (115, 155, 220)
-    assert visualization._HEAD_AXIS_COLOR_THICKNESS == 2
-    assert visualization._HEAD_AXIS_OUTLINE_THICKNESS == 3
-    assert visualization._HEAD_AXIS_FACE_LENGTH_SCALE == pytest.approx(0.26)
-    assert visualization._HEAD_AXIS_MIN_LENGTH_PX == pytest.approx(24.0)
-    assert visualization._HEAD_AXIS_MAX_LENGTH_PX == pytest.approx(44.0)
-
-    assert (
-        visualization._UNIGAZE_ARROW_THICKNESS
-        > visualization._HEAD_AXIS_COLOR_THICKNESS
-    )
-    assert (
-        visualization._UNIGAZE_ARROW_OUTLINE_THICKNESS
-        > visualization._HEAD_AXIS_OUTLINE_THICKNESS
-    )
-    assert (
-        visualization._UNIGAZE_ARROW_MIN_FACE_SCALE
-        > visualization._HEAD_AXIS_FACE_LENGTH_SCALE
-    )
+    assert not hasattr(visualization, "_HEAD_X_COLOR")
+    assert not hasattr(visualization, "_HEAD_Y_COLOR")
+    assert not hasattr(visualization, "_HEAD_Z_COLOR")
+    assert not hasattr(visualization, "_HEAD_AXIS_COLOR_THICKNESS")
 
 
 def test_current_frame_record_rejects_unvalidated_candidate_overlay_fields() -> None:

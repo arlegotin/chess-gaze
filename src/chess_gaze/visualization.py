@@ -23,9 +23,6 @@ _IRIS_LANDMARK_COLOR: Color = (160, 255, 255)
 _GEOMETRIC_GAZE_COLOR: Color = (255, 0, 255)
 _APPEARANCE_GAZE_COLOR: Color = (0, 205, 230)
 _RECOMMENDED_GAZE_COLOR: Color = (255, 255, 255)
-_HEAD_X_COLOR: Color = (210, 115, 115)
-_HEAD_Y_COLOR: Color = (115, 210, 115)
-_HEAD_Z_COLOR: Color = (115, 155, 220)
 _TEXT_COLOR: Color = (255, 255, 255)
 _TEXT_SHADOW_COLOR: Color = (0, 0, 0)
 _ERROR_COLOR: Color = (255, 90, 90)
@@ -39,12 +36,6 @@ _UNIGAZE_ARROW_MIN_FACE_SCALE = 0.38
 _UNIGAZE_ARROW_MAX_FACE_SCALE = 0.55
 _UNIGAZE_ARROW_MIN_LENGTH_PX = 48.0
 _UNIGAZE_ARROW_MAX_LENGTH_PX = 90.0
-_HEAD_AXIS_COLOR_THICKNESS = 2
-_HEAD_AXIS_OUTLINE_THICKNESS = 3
-_HEAD_AXIS_FACE_LENGTH_SCALE = 0.26
-_HEAD_AXIS_FRAME_LENGTH_SCALE = 0.16
-_HEAD_AXIS_MIN_LENGTH_PX = 24.0
-_HEAD_AXIS_MAX_LENGTH_PX = 44.0
 
 
 def render_processed_frame(
@@ -67,7 +58,6 @@ def render_processed_frame(
     _draw_eye(canvas, record.left_eye, _LEFT_EYE_COLOR, "L")
     _draw_eye(canvas, record.right_eye, _RIGHT_EYE_COLOR, "R")
 
-    _draw_head_pose(canvas, record)
     _draw_unigaze_vector(canvas, record)
     _draw_status_text(canvas, record)
 
@@ -242,75 +232,6 @@ def _draw_gaze_vector(
         _draw_text(image, label, (end[0] + 4, end[1] - 4), color=color, scale=0.35)
 
 
-def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
-    if not _has_complete_head_pose(record.head_pose):
-        return
-
-    origin = _nose_or_face_center(record)
-    if origin is None:
-        return
-
-    start = _point_pixel(origin, image)
-    face_box = record.face.bounding_box
-    if face_box is None:
-        length = _clamp(
-            min(image.shape[:2]) * _HEAD_AXIS_FRAME_LENGTH_SCALE,
-            _HEAD_AXIS_MIN_LENGTH_PX,
-            _HEAD_AXIS_MAX_LENGTH_PX,
-        )
-    else:
-        (x_min, y_min), (x_max, y_max) = _bbox_pixels(face_box, image)
-        length = _clamp(
-            min(x_max - x_min, y_max - y_min) * _HEAD_AXIS_FACE_LENGTH_SCALE,
-            _HEAD_AXIS_MIN_LENGTH_PX,
-            _HEAD_AXIS_MAX_LENGTH_PX,
-        )
-
-    roll = record.head_pose.roll_radians
-    yaw = record.head_pose.yaw_radians
-    pitch = record.head_pose.pitch_radians
-    assert roll is not None
-    assert yaw is not None
-    assert pitch is not None
-    x_end = _clip_pixel(
-        start[0] + round(math.cos(roll) * length),
-        start[1] + round(math.sin(roll) * length),
-        image,
-    )
-    y_end = _clip_pixel(
-        start[0] - round(math.sin(roll) * length),
-        start[1] + round(math.cos(roll) * length),
-        image,
-    )
-    z_end = _clip_pixel(
-        start[0] + round(yaw * length),
-        start[1] - round(pitch * length),
-        image,
-    )
-    _draw_axis_arrow(image, start, x_end, _HEAD_X_COLOR)
-    _draw_axis_arrow(image, start, y_end, _HEAD_Y_COLOR)
-    _draw_axis_arrow(image, start, z_end, _HEAD_Z_COLOR)
-
-
-def _draw_axis_arrow(image: np.ndarray, start: Pixel, end: Pixel, color: Color) -> None:
-    cv2.arrowedLine(
-        image,
-        start,
-        end,
-        _TEXT_SHADOW_COLOR,
-        _HEAD_AXIS_OUTLINE_THICKNESS,
-        line_type=cv2.LINE_AA,
-    )
-    cv2.arrowedLine(
-        image,
-        start,
-        end,
-        color,
-        _HEAD_AXIS_COLOR_THICKNESS,
-        line_type=cv2.LINE_AA,
-    )
-
-
 def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
     status_color = _status_color(record.status)
     lines = [
@@ -416,12 +337,6 @@ def _face_center(record: FrameRecord) -> Point2D | None:
         x=(bbox.x_min + bbox.x_max) / 2.0,
         y=(bbox.y_min + bbox.y_max) / 2.0,
     )
-
-
-def _nose_or_face_center(record: FrameRecord) -> Point2D | None:
-    if record.face.landmarks and len(record.face.landmarks) >= 3:
-        return record.face.landmarks[2]
-    return _face_center(record)
 
 
 def _bbox_pixels(bbox: BBox, image: np.ndarray) -> tuple[Pixel, Pixel]:
