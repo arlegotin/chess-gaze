@@ -219,6 +219,83 @@ const state = {{
     return cast(dict[str, object], json.loads(result.stdout))
 
 
+def _run_viewer_apply_scene_data_probe(body: str) -> dict[str, object]:
+    source = VIEWER_ASSET_PATH.read_text(encoding="utf-8")
+    apply_scene_data = _extract_js_function(source, "applySceneData")
+    script = f"""
+const DEFAULT_SPHERE_RADIUS_M = 0.7;
+const SPHERE_MIN_RADIUS_M = 0.35;
+const SPHERE_MAX_RADIUS_M = 1.2;
+const SPHERE_RADIUS_STEP_M = 0.01;
+const elements = {{
+  frameSlider: {{ max: "0", value: "0" }},
+  frameNumber: {{ max: "0", value: "0" }},
+  hitCount: {{ textContent: "" }},
+  controls: {{
+    sphereRadius: {{ min: "", max: "", step: "", value: "" }},
+  }},
+}};
+const state = {{ sceneData: null, frameIndex: -1 }};
+const calls = [];
+function updateSphereRadiusLabel() {{ calls.push("updateSphereRadiusLabel"); }}
+function setControlState(disabled) {{ calls.push(["setControlState", disabled]); }}
+function buildStaticScene() {{ calls.push("buildStaticScene"); }}
+function updateHitAreaErrorLabel() {{ calls.push("updateHitAreaErrorLabel"); }}
+function updateHitAreaOpacityLabel() {{ calls.push("updateHitAreaOpacityLabel"); }}
+function applyHitAreaOpacity() {{ calls.push("applyHitAreaOpacity"); }}
+function updateAccumulatedHitAreasForAngularError() {{
+  calls.push("updateAccumulatedHitAreasForAngularError");
+}}
+function resizeRenderer() {{ calls.push("resizeRenderer"); }}
+function setStatus(message, isError = false) {{
+  calls.push(["setStatus", message, isError]);
+}}
+function requestRender() {{ calls.push("requestRender"); }}
+function setFrameIndex(index) {{
+  calls.push(["setFrameIndex", index]);
+  const maxIndex = Math.max(0, (state.sceneData?.frames.length || 1) - 1);
+  state.frameIndex = Math.min(Math.max(Number(index) || 0, 0), maxIndex);
+  elements.frameSlider.value = String(state.frameIndex);
+  elements.frameNumber.value = String(state.frameIndex);
+}}
+{apply_scene_data}
+{body}
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return cast(dict[str, object], json.loads(result.stdout))
+
+
+def _run_viewer_status_probe(body: str) -> dict[str, object]:
+    source = VIEWER_ASSET_PATH.read_text(encoding="utf-8")
+    set_status = _extract_js_function(source, "setStatus")
+    script = f"""
+const elements = {{
+  frameStatus: {{ textContent: "initial frame" }},
+  fallbackStatus: {{
+    textContent: "initial fallback",
+    dataset: {{}},
+    hidden: false,
+  }},
+}};
+{set_status}
+{body}
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return cast(dict[str, object], json.loads(result.stdout))
+
+
 def _layout(run_dir: Path) -> RunLayout:
     return RunLayout(
         run_dir=run_dir,
@@ -719,6 +796,107 @@ def test_generated_viewer_removes_success_frame_status_sentence(
     assert "Waiting for local scene data." in html
     assert "Scene data unavailable:" in js
     assert "Scene viewer unavailable:" in bootstrap
+
+
+def test_viewer_status_surfaces_hide_on_success_and_show_errors() -> None:
+    result = _run_viewer_status_probe(
+        """
+setStatus("", false);
+const success = {
+  frameStatus: elements.frameStatus.textContent,
+  fallbackStatus: elements.fallbackStatus.textContent,
+  fallbackState: elements.fallbackStatus.dataset.state,
+  fallbackHidden: elements.fallbackStatus.hidden,
+};
+setStatus("Scene data unavailable: boom", true);
+const error = {
+  frameStatus: elements.frameStatus.textContent,
+  fallbackStatus: elements.fallbackStatus.textContent,
+  fallbackState: elements.fallbackStatus.dataset.state,
+  fallbackHidden: elements.fallbackStatus.hidden,
+};
+console.log(JSON.stringify({ success, error }));
+"""
+    )
+
+    assert result == {
+        "success": {
+            "frameStatus": "",
+            "fallbackStatus": "",
+            "fallbackState": "ready",
+            "fallbackHidden": True,
+        },
+        "error": {
+            "frameStatus": "Scene data unavailable: boom",
+            "fallbackStatus": "Scene data unavailable: boom",
+            "fallbackState": "error",
+            "fallbackHidden": False,
+        },
+    }
+
+
+def test_viewer_scene_data_load_initializes_frame_controls_to_last_frame() -> None:
+    result = _run_viewer_apply_scene_data_probe(
+        """
+applySceneData({
+  frames: [{ sphere_hit: { valid: true } }, {}, {}, {}, {}, {}, {}],
+  frame_count: 7,
+  gaze_sphere: { radius_m: 0.7 },
+});
+const nonEmpty = {
+  frameIndex: state.frameIndex,
+  sliderValue: elements.frameSlider.value,
+  sliderMax: elements.frameSlider.max,
+  numberValue: elements.frameNumber.value,
+  numberMax: elements.frameNumber.max,
+  setFrameIndexCalls: calls.filter(
+    (call) => Array.isArray(call) && call[0] === "setFrameIndex",
+  ),
+  setStatusCalls: calls.filter(
+    (call) => Array.isArray(call) && call[0] === "setStatus",
+  ),
+};
+calls.length = 0;
+applySceneData({
+  frames: [],
+  frame_count: 0,
+  gaze_sphere: { radius_m: 0.7 },
+});
+const empty = {
+  frameIndex: state.frameIndex,
+  sliderValue: elements.frameSlider.value,
+  sliderMax: elements.frameSlider.max,
+  numberValue: elements.frameNumber.value,
+  numberMax: elements.frameNumber.max,
+  setFrameIndexCalls: calls.filter(
+    (call) => Array.isArray(call) && call[0] === "setFrameIndex",
+  ),
+  setStatusCalls: calls.filter(
+    (call) => Array.isArray(call) && call[0] === "setStatus",
+  ),
+};
+console.log(JSON.stringify({ nonEmpty, empty }));
+"""
+    )
+
+    assert result["nonEmpty"] == {
+        "frameIndex": 6,
+        "sliderValue": "6",
+        "sliderMax": "6",
+        "numberValue": "6",
+        "numberMax": "6",
+        "setFrameIndexCalls": [["setFrameIndex", 6]],
+        "setStatusCalls": [["setStatus", "", False]],
+    }
+    assert result["empty"] == {
+        "frameIndex": 0,
+        "sliderValue": "0",
+        "sliderMax": "0",
+        "numberValue": "0",
+        "numberMax": "0",
+        "setFrameIndexCalls": [["setFrameIndex", 0]],
+        "setStatusCalls": [["setStatus", "", False]],
+    }
 
 
 def test_viewer_live_radius_hit_omits_persisted_fallback() -> None:

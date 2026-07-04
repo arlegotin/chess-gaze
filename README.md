@@ -173,8 +173,8 @@ assumption, not per-frame UniGaze confidence.
 The persisted artifacts use a default gaze-sphere radius of `0.700 m`, matching
 the previous plausible desktop display distance assumption. The viewer exposes a
 `Sphere Radius` control from `0.350 m` to `1.200 m`; changing it reprojects
-current and accumulated hit points and hit areas from the saved gaze rays onto
-the selected sphere radius without rewriting run artifacts.
+current and accumulated hit-area patches from the saved gaze rays onto the
+selected sphere radius without rewriting run artifacts.
 
 ## Scene Artifacts
 

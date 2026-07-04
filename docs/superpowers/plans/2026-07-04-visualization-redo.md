@@ -36,12 +36,12 @@
 - Consumes: generated `index.html`, `scene_viewer.js`, `styles.css`.
 - Produces: failing tests that describe the requested viewer behavior.
 
-- [ ] Update generated-selector tests so `toggle-hit-points` is absent and `toggle-hit-area`, angular-error, opacity, and status surfaces remain covered.
-- [ ] Update hit-area control assertions for `min="0.5"`, `value="0.5"`, label `0.5 deg`, and opacity `value="0.04"` / `4%`.
-- [ ] Add JS source assertions that hit-point query/render/toggle paths are gone.
-- [ ] Add source assertions that `applySceneData()` initializes with `setFrameIndex(maxIndex)` and does not call `setFrameIndex(0)`.
-- [ ] Add JS extraction/probe coverage for empty scene data and status-surface behavior.
-- [ ] Run the focused test selection and verify it fails for the expected old viewer behavior.
+- [x] Update generated-selector tests so `toggle-hit-points` is absent and `toggle-hit-area`, angular-error, opacity, and status surfaces remain covered.
+- [x] Update hit-area control assertions for `min="0.5"`, `value="0.5"`, label `0.5 deg`, and opacity `value="0.04"` / `4%`.
+- [x] Add JS source assertions that hit-point query/render/toggle paths are gone.
+- [x] Add source assertions that `applySceneData()` initializes with `setFrameIndex(maxIndex)` and does not call `setFrameIndex(0)`.
+- [x] Add JS extraction/probe coverage for empty scene data and status-surface behavior.
+- [x] Run the focused test selection and verify it fails for the expected old viewer behavior.
 
 ### Task 2: Implement Viewer Runtime And Template Changes
 
@@ -57,15 +57,15 @@
 - Consumes: tests from Task 1.
 - Produces: generated viewer assets satisfying the new contract.
 
-- [ ] Remove the `Hit Points` checkbox from `index.html`.
-- [ ] Change angular-error and opacity defaults in HTML and JS constants.
-- [ ] Remove current-hit material, accumulated hit-point cache fields, hit-point builders/updaters/visibility, and current-frame hit-point sphere rendering from JS.
-- [ ] Keep hit-count summary derived from valid sphere hits.
-- [ ] Change `applySceneData()` to initialize to the computed last index.
-- [ ] Split status handling so successful scene load clears/hides status surfaces while loading/error messages still write to both.
-- [ ] Update CSS so the fallback overlay can be hidden when ready and remove no-longer-needed hit-point styling only if unused.
-- [ ] Update the file-url bootstrap error text path in `scene_viewer.py` only if selectors or status semantics require it.
-- [ ] Run focused tests and iterate until green.
+- [x] Remove the `Hit Points` checkbox from `index.html`.
+- [x] Change angular-error and opacity defaults in HTML and JS constants.
+- [x] Remove current-hit material, accumulated hit-point cache fields, hit-point builders/updaters/visibility, and current-frame hit-point sphere rendering from JS.
+- [x] Keep hit-count summary derived from valid sphere hits.
+- [x] Change `applySceneData()` to initialize to the computed last index.
+- [x] Split status handling so successful scene load clears/hides status surfaces while loading/error messages still write to both.
+- [x] Update CSS so the fallback overlay can be hidden when ready and remove no-longer-needed hit-point styling only if unused.
+- [x] Update the file-url bootstrap error text path in `scene_viewer.py` only if selectors or status semantics require it.
+- [x] Run focused tests and iterate until green.
 
 ### Task 3: Update Docs, Review, And Verify
 
@@ -79,14 +79,14 @@
 - Consumes: implemented viewer behavior and test evidence.
 - Produces: current user-facing docs and closeout evidence.
 
-- [ ] Update README viewer text to remove hit-point visualization claims and document the new angular-error/opacity defaults.
-- [ ] Run focused viewer tests with loopback permission.
-- [ ] Run broad non-real-video pytest subset.
-- [ ] Run ruff check, ruff format check, and mypy.
-- [ ] Perform browser smoke if local serving/browser tools are available; otherwise record the exact blocker.
-- [ ] Run subagent review on the final diff and address important findings.
-- [ ] Write closeout with root cause, durable surface changed, tests, browser evidence/blockers, and residual risk.
-- [ ] Commit the final implementation and documentation changes.
+- [x] Update README viewer text to remove hit-point visualization claims and document the new angular-error/opacity defaults.
+- [x] Run focused viewer tests with loopback permission.
+- [x] Run broad non-real-video pytest subset.
+- [x] Run ruff check, ruff format check, and mypy.
+- [x] Perform browser smoke if local serving/browser tools are available; otherwise record the exact blocker.
+- [x] Run subagent review on the final diff and address important findings.
+- [x] Write closeout with root cause, durable surface changed, tests, browser evidence/blockers, and residual risk.
+- [x] Commit the final implementation and documentation changes.
 
 ## Self-Review
 
