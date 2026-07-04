@@ -33,11 +33,18 @@ _WARNING_COLOR: Color = (255, 220, 90)
 _OK_COLOR: Color = (90, 255, 140)
 _UNIGAZE_ARROW_THICKNESS = 4
 _UNIGAZE_ARROW_OUTLINE_THICKNESS = 5
-_UNIGAZE_ARROW_ANGLE_SCALE = 2.40
+_UNIGAZE_ARROW_MIN_ANGLE_RADIANS = 0.015
+_UNIGAZE_ARROW_REFERENCE_ANGLE_RADIANS = 0.25
+_UNIGAZE_ARROW_MIN_FACE_SCALE = 0.38
+_UNIGAZE_ARROW_MAX_FACE_SCALE = 0.55
+_UNIGAZE_ARROW_MIN_LENGTH_PX = 48.0
+_UNIGAZE_ARROW_MAX_LENGTH_PX = 90.0
 _HEAD_AXIS_COLOR_THICKNESS = 2
 _HEAD_AXIS_OUTLINE_THICKNESS = 3
-_HEAD_AXIS_FACE_LENGTH_SCALE = 0.30
+_HEAD_AXIS_FACE_LENGTH_SCALE = 0.26
 _HEAD_AXIS_FRAME_LENGTH_SCALE = 0.16
+_HEAD_AXIS_MIN_LENGTH_PX = 24.0
+_HEAD_AXIS_MAX_LENGTH_PX = 44.0
 
 
 def render_processed_frame(
@@ -139,6 +146,10 @@ def _draw_unigaze_vector(image: np.ndarray, record: FrameRecord) -> None:
     if origin is None:
         return
 
+    length_px = _unigaze_arrow_length_px(image, record)
+    if length_px is None:
+        return
+
     _draw_gaze_vector(
         image,
         origin,
@@ -146,9 +157,37 @@ def _draw_unigaze_vector(image: np.ndarray, record: FrameRecord) -> None:
         _APPEARANCE_GAZE_COLOR,
         label=None,
         thickness=_UNIGAZE_ARROW_THICKNESS,
-        angle_scale=_UNIGAZE_ARROW_ANGLE_SCALE,
+        length_px=length_px,
         outline=True,
         outline_thickness=_UNIGAZE_ARROW_OUTLINE_THICKNESS,
+    )
+
+
+def _unigaze_arrow_length_px(image: np.ndarray, record: FrameRecord) -> float | None:
+    bbox = record.face.bounding_box
+    gaze = record.appearance_gaze
+    if (
+        bbox is None
+        or not gaze.valid
+        or gaze.yaw_radians is None
+        or gaze.pitch_radians is None
+    ):
+        return None
+
+    (x_min, y_min), (x_max, y_max) = _bbox_pixels(bbox, image)
+    face_min = min(x_max - x_min, y_max - y_min)
+    angle_magnitude = math.hypot(gaze.yaw_radians, gaze.pitch_radians)
+    if face_min <= 0 or angle_magnitude < _UNIGAZE_ARROW_MIN_ANGLE_RADIANS:
+        return None
+
+    angle_factor = min(angle_magnitude / _UNIGAZE_ARROW_REFERENCE_ANGLE_RADIANS, 1.0)
+    face_scale = _UNIGAZE_ARROW_MIN_FACE_SCALE + (
+        (_UNIGAZE_ARROW_MAX_FACE_SCALE - _UNIGAZE_ARROW_MIN_FACE_SCALE) * angle_factor
+    )
+    return _clamp(
+        face_min * face_scale,
+        _UNIGAZE_ARROW_MIN_LENGTH_PX,
+        _UNIGAZE_ARROW_MAX_LENGTH_PX,
     )
 
 
@@ -160,7 +199,7 @@ def _draw_gaze_vector(
     *,
     label: str | None,
     thickness: int = 2,
-    angle_scale: float = 0.25,
+    length_px: float,
     outline: bool = False,
     outline_thickness: int | None = None,
 ) -> None:
@@ -168,10 +207,13 @@ def _draw_gaze_vector(
         return
 
     start = _point_pixel(origin, image)
-    pixels_per_radian = max(30.0, min(image.shape[:2]) * angle_scale)
+    angle_magnitude = math.hypot(gaze.yaw_radians, gaze.pitch_radians)
+    if angle_magnitude <= 0:
+        return
+
     end = _clip_pixel(
-        start[0] + round(gaze.yaw_radians * pixels_per_radian),
-        start[1] - round(gaze.pitch_radians * pixels_per_radian),
+        start[0] + round((gaze.yaw_radians / angle_magnitude) * length_px),
+        start[1] - round((gaze.pitch_radians / angle_magnitude) * length_px),
         image,
     )
     if outline:
@@ -211,11 +253,17 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
     start = _point_pixel(origin, image)
     face_box = record.face.bounding_box
     if face_box is None:
-        length = max(24.0, min(image.shape[:2]) * _HEAD_AXIS_FRAME_LENGTH_SCALE)
+        length = _clamp(
+            min(image.shape[:2]) * _HEAD_AXIS_FRAME_LENGTH_SCALE,
+            _HEAD_AXIS_MIN_LENGTH_PX,
+            _HEAD_AXIS_MAX_LENGTH_PX,
+        )
     else:
         (x_min, y_min), (x_max, y_max) = _bbox_pixels(face_box, image)
-        length = max(
-            24.0, min(x_max - x_min, y_max - y_min) * _HEAD_AXIS_FACE_LENGTH_SCALE
+        length = _clamp(
+            min(x_max - x_min, y_max - y_min) * _HEAD_AXIS_FACE_LENGTH_SCALE,
+            _HEAD_AXIS_MIN_LENGTH_PX,
+            _HEAD_AXIS_MAX_LENGTH_PX,
         )
 
     roll = record.head_pose.roll_radians
@@ -410,3 +458,7 @@ def _clip_pixel(x: int, y: int, image: np.ndarray) -> Pixel:
     clipped_x = min(max(x, 0), width - 1)
     clipped_y = min(max(y, 0), height - 1)
     return clipped_x, clipped_y
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return min(max(value, lower), upper)
