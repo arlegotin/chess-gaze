@@ -8,7 +8,7 @@
 
 ---
 
-## What it does
+## Video-to-gaze pipeline
 
 When you run `chess-gaze analyze <video>`, it:
 
@@ -22,7 +22,7 @@ local weights.
 
 See [the demo](https://artemlegotin.com/chess-gaze-demo).
 
-## Use it
+## Run the analyzer
 
 ```sh
 uv sync
@@ -60,7 +60,7 @@ portable CPU run:
 uv run chess-gaze analyze video.mp4 --unigaze-device cpu --unigaze-batch-size 1
 ```
 
-## Output
+## Analysis artifacts
 
 Runs land here:
 
@@ -76,17 +76,17 @@ Core outputs:
 - `viewer/scene-data.json`: viewer data for the local server path.
 - Processed frame JPEGs (if `--save-frames` added).
 
-## Viewer
+## Inspect the gaze scene
 
 The viewer shows a head model, eyes, the UniGaze ray, a gaze sphere, and translucent hit-area patches. Scrub frames, play the run, switch instant or accumulated hits, and adjust display assumptions such as sphere radius and angular error.
 
 Run artifacts stay local. The viewer loads pinned Three.js `0.185.0` modules from jsDelivr when it renders.
 
-## Built on
+## Runtime stack
 
 Python 3.12, `uv`, PyAV, MediaPipe Face Landmarker, UniGaze, PyTorch, OpenCV, Pydantic, Pillow, and Three.js.
 
-## Develop
+## Development checks
 
 ```sh
 uv run pytest
