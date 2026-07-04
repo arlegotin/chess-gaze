@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
+import chess_gaze.visualization as visualization
 from chess_gaze.errors import ErrorCode
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
@@ -385,6 +386,17 @@ def test_processed_frame_does_not_draw_unigaze_label_text(tmp_path: Path) -> Non
         )
         == 0
     )
+
+
+def test_processed_frame_arrow_style_uses_subdued_strokes() -> None:
+    assert visualization._APPEARANCE_GAZE_COLOR == (32, 176, 204)
+    assert visualization._UNIGAZE_ARROW_THICKNESS == 3
+    assert visualization._UNIGAZE_ARROW_OUTLINE_THICKNESS == 4
+    assert visualization._HEAD_X_COLOR == (180, 96, 96)
+    assert visualization._HEAD_Y_COLOR == (100, 170, 100)
+    assert visualization._HEAD_Z_COLOR == (100, 135, 185)
+    assert visualization._HEAD_AXIS_COLOR_THICKNESS == 1
+    assert visualization._HEAD_AXIS_OUTLINE_THICKNESS == 2
 
 
 def test_current_frame_record_rejects_unvalidated_candidate_overlay_fields() -> None:

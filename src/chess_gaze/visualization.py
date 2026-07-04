@@ -21,16 +21,20 @@ _RIGHT_EYE_COLOR: Color = (255, 120, 80)
 _IRIS_CENTER_COLOR: Color = (255, 255, 255)
 _IRIS_LANDMARK_COLOR: Color = (160, 255, 255)
 _GEOMETRIC_GAZE_COLOR: Color = (255, 0, 255)
-_APPEARANCE_GAZE_COLOR: Color = (0, 220, 255)
+_APPEARANCE_GAZE_COLOR: Color = (32, 176, 204)
 _RECOMMENDED_GAZE_COLOR: Color = (255, 255, 255)
-_HEAD_X_COLOR: Color = (255, 80, 80)
-_HEAD_Y_COLOR: Color = (80, 255, 80)
-_HEAD_Z_COLOR: Color = (80, 160, 255)
+_HEAD_X_COLOR: Color = (180, 96, 96)
+_HEAD_Y_COLOR: Color = (100, 170, 100)
+_HEAD_Z_COLOR: Color = (100, 135, 185)
 _TEXT_COLOR: Color = (255, 255, 255)
 _TEXT_SHADOW_COLOR: Color = (0, 0, 0)
 _ERROR_COLOR: Color = (255, 90, 90)
 _WARNING_COLOR: Color = (255, 220, 90)
 _OK_COLOR: Color = (90, 255, 140)
+_UNIGAZE_ARROW_THICKNESS = 3
+_UNIGAZE_ARROW_OUTLINE_THICKNESS = 4
+_HEAD_AXIS_COLOR_THICKNESS = 1
+_HEAD_AXIS_OUTLINE_THICKNESS = 2
 
 
 def render_processed_frame(
@@ -138,9 +142,10 @@ def _draw_unigaze_vector(image: np.ndarray, record: FrameRecord) -> None:
         record.appearance_gaze,
         _APPEARANCE_GAZE_COLOR,
         label=None,
-        thickness=4,
+        thickness=_UNIGAZE_ARROW_THICKNESS,
         length_scale=0.36,
         outline=True,
+        outline_thickness=_UNIGAZE_ARROW_OUTLINE_THICKNESS,
     )
 
 
@@ -154,6 +159,7 @@ def _draw_gaze_vector(
     thickness: int = 2,
     length_scale: float = 0.25,
     outline: bool = False,
+    outline_thickness: int | None = None,
 ) -> None:
     if not gaze.valid or gaze.yaw_radians is None or gaze.pitch_radians is None:
         return
@@ -166,12 +172,15 @@ def _draw_gaze_vector(
         image,
     )
     if outline:
+        resolved_outline_thickness = (
+            thickness + 2 if outline_thickness is None else outline_thickness
+        )
         cv2.arrowedLine(
             image,
             start,
             end,
             _TEXT_SHADOW_COLOR,
-            thickness + 3,
+            resolved_outline_thickness,
             line_type=cv2.LINE_AA,
             tipLength=0.28,
         )
@@ -231,8 +240,22 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
 
 
 def _draw_axis_arrow(image: np.ndarray, start: Pixel, end: Pixel, color: Color) -> None:
-    cv2.arrowedLine(image, start, end, _TEXT_SHADOW_COLOR, 5, line_type=cv2.LINE_AA)
-    cv2.arrowedLine(image, start, end, color, 3, line_type=cv2.LINE_AA)
+    cv2.arrowedLine(
+        image,
+        start,
+        end,
+        _TEXT_SHADOW_COLOR,
+        _HEAD_AXIS_OUTLINE_THICKNESS,
+        line_type=cv2.LINE_AA,
+    )
+    cv2.arrowedLine(
+        image,
+        start,
+        end,
+        color,
+        _HEAD_AXIS_COLOR_THICKNESS,
+        line_type=cv2.LINE_AA,
+    )
 
 
 def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
