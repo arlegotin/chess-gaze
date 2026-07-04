@@ -21,20 +21,23 @@ _RIGHT_EYE_COLOR: Color = (255, 120, 80)
 _IRIS_CENTER_COLOR: Color = (255, 255, 255)
 _IRIS_LANDMARK_COLOR: Color = (160, 255, 255)
 _GEOMETRIC_GAZE_COLOR: Color = (255, 0, 255)
-_APPEARANCE_GAZE_COLOR: Color = (32, 176, 204)
+_APPEARANCE_GAZE_COLOR: Color = (0, 205, 230)
 _RECOMMENDED_GAZE_COLOR: Color = (255, 255, 255)
-_HEAD_X_COLOR: Color = (180, 96, 96)
-_HEAD_Y_COLOR: Color = (100, 170, 100)
-_HEAD_Z_COLOR: Color = (100, 135, 185)
+_HEAD_X_COLOR: Color = (210, 115, 115)
+_HEAD_Y_COLOR: Color = (115, 210, 115)
+_HEAD_Z_COLOR: Color = (115, 155, 220)
 _TEXT_COLOR: Color = (255, 255, 255)
 _TEXT_SHADOW_COLOR: Color = (0, 0, 0)
 _ERROR_COLOR: Color = (255, 90, 90)
 _WARNING_COLOR: Color = (255, 220, 90)
 _OK_COLOR: Color = (90, 255, 140)
-_UNIGAZE_ARROW_THICKNESS = 3
-_UNIGAZE_ARROW_OUTLINE_THICKNESS = 4
-_HEAD_AXIS_COLOR_THICKNESS = 1
-_HEAD_AXIS_OUTLINE_THICKNESS = 2
+_UNIGAZE_ARROW_THICKNESS = 4
+_UNIGAZE_ARROW_OUTLINE_THICKNESS = 5
+_UNIGAZE_ARROW_ANGLE_SCALE = 2.40
+_HEAD_AXIS_COLOR_THICKNESS = 2
+_HEAD_AXIS_OUTLINE_THICKNESS = 3
+_HEAD_AXIS_FACE_LENGTH_SCALE = 0.30
+_HEAD_AXIS_FRAME_LENGTH_SCALE = 0.16
 
 
 def render_processed_frame(
@@ -57,8 +60,8 @@ def render_processed_frame(
     _draw_eye(canvas, record.left_eye, _LEFT_EYE_COLOR, "L")
     _draw_eye(canvas, record.right_eye, _RIGHT_EYE_COLOR, "R")
 
-    _draw_unigaze_vector(canvas, record)
     _draw_head_pose(canvas, record)
+    _draw_unigaze_vector(canvas, record)
     _draw_status_text(canvas, record)
 
     # save_bgr_jpeg owns the OpenCV BGR conversion boundary; canvas remains RGB here.
@@ -143,7 +146,7 @@ def _draw_unigaze_vector(image: np.ndarray, record: FrameRecord) -> None:
         _APPEARANCE_GAZE_COLOR,
         label=None,
         thickness=_UNIGAZE_ARROW_THICKNESS,
-        length_scale=0.36,
+        angle_scale=_UNIGAZE_ARROW_ANGLE_SCALE,
         outline=True,
         outline_thickness=_UNIGAZE_ARROW_OUTLINE_THICKNESS,
     )
@@ -157,7 +160,7 @@ def _draw_gaze_vector(
     *,
     label: str | None,
     thickness: int = 2,
-    length_scale: float = 0.25,
+    angle_scale: float = 0.25,
     outline: bool = False,
     outline_thickness: int | None = None,
 ) -> None:
@@ -165,10 +168,10 @@ def _draw_gaze_vector(
         return
 
     start = _point_pixel(origin, image)
-    length = max(30.0, min(image.shape[:2]) * length_scale)
+    pixels_per_radian = max(30.0, min(image.shape[:2]) * angle_scale)
     end = _clip_pixel(
-        start[0] + round(gaze.yaw_radians * length),
-        start[1] - round(gaze.pitch_radians * length),
+        start[0] + round(gaze.yaw_radians * pixels_per_radian),
+        start[1] - round(gaze.pitch_radians * pixels_per_radian),
         image,
     )
     if outline:
@@ -208,10 +211,12 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
     start = _point_pixel(origin, image)
     face_box = record.face.bounding_box
     if face_box is None:
-        length = max(24.0, min(image.shape[:2]) * 0.18)
+        length = max(24.0, min(image.shape[:2]) * _HEAD_AXIS_FRAME_LENGTH_SCALE)
     else:
         (x_min, y_min), (x_max, y_max) = _bbox_pixels(face_box, image)
-        length = max(24.0, min(x_max - x_min, y_max - y_min) * 0.35)
+        length = max(
+            24.0, min(x_max - x_min, y_max - y_min) * _HEAD_AXIS_FACE_LENGTH_SCALE
+        )
 
     roll = record.head_pose.roll_radians
     yaw = record.head_pose.yaw_radians
