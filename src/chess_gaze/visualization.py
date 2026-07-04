@@ -53,8 +53,7 @@ def render_processed_frame(
     _draw_eye(canvas, record.left_eye, _LEFT_EYE_COLOR, "L")
     _draw_eye(canvas, record.right_eye, _RIGHT_EYE_COLOR, "R")
 
-    _draw_eye_gaze_vectors(canvas, record)
-    _draw_face_gaze_vectors(canvas, record)
+    _draw_unigaze_vector(canvas, record)
     _draw_head_pose(canvas, record)
     _draw_status_text(canvas, record)
 
@@ -80,7 +79,7 @@ def _draw_box(
     image: np.ndarray, bbox: BBox, color: Color, *, thickness: int = 2
 ) -> None:
     top_left, bottom_right = _bbox_pixels(bbox, image)
-    cv2.rectangle(image, top_left, bottom_right, color, thickness, lineType=cv2.LINE_AA)
+    _draw_corner_box(image, top_left, bottom_right, color, thickness=thickness)
 
 
 def _draw_circle(
@@ -97,16 +96,9 @@ def _draw_circle(
 
 
 def _draw_eye(image: np.ndarray, eye: EyeRecord, color: Color, label: str) -> None:
+    del label
     if eye.bounding_box is not None:
-        _draw_box(image, eye.bounding_box, color, thickness=1)
-
-    if eye.iris_landmarks:
-        iris_pixels = [_point_pixel(point, image) for point in eye.iris_landmarks]
-        if len(iris_pixels) >= 3:
-            contour = np.array(iris_pixels, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(image, [contour], isClosed=True, color=color, thickness=1)
-        for point in eye.iris_landmarks:
-            _draw_circle(image, point, _IRIS_LANDMARK_COLOR, radius=1, filled=True)
+        _draw_eye_corner(image, eye.bounding_box, color)
 
     if eye.pupil_center is not None:
         center = _point_pixel(eye.pupil_center, image)
@@ -118,30 +110,10 @@ def _draw_eye(image: np.ndarray, eye: EyeRecord, color: Color, label: str) -> No
             -1,
             lineType=cv2.LINE_AA,
         )
-        cv2.circle(image, center, 6, color, 1, lineType=cv2.LINE_AA)
-        _draw_text(
-            image,
-            label,
-            (center[0] + 7, center[1] + 4),
-            color=color,
-            scale=0.35,
-        )
+        cv2.circle(image, center, 5, color, 1, lineType=cv2.LINE_AA)
 
 
-def _draw_eye_gaze_vectors(image: np.ndarray, record: FrameRecord) -> None:
-    for eye in (record.left_eye, record.right_eye):
-        if eye.pupil_center is None:
-            continue
-        _draw_gaze_vector(
-            image,
-            eye.pupil_center,
-            record.geometric_gaze,
-            _GEOMETRIC_GAZE_COLOR,
-            label=None,
-        )
-
-
-def _draw_face_gaze_vectors(image: np.ndarray, record: FrameRecord) -> None:
+def _draw_unigaze_vector(image: np.ndarray, record: FrameRecord) -> None:
     origin = _face_center(record)
     if origin is None:
         return
@@ -151,14 +123,10 @@ def _draw_face_gaze_vectors(image: np.ndarray, record: FrameRecord) -> None:
         origin,
         record.appearance_gaze,
         _APPEARANCE_GAZE_COLOR,
-        label="UniGaze",
-    )
-    _draw_gaze_vector(
-        image,
-        origin,
-        record.recommended_gaze,
-        _RECOMMENDED_GAZE_COLOR,
-        label="rec",
+        label=None,
+        thickness=4,
+        length_scale=0.36,
+        outline=True,
     )
 
 
@@ -169,18 +137,41 @@ def _draw_gaze_vector(
     color: Color,
     *,
     label: str | None,
+    thickness: int = 2,
+    length_scale: float = 0.25,
+    outline: bool = False,
 ) -> None:
     if not gaze.valid or gaze.yaw_radians is None or gaze.pitch_radians is None:
         return
 
     start = _point_pixel(origin, image)
-    length = max(24.0, min(image.shape[:2]) * 0.25)
+    length = max(30.0, min(image.shape[:2]) * length_scale)
     end = _clip_pixel(
         start[0] + round(gaze.yaw_radians * length),
         start[1] - round(gaze.pitch_radians * length),
         image,
     )
-    cv2.arrowedLine(image, start, end, color, 2, line_type=cv2.LINE_AA, tipLength=0.25)
+    if outline:
+        start, end = _backstep_arrow(start, end, image)
+    if outline:
+        cv2.arrowedLine(
+            image,
+            start,
+            end,
+            _TEXT_SHADOW_COLOR,
+            thickness + 3,
+            line_type=cv2.LINE_AA,
+            tipLength=0.28,
+        )
+    cv2.arrowedLine(
+        image,
+        start,
+        end,
+        color,
+        thickness,
+        line_type=cv2.LINE_AA,
+        tipLength=0.28,
+    )
     if label is not None:
         _draw_text(image, label, (end[0] + 4, end[1] - 4), color=color, scale=0.35)
 
@@ -189,7 +180,7 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
     if not _has_complete_head_pose(record.head_pose):
         return
 
-    origin = _nose_or_face_center(record)
+    origin = _head_pose_origin(record)
     if origin is None:
         return
 
@@ -222,9 +213,14 @@ def _draw_head_pose(image: np.ndarray, record: FrameRecord) -> None:
         start[1] - round(pitch * length),
         image,
     )
-    cv2.arrowedLine(image, start, x_end, _HEAD_X_COLOR, 2, line_type=cv2.LINE_AA)
-    cv2.arrowedLine(image, start, y_end, _HEAD_Y_COLOR, 2, line_type=cv2.LINE_AA)
-    cv2.arrowedLine(image, start, z_end, _HEAD_Z_COLOR, 2, line_type=cv2.LINE_AA)
+    _draw_axis_arrow(image, start, x_end, _HEAD_X_COLOR)
+    _draw_axis_arrow(image, start, y_end, _HEAD_Y_COLOR)
+    _draw_axis_arrow(image, start, z_end, _HEAD_Z_COLOR)
+
+
+def _draw_axis_arrow(image: np.ndarray, start: Pixel, end: Pixel, color: Color) -> None:
+    cv2.arrowedLine(image, start, end, _TEXT_SHADOW_COLOR, 5, line_type=cv2.LINE_AA)
+    cv2.arrowedLine(image, start, end, color, 3, line_type=cv2.LINE_AA)
 
 
 def _draw_status_text(image: np.ndarray, record: FrameRecord) -> None:
@@ -334,6 +330,21 @@ def _face_center(record: FrameRecord) -> Point2D | None:
     )
 
 
+def _head_pose_origin(record: FrameRecord) -> Point2D | None:
+    origin = _nose_or_face_center(record)
+    if origin is None:
+        return None
+
+    face_box = record.face.bounding_box
+    if face_box is not None and face_box.space is origin.space:
+        offset = (face_box.y_max - face_box.y_min) * 0.08
+    elif origin.space is CoordinateSpace.IMAGE_PX:
+        offset = 8.0
+    else:
+        offset = 0.05
+    return Point2D(space=origin.space, x=origin.x, y=origin.y + offset)
+
+
 def _nose_or_face_center(record: FrameRecord) -> Point2D | None:
     if record.face.landmarks and len(record.face.landmarks) >= 3:
         return record.face.landmarks[2]
@@ -367,6 +378,130 @@ def _point_pixel(point: Point2D, image: np.ndarray) -> Pixel:
             image,
         )
     return _clip_pixel(round(point.x), round(point.y), image)
+
+
+def _draw_eye_corner(image: np.ndarray, bbox: BBox, color: Color) -> None:
+    top_left, bottom_right = _bbox_pixels(bbox, image)
+    _draw_corner_box(
+        image,
+        top_left,
+        bottom_right,
+        color,
+        thickness=1,
+        corners=("top_left",),
+        corner_length=8,
+    )
+
+
+def _draw_corner_box(
+    image: np.ndarray,
+    top_left: Pixel,
+    bottom_right: Pixel,
+    color: Color,
+    *,
+    thickness: int,
+    corners: tuple[str, ...] = ("top_left", "top_right", "bottom_left", "bottom_right"),
+    corner_length: int | None = None,
+) -> None:
+    width = max(1, bottom_right[0] - top_left[0])
+    height = max(1, bottom_right[1] - top_left[1])
+    length = corner_length or max(8, min(width, height) // 5)
+    length = min(length, width, height)
+
+    if "top_left" in corners:
+        cv2.line(
+            image,
+            top_left,
+            _clip_pixel(top_left[0] + length, top_left[1], image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+        cv2.line(
+            image,
+            top_left,
+            _clip_pixel(top_left[0], top_left[1] + length, image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+    if "top_right" in corners:
+        corner = bottom_right[0], top_left[1]
+        cv2.line(
+            image,
+            corner,
+            _clip_pixel(corner[0] - length, corner[1], image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+        cv2.line(
+            image,
+            corner,
+            _clip_pixel(corner[0], corner[1] + length, image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+    if "bottom_left" in corners:
+        corner = top_left[0], bottom_right[1]
+        cv2.line(
+            image,
+            corner,
+            _clip_pixel(corner[0] + length, corner[1], image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+        cv2.line(
+            image,
+            corner,
+            _clip_pixel(corner[0], corner[1] - length, image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+    if "bottom_right" in corners:
+        corner = bottom_right
+        cv2.line(
+            image,
+            corner,
+            _clip_pixel(corner[0] - length, corner[1], image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+        cv2.line(
+            image,
+            corner,
+            _clip_pixel(corner[0], corner[1] - length, image),
+            color,
+            thickness,
+            lineType=cv2.LINE_AA,
+        )
+
+
+def _backstep_arrow(start: Pixel, end: Pixel, image: np.ndarray) -> tuple[Pixel, Pixel]:
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    pixel_length = math.hypot(dx, dy)
+    if pixel_length <= 0.0:
+        return start, end
+
+    backstep = min(3.0, pixel_length / 2.0)
+    unit_x = dx / pixel_length
+    unit_y = dy / pixel_length
+    shifted_start = _clip_pixel(
+        round(start[0] - unit_x * backstep),
+        round(start[1] - unit_y * backstep),
+        image,
+    )
+    shifted_end = _clip_pixel(
+        round(end[0] - unit_x * backstep),
+        round(end[1] - unit_y * backstep),
+        image,
+    )
+    return shifted_start, shifted_end
 
 
 def _clip_pixel(x: int, y: int, image: np.ndarray) -> Pixel:

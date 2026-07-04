@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import numpy as np
@@ -23,21 +23,12 @@ from chess_gaze.frame_records import (
 )
 from chess_gaze.gaze_observation import (
     FaceModelGaze,
-    GazeThresholds,
     NormalizedFaceCrop,
-    compute_per_eye_geometric_gaze,
     normalize_face_crop,
-    synthesize_recommended_gaze,
 )
 from chess_gaze.head_pose import HeadPoseObservation, ImageSize, estimate_head_pose
 
-DEFAULT_RECOMMENDED_GAZE_MAX_PAIRWISE_DELTA_RADIANS = 0.35
-FRAME_WARNING_ERROR_CODES = frozenset(
-    {
-        ErrorCode.GAZE_ESTIMATORS_DISAGREE,
-        ErrorCode.MULTIPLE_FACE_CANDIDATES,
-    }
-)
+FRAME_WARNING_ERROR_CODES = frozenset({ErrorCode.MULTIPLE_FACE_CANDIDATES})
 
 
 class EyeObserver(Protocol):
@@ -87,9 +78,6 @@ class _FrameEvidence:
     left_eye: EyeRecord
     right_eye: EyeRecord
     head_pose_record: HeadPoseRecord
-    left_geometric: GazeAngles
-    right_geometric: GazeAngles
-    geometric_gaze: GazeAngles
     normalized_face_crop: NormalizedFaceCrop | None
 
 
@@ -103,13 +91,6 @@ class ModelBackedFrameObserver:
     head_pose_estimator: HeadPoseEstimator = estimate_head_pose
     face_crop_normalizer: FaceCropNormalizer = normalize_face_crop
     save_crop_images: bool = False
-    gaze_thresholds: GazeThresholds = field(
-        default_factory=lambda: GazeThresholds(
-            max_pairwise_angle_delta_radians=(
-                DEFAULT_RECOMMENDED_GAZE_MAX_PAIRWISE_DELTA_RADIANS
-            )
-        )
-    )
 
     def __call__(self, frame: Any) -> FrameRecord:
         return self.observe_batch([frame])[0]
@@ -213,9 +194,6 @@ class ModelBackedFrameObserver:
                     roll_radians=None,
                     reason_invalid=ErrorCode.HEAD_POSE_INVALID,
                 ),
-                left_geometric=_invalid_gaze(ErrorCode.LEFT_EYE_NOT_FOUND),
-                right_geometric=_invalid_gaze(ErrorCode.RIGHT_EYE_NOT_FOUND),
-                geometric_gaze=_invalid_gaze(ErrorCode.FACE_NOT_FOUND),
                 normalized_face_crop=None,
             )
 
@@ -257,17 +235,6 @@ class ModelBackedFrameObserver:
                 ),
             )
 
-        left_geometric = compute_per_eye_geometric_gaze(
-            eye_pair.left,
-            head_pose,
-            missing_reason=ErrorCode.LEFT_EYE_NOT_FOUND,
-        )
-        right_geometric = compute_per_eye_geometric_gaze(
-            eye_pair.right,
-            head_pose,
-            missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
-        )
-        geometric_gaze = _combine_eye_gazes(left_geometric, right_geometric)
         normalized_face_crop = self._normalized_face_crop(
             frame.rgb,
             selected_face,
@@ -283,9 +250,6 @@ class ModelBackedFrameObserver:
             left_eye=left_eye,
             right_eye=right_eye,
             head_pose_record=head_pose_record,
-            left_geometric=left_geometric,
-            right_geometric=right_geometric,
-            geometric_gaze=geometric_gaze,
             normalized_face_crop=normalized_face_crop,
         )
 
@@ -295,24 +259,6 @@ class ModelBackedFrameObserver:
         appearance_gaze: FaceModelGaze,
     ) -> FrameRecord:
         appearance_gaze_record = _face_model_gaze_record(appearance_gaze)
-        recommended = synthesize_recommended_gaze(
-            evidence.left_geometric,
-            evidence.right_geometric,
-            appearance_gaze,
-            thresholds=self.gaze_thresholds,
-        ).gaze
-        if not recommended.valid and recommended.reason_invalid is not None:
-            _append_error_once(
-                evidence.errors,
-                ErrorRecord(
-                    code=recommended.reason_invalid,
-                    message=(
-                        "Recommended gaze is invalid: "
-                        f"{recommended.reason_invalid.value}."
-                    ),
-                ),
-            )
-
         return FrameRecord(
             frame_id=evidence.frame.frame_id,
             frame_index=evidence.frame.frame_index,
@@ -323,16 +269,15 @@ class ModelBackedFrameObserver:
                 right_eye=evidence.right_eye,
                 head_pose=evidence.head_pose_record,
                 appearance_gaze=appearance_gaze,
-                recommended_gaze=recommended,
             ),
             timestamp_seconds=evidence.frame.timestamp_seconds,
             face=evidence.face_record,
             left_eye=evidence.left_eye,
             right_eye=evidence.right_eye,
             head_pose=evidence.head_pose_record,
-            geometric_gaze=evidence.geometric_gaze,
+            geometric_gaze=_invalid_gaze(ErrorCode.GAZE_MODEL_FAILED),
             appearance_gaze=appearance_gaze_record,
-            recommended_gaze=recommended,
+            recommended_gaze=appearance_gaze_record,
             errors=evidence.errors,
         )
 
@@ -468,27 +413,6 @@ def _head_pose_record(head_pose: HeadPoseObservation) -> HeadPoseRecord:
     )
 
 
-def _combine_eye_gazes(left: GazeAngles, right: GazeAngles) -> GazeAngles:
-    if (
-        left.valid
-        and right.valid
-        and left.pitch_radians is not None
-        and left.yaw_radians is not None
-        and right.pitch_radians is not None
-        and right.yaw_radians is not None
-    ):
-        return GazeAngles(
-            valid=True,
-            yaw_radians=(left.yaw_radians + right.yaw_radians) / 2.0,
-            pitch_radians=(left.pitch_radians + right.pitch_radians) / 2.0,
-            reason_invalid=None,
-        )
-
-    return _invalid_gaze(
-        left.reason_invalid or right.reason_invalid or ErrorCode.GAZE_MODEL_FAILED
-    )
-
-
 def _face_model_gaze_record(face_gaze: FaceModelGaze) -> GazeAngles:
     if (
         face_gaze.valid
@@ -534,7 +458,6 @@ def _frame_status(
     right_eye: EyeRecord,
     head_pose: HeadPoseRecord,
     appearance_gaze: FaceModelGaze,
-    recommended_gaze: GazeAngles,
 ) -> FrameStatus:
     if not (
         face.present
@@ -545,27 +468,12 @@ def _frame_status(
     ):
         return FrameStatus.ERROR
 
-    if not recommended_gaze.valid:
-        if _warning_only_recommended_gaze_disagreement(errors, recommended_gaze):
-            return FrameStatus.WARNING
-        return FrameStatus.ERROR
-
     if errors:
         if _only_warning_errors(errors):
             return FrameStatus.WARNING
         return FrameStatus.ERROR
 
     return FrameStatus.OK
-
-
-def _warning_only_recommended_gaze_disagreement(
-    errors: list[ErrorRecord], recommended_gaze: GazeAngles
-) -> bool:
-    return (
-        not recommended_gaze.valid
-        and recommended_gaze.reason_invalid is ErrorCode.GAZE_ESTIMATORS_DISAGREE
-        and _only_warning_errors(errors)
-    )
 
 
 def _only_warning_errors(errors: list[ErrorRecord]) -> bool:
