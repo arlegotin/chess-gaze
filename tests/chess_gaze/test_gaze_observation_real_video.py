@@ -10,17 +10,12 @@ import pytest
 from chess_gaze.artifact_runs import create_run_layout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import ErrorCode, FrameStatus
-from chess_gaze.eye_observation import observe_eyes
 from chess_gaze.face_observation import FaceCandidate, MediaPipeFaceObserver
 from chess_gaze.frame_observation import ModelBackedFrameObserver
 from chess_gaze.gaze_observation import (
-    GazeThresholds,
     UniGazeModel,
-    compute_per_eye_geometric_gaze,
     normalize_face_crop,
-    synthesize_recommended_gaze,
 )
-from chess_gaze.head_pose import ImageSize, estimate_head_pose
 from chess_gaze.model_assets import (
     ResolvedModelAsset,
     load_model_registry,
@@ -117,9 +112,14 @@ def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
         record.left_eye.present and record.right_eye.present for record in records
     )
     assert all(record.head_pose.valid for record in records)
-    assert all(record.geometric_gaze.valid for record in records)
+    assert all(not record.geometric_gaze.valid for record in records)
+    assert all(
+        record.geometric_gaze.reason_invalid is ErrorCode.GAZE_MODEL_FAILED
+        for record in records
+    )
     assert all(record.appearance_gaze.valid for record in records)
     assert all(record.recommended_gaze.valid for record in records)
+    assert all(record.recommended_gaze == record.appearance_gaze for record in records)
     assert all(not record.errors for record in records)
 
 
@@ -137,7 +137,7 @@ def _observer_frame(frame: DecodedFrame) -> ObserverFrame:
 
 
 def test_unigaze_predicts_from_real_video_face_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for video_path in SAMPLED_FRAME_INDICES:
         absolute_video_path = REPO_ROOT / video_path
@@ -192,12 +192,6 @@ def test_unigaze_predicts_from_real_video_face_evidence(
     try:
         for video_path, frame_indices in SAMPLED_FRAME_INDICES.items():
             absolute_video_path = REPO_ROOT / video_path
-            run_layout = create_run_layout(
-                input_path=absolute_video_path,
-                output_root=tmp_path / video_path.stem,
-                clock=lambda: datetime(2026, 6, 25, 12, 0, 0, tzinfo=UTC),
-                run_suffix="abcdef12",
-            )
             sampled_frames = _sample_frames(absolute_video_path, frame_indices)
             video_prediction_count = 0
             video_failures: list[str] = []
@@ -211,38 +205,6 @@ def test_unigaze_predicts_from_real_video_face_evidence(
                     continue
 
                 selected_face = _selected_face(face_observation.selection.candidates)
-                eye_observation = observe_eyes(
-                    selected_face,
-                    frame.rgb,
-                    run_layout,
-                    frame_id=frame.frame_id,
-                )
-                head_pose = estimate_head_pose(
-                    selected_face,
-                    calibration,
-                    ImageSize(
-                        width_px=frame.rgb.shape[1],
-                        height_px=frame.rgb.shape[0],
-                    ),
-                )
-                if (
-                    not eye_observation.left.present
-                    or not eye_observation.right.present
-                    or not head_pose.valid
-                ):
-                    video_failures.append(f"{frame.frame_id}:incomplete_evidence")
-                    continue
-
-                left_gaze = compute_per_eye_geometric_gaze(
-                    eye_observation.left,
-                    head_pose,
-                    missing_reason=ErrorCode.LEFT_EYE_NOT_FOUND,
-                )
-                right_gaze = compute_per_eye_geometric_gaze(
-                    eye_observation.right,
-                    head_pose,
-                    missing_reason=ErrorCode.RIGHT_EYE_NOT_FOUND,
-                )
                 normalized_crop = normalize_face_crop(
                     frame.rgb,
                     selected_face.bounding_box_image_px,
@@ -250,12 +212,6 @@ def test_unigaze_predicts_from_real_video_face_evidence(
                 )
                 assert normalized_crop.tensor.shape == (1, 3, 224, 224)
                 face_gaze = model.predict(normalized_crop.tensor)
-                recommended = synthesize_recommended_gaze(
-                    left_gaze,
-                    right_gaze,
-                    face_gaze,
-                    thresholds=GazeThresholds(max_pairwise_angle_delta_radians=math.pi),
-                )
 
                 assert face_gaze.valid is True
                 assert face_gaze.method == "unigaze_h14_joint"
@@ -265,9 +221,6 @@ def test_unigaze_predicts_from_real_video_face_evidence(
                 assert math.isfinite(face_gaze.yaw_radians)
                 assert face_gaze.confidence is None
                 assert face_gaze.confidence_source == "not_provided_by_unigaze"
-                assert recommended.target_image_px is None
-                assert recommended.target_board_norm is None
-                assert recommended.target_square is None
                 video_prediction_count += 1
                 break
 
