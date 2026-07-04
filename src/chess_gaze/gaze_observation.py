@@ -158,6 +158,8 @@ def normalize_face_crop(
             ),
         ),
     )
+
+
 def pitch_yaw_to_unit_vector(
     *, pitch_radians: float, yaw_radians: float
 ) -> tuple[float, float, float]:
@@ -169,6 +171,8 @@ def pitch_yaw_to_unit_vector(
         math.sin(pitch_radians),
         cos_pitch * math.cos(yaw_radians),
     )
+
+
 def _face_model_gaze_from_pred_row(pred_row: torch.Tensor) -> FaceModelGaze:
     pitch_radians = float(pred_row[0])
     # UniGaze's reference drawing treats positive yaw as image-left. Frame

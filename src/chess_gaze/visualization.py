@@ -166,8 +166,6 @@ def _draw_gaze_vector(
         image,
     )
     if outline:
-        start, end = _backstep_arrow(start, end, image)
-    if outline:
         cv2.arrowedLine(
             image,
             start,
@@ -377,29 +375,6 @@ def _point_pixel(point: Point2D, image: np.ndarray) -> Pixel:
             image,
         )
     return _clip_pixel(round(point.x), round(point.y), image)
-
-
-def _backstep_arrow(start: Pixel, end: Pixel, image: np.ndarray) -> tuple[Pixel, Pixel]:
-    dx = end[0] - start[0]
-    dy = end[1] - start[1]
-    pixel_length = math.hypot(dx, dy)
-    if pixel_length <= 0.0:
-        return start, end
-
-    backstep = min(3.0, pixel_length / 2.0)
-    unit_x = dx / pixel_length
-    unit_y = dy / pixel_length
-    shifted_start = _clip_pixel(
-        round(start[0] - unit_x * backstep),
-        round(start[1] - unit_y * backstep),
-        image,
-    )
-    shifted_end = _clip_pixel(
-        round(end[0] - unit_x * backstep),
-        round(end[1] - unit_y * backstep),
-        image,
-    )
-    return shifted_start, shifted_end
 
 
 def _clip_pixel(x: int, y: int, image: np.ndarray) -> Pixel:

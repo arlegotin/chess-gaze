@@ -321,18 +321,54 @@ def test_processed_frame_renders_only_unigaze_gaze_vector(tmp_path: Path) -> Non
     render_processed_frame(frame, record, output_path, quality=100)
 
     rendered = _rgb_jpeg(output_path)
-    assert _dominant_color_count_near(
-        rendered, x=108, y=85, color=_APPEARANCE_GAZE_COLOR, radius=10
-    ) > 0
-    assert _dominant_color_count_near(
-        rendered, x=84, y=69, color=_GEOMETRIC_GAZE_COLOR, radius=8
-    ) == 0
-    assert _dominant_color_count_near(
-        rendered, x=140, y=70, color=_GEOMETRIC_GAZE_COLOR, radius=8
-    ) == 0
-    assert _dominant_color_count_near(
-        rendered, x=112, y=84, color=_RECOMMENDED_GAZE_COLOR, radius=8
-    ) == 0
+    assert (
+        _dominant_color_count_near(
+            rendered, x=108, y=85, color=_APPEARANCE_GAZE_COLOR, radius=10
+        )
+        > 0
+    )
+    assert (
+        _dominant_color_count_near(
+            rendered, x=84, y=69, color=_GEOMETRIC_GAZE_COLOR, radius=8
+        )
+        == 0
+    )
+    assert (
+        _dominant_color_count_near(
+            rendered, x=140, y=70, color=_GEOMETRIC_GAZE_COLOR, radius=8
+        )
+        == 0
+    )
+    assert (
+        _dominant_color_count_near(
+            rendered, x=112, y=84, color=_RECOMMENDED_GAZE_COLOR, radius=8
+        )
+        == 0
+    )
+
+
+def test_processed_frame_unigaze_arrow_covers_face_center_anchor_region(
+    tmp_path: Path,
+) -> None:
+    frame = np.zeros((160, 220, 3), dtype=np.uint8)
+    record = _observed_record()
+    output_path = tmp_path / "unigaze-center-anchor.jpg"
+
+    render_processed_frame(frame, record, output_path, quality=100)
+
+    rendered = _rgb_jpeg(output_path)
+    assert (
+        _dominant_color_count_near(
+            rendered, x=105, y=84, color=_APPEARANCE_GAZE_COLOR, radius=4
+        )
+        > 0
+    )
+    assert (
+        _dominant_color_count_near(
+            rendered, x=101, y=82, color=_APPEARANCE_GAZE_COLOR, radius=1
+        )
+        == 0
+    )
 
 
 def test_processed_frame_does_not_draw_unigaze_label_text(tmp_path: Path) -> None:
