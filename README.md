@@ -6,8 +6,6 @@
   <img src="docs/assets/chess-gaze-demo.gif" alt="Processed chess stream frames beside a 3D gaze scene projection" width="900">
 </p>
 
----
-
 ## Video-to-gaze pipeline
 
 When you run `chess-gaze analyze <video>`, it:
