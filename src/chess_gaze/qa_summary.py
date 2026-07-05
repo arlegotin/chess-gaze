@@ -35,6 +35,7 @@ from chess_gaze.scene_records import (
     SceneGazeSphereRecord,
     SceneManifest,
     SceneSummary,
+    SceneTargetPlaneRecord,
 )
 
 QA_SUMMARY_BYTE_COUNT_STABILIZATION_ATTEMPTS = 5
@@ -183,6 +184,7 @@ class _ViewerSceneDataEnvelope(StrictSchemaModel):
     frames_count: int
     valid_sphere_hit_frames_count: int
     gaze_sphere: SceneGazeSphereRecord
+    target_plane: SceneTargetPlaneRecord | None = None
     axis_basis: SceneAxisBasisRecord
     assumptions: list[SceneAssumptionRecord]
     summary: SceneSummary
@@ -616,6 +618,7 @@ def _scan_viewer_scene_data_payload(data: mmap.mmap) -> dict[str, object]:
         "source_video_stem",
         "frame_count",
         "gaze_sphere",
+        "target_plane",
         "axis_basis",
         "assumptions",
         "summary",

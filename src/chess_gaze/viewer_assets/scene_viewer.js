@@ -33,6 +33,8 @@ const COLORS = {
   rightEye: 0xd46a5b,
   unigazeRay: 0x006d6f,
   hitArea: 0xc43d7a,
+  targetPlane: 0x3f7f54,
+  targetPlaneHit: 0x1f6f43,
   gazeSphere: 0xd8dde5,
   warning: 0xb5532f,
 };
@@ -156,6 +158,17 @@ const materials = {
     side: THREE.DoubleSide,
     depthWrite: false,
   }),
+  targetPlane: new THREE.MeshBasicMaterial({
+    color: COLORS.targetPlane,
+    transparent: true,
+    opacity: 0.16,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  }),
+  targetPlaneHit: new THREE.MeshStandardMaterial({
+    color: COLORS.targetPlaneHit,
+    roughness: 0.4,
+  }),
 };
 
 function setStatus(message, isError = false) {
@@ -262,6 +275,11 @@ function sphereRadiusMeters() {
     return state.sceneData?.gaze_sphere?.radius_m || DEFAULT_SPHERE_RADIUS_M;
   }
   return Math.min(SPHERE_MAX_RADIUS_M, Math.max(SPHERE_MIN_RADIUS_M, parsed));
+}
+
+function targetPlaneRecord() {
+  const plane = state.sceneData?.target_plane;
+  return plane?.valid ? plane : null;
 }
 
 function updateSphereRadiusLabel() {
@@ -552,6 +570,45 @@ function buildGazeSphere() {
   return mesh;
 }
 
+function buildTargetPlane() {
+  const plane = targetPlaneRecord();
+  if (!plane) {
+    return null;
+  }
+  const origin = finiteVector(plane.origin_scene_m);
+  const xAxis = normalizedVector(plane.x_axis_scene);
+  const yAxis = normalizedVector(plane.y_axis_scene);
+  const width = plane.width_m;
+  const height = plane.height_m;
+  if (!origin || !xAxis || !yAxis || !finiteNumber(width) || !finiteNumber(height)) {
+    return null;
+  }
+
+  const xEdge = xAxis.clone().multiplyScalar(width);
+  const yEdge = yAxis.clone().multiplyScalar(height);
+  const vertices = new Float32Array([
+    origin.x,
+    origin.y,
+    origin.z,
+    origin.x + xEdge.x,
+    origin.y + xEdge.y,
+    origin.z + xEdge.z,
+    origin.x + xEdge.x + yEdge.x,
+    origin.y + xEdge.y + yEdge.y,
+    origin.z + xEdge.z + yEdge.z,
+    origin.x + yEdge.x,
+    origin.y + yEdge.y,
+    origin.z + yEdge.z,
+  ]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  const mesh = new THREE.Mesh(geometry, materials.targetPlane);
+  mesh.userData.layer = "targetPlane";
+  groups.static.add(mesh);
+  return mesh;
+}
+
 function buildAccumulatedHitAreaMesh() {
   removeAccumulatedObject(state.renderCache.hitAreas);
   state.renderCache.hitAreas = null;
@@ -692,6 +749,7 @@ function buildStaticScene() {
   clearGroup(groups.static);
   state.renderCache.gazeSphere = null;
   buildGazeSphere();
+  buildTargetPlane();
 
   const grid = new THREE.GridHelper(1.4, 14, COLORS.grid, COLORS.grid);
   grid.position.set(0, -0.24, 0.42);
@@ -723,6 +781,8 @@ function applyStaticVisibility() {
     const layer = child.userData.layer;
     if (layer === "gazeSphere") {
       child.visible = Boolean(elements.controls.gazeSphere?.checked);
+    } else if (layer === "targetPlane") {
+      child.visible = true;
     } else if (layer === "axes") {
       child.visible = elements.toggles.axes.checked;
     }
@@ -795,6 +855,12 @@ function renderCurrentFrame() {
 
   renderCurrentHitArea(frame);
 
+  const targetPlaneHit = frame.target_plane_hit;
+  const targetHitPoint = finiteVector(targetPlaneHit?.point_scene_m);
+  if (targetPlaneHit?.valid && targetHitPoint) {
+    addSphere(groups.current, targetHitPoint, 0.01, materials.targetPlaneHit);
+  }
+
 }
 
 function rebuildCurrentFrame() {
@@ -821,9 +887,16 @@ function updateStatusPanel() {
     ? "valid appearance_gaze ray"
     : frame?.unigaze_ray?.reason_invalid || "invalid";
   const hitResult = sphereHitForFrame(frame);
-  elements.hitStatus.textContent = hitResult.valid
+  const targetHit = frame?.target_plane_hit;
+  const targetStatus = targetHit?.valid
+    ? `target ${targetHit.target_x_normalized.toFixed(3)}, ${targetHit.target_y_normalized.toFixed(3)}`
+    : null;
+  const sphereStatus = hitResult.valid
     ? "valid sphere hit"
     : hitResult.reason || "invalid";
+  elements.hitStatus.textContent = targetStatus
+    ? `${targetStatus}; ${sphereStatus}`
+    : sphereStatus;
   elements.accumulatedStatus.textContent = `${validHitAreasToFrame} of ${totalValidHitAreas}`;
   elements.hitCount.textContent = String(totalValidHits);
 }

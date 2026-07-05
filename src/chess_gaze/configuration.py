@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +19,44 @@ class ConfigurationError(RuntimeError):
         self.code = code
 
 
+class TargetPlaneConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    origin_camera_m: tuple[float, float, float]
+    x_axis_camera: tuple[float, float, float]
+    y_axis_camera: tuple[float, float, float]
+    width_m: float
+    height_m: float
+    mirror_horizontal: bool = False
+
+    @field_validator("origin_camera_m", "x_axis_camera", "y_axis_camera", mode="before")
+    @classmethod
+    def coerce_triplet(cls, value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @field_validator("origin_camera_m", "x_axis_camera", "y_axis_camera")
+    @classmethod
+    def validate_triplet(
+        cls, value: tuple[float, float, float], info: object
+    ) -> tuple[float, float, float]:
+        field_name = getattr(info, "field_name", "target_plane_triplet")
+        if len(value) != 3:
+            raise ValueError(f"{field_name} must contain exactly three values")
+        if not all(math.isfinite(coordinate) for coordinate in value):
+            raise ValueError(f"{field_name} must contain only finite values")
+        return value
+
+    @field_validator("width_m", "height_m")
+    @classmethod
+    def validate_positive_meters(cls, value: float, info: object) -> float:
+        field_name = getattr(info, "field_name", "target_plane_size")
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{field_name} must be positive and finite")
+        return value
+
+
 class AnalysisConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -33,6 +72,7 @@ class AnalysisConfig(BaseModel):
     unigaze_preprocessing_profile: UniGazePreprocessingProfile = (
         DEFAULT_UNIGAZE_PREPROCESSING_PROFILE
     )
+    target_plane: TargetPlaneConfig | None = None
 
     @field_validator("unigaze_batch_size")
     @classmethod

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -378,6 +379,12 @@ class CalibrationRecord(StrictSchemaModel):
     unigaze_face_crop_scale: float
     unigaze_image_mean_rgb: tuple[float, float, float] | None
     unigaze_image_std_rgb: tuple[float, float, float] | None
+    target_plane_origin_camera_m: tuple[float, float, float] | None
+    target_plane_x_axis_camera: tuple[float, float, float] | None
+    target_plane_y_axis_camera: tuple[float, float, float] | None
+    target_plane_width_m: float | None
+    target_plane_height_m: float | None
+    target_plane_mirror_horizontal: bool
     face_landmarker_running_mode: str
     camera_intrinsics_policy: str
     metric_translation_allowed: bool
@@ -392,6 +399,18 @@ class CalibrationRecord(StrictSchemaModel):
             return tuple(value)
         return value
 
+    @field_validator(
+        "target_plane_origin_camera_m",
+        "target_plane_x_axis_camera",
+        "target_plane_y_axis_camera",
+        mode="before",
+    )
+    @classmethod
+    def coerce_target_plane_tuple(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
     @model_validator(mode="after")
     def validate_unigaze_preprocessing(self) -> CalibrationRecord:
         if self.unigaze_face_crop_scale <= 0.0:
@@ -402,4 +421,36 @@ class CalibrationRecord(StrictSchemaModel):
             raise ValueError(
                 "unigaze_image_mean_rgb and unigaze_image_std_rgb must both be set"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_target_plane(self) -> CalibrationRecord:
+        fields = (
+            self.target_plane_origin_camera_m,
+            self.target_plane_x_axis_camera,
+            self.target_plane_y_axis_camera,
+            self.target_plane_width_m,
+            self.target_plane_height_m,
+        )
+        configured = [field is not None for field in fields]
+        if any(configured) and not all(configured):
+            raise ValueError(
+                "target plane calibration fields must be all set or all null"
+            )
+        for field_name in (
+            "target_plane_origin_camera_m",
+            "target_plane_x_axis_camera",
+            "target_plane_y_axis_camera",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                if len(value) != 3:
+                    raise ValueError(f"{field_name} must contain exactly three values")
+                for coordinate in value:
+                    if not math.isfinite(coordinate):
+                        raise ValueError(f"{field_name} must contain finite values")
+        if self.target_plane_width_m is not None and self.target_plane_width_m <= 0.0:
+            raise ValueError("target_plane_width_m must be positive")
+        if self.target_plane_height_m is not None and self.target_plane_height_m <= 0.0:
+            raise ValueError("target_plane_height_m must be positive")
         return self

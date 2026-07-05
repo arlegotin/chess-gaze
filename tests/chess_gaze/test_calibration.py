@@ -218,6 +218,12 @@ def test_default_calibration_persists_named_constants() -> None:
         "unigaze_face_crop_scale": 2.0,
         "unigaze_image_mean_rgb": (0.485, 0.456, 0.406),
         "unigaze_image_std_rgb": (0.229, 0.224, 0.225),
+        "target_plane_origin_camera_m": None,
+        "target_plane_x_axis_camera": None,
+        "target_plane_y_axis_camera": None,
+        "target_plane_width_m": None,
+        "target_plane_height_m": None,
+        "target_plane_mirror_horizontal": False,
         "face_landmarker_running_mode": "IMAGE",
         "camera_intrinsics_policy": "estimate_with_explicit_uncertainty",
         "metric_translation_allowed": False,
@@ -234,6 +240,26 @@ def test_default_calibration_persists_named_constants() -> None:
             "right_mouth_corner": 61,
         },
     }
+
+
+def test_default_calibration_persists_configured_target_plane() -> None:
+    from chess_gaze.calibration import default_calibration
+
+    calibration = default_calibration(
+        target_plane_origin_camera_m=(-0.30, -0.20, 0.70),
+        target_plane_x_axis_camera=(1.0, 0.0, 0.0),
+        target_plane_y_axis_camera=(0.0, 1.0, 0.0),
+        target_plane_width_m=0.60,
+        target_plane_height_m=0.40,
+        target_plane_mirror_horizontal=True,
+    )
+
+    assert calibration.target_plane_origin_camera_m == (-0.30, -0.20, 0.70)
+    assert calibration.target_plane_x_axis_camera == (1.0, 0.0, 0.0)
+    assert calibration.target_plane_y_axis_camera == (0.0, 1.0, 0.0)
+    assert calibration.target_plane_width_m == 0.60
+    assert calibration.target_plane_height_m == 0.40
+    assert calibration.target_plane_mirror_horizontal is True
 
 
 def test_derive_setup_constants_does_not_rewrite_frame_fields() -> None:

@@ -726,6 +726,9 @@ def test_generated_viewer_exposes_hit_area_controls_and_math(
     assert "function writeSphereHitAreaPatchPositions" in js
     assert "new THREE.SphereGeometry(1, 48, 24)" in js
     assert "frame?.sphere_hit" in js
+    assert "function buildTargetPlane" in js
+    assert "state.sceneData?.target_plane" in js
+    assert "frame.target_plane_hit" in js
     assert 'data-testid="toggle-monitor-plane"' not in html
     assert "main_monitor_hit" not in js
     assert "monitor_plane" not in js

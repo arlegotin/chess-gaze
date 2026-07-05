@@ -24,6 +24,7 @@ from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import (
     ConfigurationError,
+    TargetPlaneConfig,
     apply_analysis_overrides,
     load_config,
 )
@@ -184,6 +185,7 @@ class _ResolvedRequest:
     unigaze_device: str
     unigaze_batch_size: int
     unigaze_preprocessing_profile: str
+    target_plane: TargetPlaneConfig | None
 
 
 @dataclass(frozen=True)
@@ -205,7 +207,8 @@ def analyze_video(
         raise PipelineError(exc.code, str(exc)) from exc
 
     calibration = default_calibration(
-        unigaze_preprocessing_profile=resolved.unigaze_preprocessing_profile
+        unigaze_preprocessing_profile=resolved.unigaze_preprocessing_profile,
+        **_target_plane_calibration_kwargs(resolved.target_plane),
     )
     resolved_model_assets: list[ResolvedModelAsset] | None = None
     prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
@@ -599,7 +602,23 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
         unigaze_preprocessing_profile=resolved_config.unigaze_preprocessing_profile,
+        target_plane=resolved_config.target_plane,
     )
+
+
+def _target_plane_calibration_kwargs(
+    target_plane: TargetPlaneConfig | None,
+) -> dict[str, object]:
+    if target_plane is None:
+        return {}
+    return {
+        "target_plane_origin_camera_m": target_plane.origin_camera_m,
+        "target_plane_x_axis_camera": target_plane.x_axis_camera,
+        "target_plane_y_axis_camera": target_plane.y_axis_camera,
+        "target_plane_width_m": target_plane.width_m,
+        "target_plane_height_m": target_plane.height_m,
+        "target_plane_mirror_horizontal": target_plane.mirror_horizontal,
+    }
 
 
 def _report_analysis_progress(

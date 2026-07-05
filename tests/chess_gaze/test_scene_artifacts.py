@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from chess_gaze.artifact_runs import RunLayout
+from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
     ErrorRecord,
@@ -350,6 +351,37 @@ def test_build_scene_artifacts_writes_strict_manifest_summary_and_frames(
     assert result.valid_sphere_hit_count == 6
     assert result.summary == summary
     assert result.manifest == manifest
+
+
+def test_build_scene_artifacts_projects_rays_to_configured_target_plane(
+    tmp_path: Path,
+) -> None:
+    layout = _write_minimal_run(tmp_path / "run")
+    calibration = default_calibration(
+        target_plane_origin_camera_m=(-10.0, -10.0, 0.5),
+        target_plane_x_axis_camera=(1.0, 0.0, 0.0),
+        target_plane_y_axis_camera=(0.0, 1.0, 0.0),
+        target_plane_width_m=20.0,
+        target_plane_height_m=20.0,
+        target_plane_mirror_horizontal=False,
+    )
+    (layout.run_dir / "calibration.json").write_text(
+        calibration.model_dump_json(), encoding="utf-8"
+    )
+
+    result = build_scene_artifacts(layout)
+
+    assert result.manifest.target_plane is not None
+    assert result.manifest.target_plane.valid is True
+    assert result.viewer_data.target_plane == result.manifest.target_plane
+    valid_hits = [
+        frame.target_plane_hit
+        for frame in result.frames
+        if frame.target_plane_hit is not None and frame.target_plane_hit.valid
+    ]
+    assert len(valid_hits) == 6
+    assert result.summary.valid_target_plane_hit_frames == 6
+    assert all(hit.inside_bounds is True for hit in valid_hits)
 
 
 def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hits(
