@@ -11,12 +11,15 @@
 When you run `chess-gaze analyze <video>`, it:
 
 1. Decodes the video.
-2. Finds the face, eyes, and head pose.
-3. Runs [UniGaze](https://github.com/ut-vision/UniGaze) from
-local weights.
-4. Writes per-frame records.
-5. Projects gaze rays onto a gaze sphere.
-6. Builds a local browser viewer.
+2. Finds the face, eyes, and head pose with MediaPipe.
+3. Builds UniGaze inputs with the default precision profile: expanded face
+   framing, ImageNet normalization, and persisted preprocessing metadata.
+4. Runs [UniGaze](https://github.com/ut-vision/UniGaze) from local weights.
+5. Writes calibration metadata and per-frame records with head pose, gaze
+   angles, gaze rays, and projection metadata.
+6. Projects gaze rays onto the 3D gaze sphere and, when configured, a calibrated
+   screen or board target plane.
+7. Builds a local browser viewer.
 
 See [the demo](https://artemlegotin.com/chess-gaze-demo).
 
@@ -51,8 +54,8 @@ Open the printed `viewer/index.html`, or serve the viewer on localhost:
 uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>
 ```
 
-Default inference expects Apple Silicon MPS with UniGaze batch size `7`. For a
-portable CPU run:
+Default inference expects Apple Silicon MPS, UniGaze batch size `7`, and the
+precision preprocessing profile. For a portable CPU run:
 
 ```sh
 uv run chess-gaze analyze video.mp4 --unigaze-device cpu --unigaze-batch-size 1
@@ -68,15 +71,23 @@ artifacts/output/<video-stem>/runs/<run-id>/
 
 Core outputs:
 
-- `records/frames.jsonl`: face, eye, head pose, UniGaze yaw/pitch, frame errors.
-- `records/scene_frames.jsonl`: eye points, gaze ray, sphere hit.
+- `calibration.json`: analysis settings, UniGaze preprocessing metadata, and
+  optional target-plane geometry.
+- `records/frames.jsonl`: face, eye, head pose, UniGaze yaw/pitch, and frame
+  errors.
+- `records/scene_frames.jsonl`: eye points, gaze ray, sphere hit, and optional
+  calibrated target-plane hit.
 - `viewer/index.html`: direct-open 3D viewer with embedded scene data.
 - `viewer/scene-data.json`: viewer data for the local server path.
 - Processed frame JPEGs (if `--save-frames` added).
 
 ## Inspect the gaze scene
 
-The viewer shows a head model, eyes, the UniGaze ray, a gaze sphere, and translucent hit-area patches. Scrub frames, play the run, switch instant or accumulated hits, and adjust display assumptions such as sphere radius and angular error.
+The viewer shows a head model, eyes, the UniGaze ray, a gaze sphere, and
+translucent hit-area patches. If the run has target-plane calibration, the
+viewer also shows the configured screen or board plane and the current
+plane-hit marker. Scrub frames, play the run, switch instant or accumulated
+hits, and adjust display assumptions such as sphere radius and angular error.
 
 Run artifacts stay local. The viewer loads pinned Three.js `0.185.0` modules from jsDelivr when it renders.
 
