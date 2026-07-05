@@ -24,6 +24,90 @@ def test_load_config_uses_unigaze_runtime_defaults() -> None:
 
     assert config.unigaze_device == "mps"
     assert config.unigaze_batch_size == 7
+    assert config.unigaze_preprocessing_profile == "reference_face2x_imagenet"
+    assert config.target_plane is None
+
+
+def test_load_config_accepts_legacy_unigaze_preprocessing_profile(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_preprocessing_profile": "legacy_bbox_rgb01"}',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.unigaze_preprocessing_profile == "legacy_bbox_rgb01"
+
+
+def test_load_config_rejects_unknown_unigaze_preprocessing_profile(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_preprocessing_profile": "crop_it_somehow"}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ConfigurationError, match="unigaze_preprocessing_profile"
+    ) as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
+
+
+def test_load_config_accepts_target_plane(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        """
+        {
+          "target_plane": {
+            "origin_camera_m": [-0.30, -0.20, 0.70],
+            "x_axis_camera": [1.0, 0.0, 0.0],
+            "y_axis_camera": [0.0, 1.0, 0.0],
+            "width_m": 0.60,
+            "height_m": 0.40,
+            "mirror_horizontal": true
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.target_plane is not None
+    assert config.target_plane.origin_camera_m == (-0.30, -0.20, 0.70)
+    assert config.target_plane.x_axis_camera == (1.0, 0.0, 0.0)
+    assert config.target_plane.y_axis_camera == (0.0, 1.0, 0.0)
+    assert config.target_plane.width_m == 0.60
+    assert config.target_plane.height_m == 0.40
+    assert config.target_plane.mirror_horizontal is True
+
+
+def test_load_config_rejects_incomplete_target_plane(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        """
+        {
+          "target_plane": {
+            "origin_camera_m": [-0.30, -0.20, 0.70],
+            "x_axis_camera": [1.0, 0.0, 0.0],
+            "width_m": 0.60,
+            "height_m": 0.40
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="target_plane") as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
 
 
 def test_load_config_accepts_save_frame_images(tmp_path: Path) -> None:

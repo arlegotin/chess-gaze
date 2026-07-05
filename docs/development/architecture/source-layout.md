@@ -10,7 +10,9 @@ package instead of accidentally importing Python files from the repository root.
 - `src/chess_gaze/` is the importable package. Active modules are named after
   the behavior they own:
   - `artifact_runs.py` owns run directory layout and artifact-relative paths.
-  - `calibration.py` and `configuration.py` own analysis configuration records.
+  - `calibration.py`, `configuration.py`, and `unigaze_preprocessing.py` own
+    analysis configuration records, persisted calibration defaults, and named
+    UniGaze preprocessing profiles.
   - `video_decode.py`, `image_io.py`, and `visualization.py` own frame IO,
     optional debug-image writes, and processed-frame rendering.
   - `model_assets.py` and `model_registry.json` own local model trust and
@@ -23,6 +25,8 @@ package instead of accidentally importing Python files from the repository root.
     crop debug artifacts.
   - `unigaze_runtime.py` owns UniGaze device/batch runtime validation, MPS
     preflight, synchronization, and inference metadata assembly.
+  - `gaze_calibration.py` owns labeled per-person affine gaze calibration and
+    held-out evaluation metrics.
   - `frame_records.py`, `errors.py`, and `geometry.py` own strict shared record,
     frame/crop image retention policies, and primitive geometry contracts.
   - `analysis_resume.py` owns interrupted-run discovery, compatible-run
@@ -36,6 +40,8 @@ package instead of accidentally importing Python files from the repository root.
     scene axes, and camera/scene transforms.
   - `sphere_projection.py` owns ray-to-gaze-sphere projection math, angular
     hit coordinates, and invalid sphere-intersection reasons.
+  - `target_plane.py` owns calibrated ray-to-target-plane projection math and
+    normalized screen/board hit coordinates.
   - `scene_artifacts.py` owns reading validated frame artifacts and writing
     scene JSON/JSONL artifacts, including sphere hit summaries.
   - `scene_viewer.py` owns viewer-data generation, packaged static asset
@@ -44,6 +50,8 @@ package instead of accidentally importing Python files from the repository root.
     CPU/MPS optimization validation.
   - `unigaze_batch_benchmark.py` owns the Nakamura UniGaze device/batch
     benchmark harness and selected-batch report schema.
+  - `gaze_precision_benchmark.py` owns run-to-run gaze precision proxy metrics
+    for preprocessing/calibration comparisons.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration,
     policy-aware artifact validation, and command-line entry points.
 

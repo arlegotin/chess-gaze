@@ -66,6 +66,13 @@ class SceneInvalidReason(StrEnum):
     RAY_SPHERE_DISCRIMINANT_NEGATIVE = "RAY_SPHERE_DISCRIMINANT_NEGATIVE"
     RAY_SPHERE_INTERSECTION_NON_FINITE = "RAY_SPHERE_INTERSECTION_NON_FINITE"
     RAY_SPHERE_INTERSECTION_BEHIND_ORIGIN = "RAY_SPHERE_INTERSECTION_BEHIND_ORIGIN"
+    RAY_TARGET_PLANE_PARALLEL = "RAY_TARGET_PLANE_PARALLEL"
+    RAY_TARGET_PLANE_INTERSECTION_NON_FINITE = (
+        "RAY_TARGET_PLANE_INTERSECTION_NON_FINITE"
+    )
+    RAY_TARGET_PLANE_INTERSECTION_BEHIND_ORIGIN = (
+        "RAY_TARGET_PLANE_INTERSECTION_BEHIND_ORIGIN"
+    )
     SCENE_CENTER_INSUFFICIENT_INLIERS = "SCENE_CENTER_INSUFFICIENT_INLIERS"
     MAIN_DIRECTION_INSUFFICIENT_INLIERS = "MAIN_DIRECTION_INSUFFICIENT_INLIERS"
     SCENE_AXIS_DEGENERATE = "SCENE_AXIS_DEGENERATE"
@@ -439,6 +446,146 @@ class SceneGazeSphereRecord(SceneSchemaModel):
         return self
 
 
+class SceneTargetPlaneRecord(SceneSchemaModel):
+    valid: bool
+    origin_camera_m: Vector3D | None = None
+    origin_scene_m: Vector3D | None = None
+    x_axis_camera: UnitVector3D | None = None
+    y_axis_camera: UnitVector3D | None = None
+    normal_camera: UnitVector3D | None = None
+    x_axis_scene: UnitVector3D | None = None
+    y_axis_scene: UnitVector3D | None = None
+    normal_scene: UnitVector3D | None = None
+    width_m: float | None = None
+    height_m: float | None = None
+    mirror_horizontal: bool
+    source: Literal["analysis_config"]
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_target_plane(self) -> SceneTargetPlaneRecord:
+        for field_name in (
+            "origin_camera_m",
+            "x_axis_camera",
+            "y_axis_camera",
+            "normal_camera",
+        ):
+            _require_vector_space(
+                getattr(self, field_name),
+                expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+                field_name=field_name,
+            )
+        _require_vector_space(
+            self.origin_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="origin_scene_m",
+        )
+        for field_name in (
+            "x_axis_scene",
+            "y_axis_scene",
+            "normal_scene",
+        ):
+            _require_vector_space(
+                getattr(self, field_name),
+                expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+                field_name=field_name,
+            )
+        if self.valid:
+            required_values = (
+                self.origin_camera_m,
+                self.x_axis_camera,
+                self.y_axis_camera,
+                self.normal_camera,
+                self.width_m,
+                self.height_m,
+            )
+            if any(value is None for value in required_values):
+                raise ValueError("valid target plane requires origin, axes, and size")
+            if self.width_m is not None and self.width_m <= 0:
+                raise ValueError("valid target plane requires width_m > 0")
+            if self.height_m is not None and self.height_m <= 0:
+                raise ValueError("valid target plane requires height_m > 0")
+            if self.reason_invalid is not None:
+                raise ValueError("valid target plane cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid target plane requires reason_invalid")
+        return self
+
+
+class SceneTargetPlaneHitRecord(SceneSchemaModel):
+    valid: bool
+    point_camera_m: Vector3D | None = None
+    point_scene_m: Vector3D | None = None
+    target_x_normalized: float | None = None
+    target_y_normalized: float | None = None
+    inside_bounds: bool | None = None
+    ray_t_m: float | None = None
+    source_reason_invalid: str | None = None
+    reason_invalid: SceneInvalidReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enum_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        coerced = dict(data)
+        _coerce_enum_field(
+            coerced,
+            field_name="reason_invalid",
+            enum_type=SceneInvalidReason,
+        )
+        return coerced
+
+    @model_validator(mode="after")
+    def validate_target_plane_hit(self) -> SceneTargetPlaneHitRecord:
+        _require_vector_space(
+            self.point_camera_m,
+            expected=CoordinateFrame3D.CAMERA_OPENCV_PSEUDO_M,
+            field_name="point_camera_m",
+        )
+        _require_vector_space(
+            self.point_scene_m,
+            expected=CoordinateFrame3D.SCENE_PSEUDO_M,
+            field_name="point_scene_m",
+        )
+        if self.valid:
+            required_values = (
+                self.point_camera_m,
+                self.target_x_normalized,
+                self.target_y_normalized,
+                self.inside_bounds,
+                self.ray_t_m,
+            )
+            if any(value is None for value in required_values):
+                raise ValueError(
+                    "valid target plane hit requires point, normalized coordinates, "
+                    "bounds state, and ray_t_m"
+                )
+            if self.ray_t_m is not None and self.ray_t_m < 0:
+                raise ValueError("valid target plane hit requires ray_t_m >= 0")
+            if self.reason_invalid is not None:
+                raise ValueError("valid target plane hit cannot have reason_invalid")
+            return self
+        if self.reason_invalid is None:
+            raise ValueError("invalid target plane hit requires reason_invalid")
+        return self
+
+
 class SceneAxisBasisRecord(SceneSchemaModel):
     right_camera: UnitVector3D
     up_camera: UnitVector3D
@@ -518,6 +665,7 @@ class SceneFrameRecord(SceneSchemaModel):
     head: SceneHeadRecord
     unigaze_ray: SceneUniGazeRayRecord
     sphere_hit: SceneSphereHitRecord
+    target_plane_hit: SceneTargetPlaneHitRecord | None = None
     diagnostics: SceneFrameDiagnosticsRecord
 
     @model_validator(mode="before")
@@ -549,6 +697,9 @@ class SceneFrameRecord(SceneSchemaModel):
             )
         if self.sphere_hit.valid and not self.unigaze_ray.valid:
             raise ValueError("valid sphere hit requires a valid unigaze ray")
+        if self.target_plane_hit is not None and self.target_plane_hit.valid:
+            if not self.unigaze_ray.valid:
+                raise ValueError("valid target plane hit requires a valid unigaze ray")
         return self
 
 
@@ -692,6 +843,7 @@ class SceneManifest(SceneSchemaModel):
     scene_center_camera_m: Vector3D
     axis_basis: SceneAxisBasisRecord = Field(alias="scene_axes_camera")
     gaze_sphere: SceneGazeSphereRecord
+    target_plane: SceneTargetPlaneRecord | None = None
     viewer_dependency: SceneViewerDependencyRecord = Field(alias="viewer")
     generated_at_utc: str
 
@@ -737,6 +889,7 @@ class SceneSummary(SceneSchemaModel):
     valid_eye_midpoint_frames: int
     valid_unigaze_ray_frames: int
     valid_sphere_hit_frames: int
+    valid_target_plane_hit_frames: int = 0
     invalid_sphere_hit_reasons: dict[str, int]
     sphere_hit_angle_bounds: SceneSphereHitAngleBoundsRecord
     representative_scene_warning_frame_ids: list[str]
@@ -760,6 +913,7 @@ class ViewerSceneData(SceneSchemaModel):
     frame_count: int
     frames: list[SceneFrameRecord]
     gaze_sphere: SceneGazeSphereRecord
+    target_plane: SceneTargetPlaneRecord | None = None
     axis_basis: SceneAxisBasisRecord
     assumptions: list[SceneAssumptionRecord]
     summary: SceneSummary

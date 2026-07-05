@@ -9,6 +9,10 @@ from typing import Any, TextIO, cast
 from chess_gaze.errors import CliErrorCode
 from chess_gaze.native_log_filter import suppress_known_native_analysis_logs
 from chess_gaze.scene_viewer import ViewerServerError, serve_viewer
+from chess_gaze.unigaze_preprocessing import (
+    LEGACY_UNIGAZE_PREPROCESSING_PROFILE,
+    REFERENCE_UNIGAZE_PREPROCESSING_PROFILE,
+)
 
 AnalyzeVideoCallable = Any
 analyze_video: AnalyzeVideoCallable | None = None
@@ -55,6 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--config", default=None)
     analyze.add_argument("--unigaze-device", choices=("cpu", "mps"), default=None)
     analyze.add_argument("--unigaze-batch-size", type=int, default=None)
+    analyze.add_argument(
+        "--unigaze-preprocessing-profile",
+        choices=(
+            LEGACY_UNIGAZE_PREPROCESSING_PROFILE,
+            REFERENCE_UNIGAZE_PREPROCESSING_PROFILE,
+        ),
+        default=None,
+    )
     analyze.add_argument(
         "--progress",
         choices=("auto", "on", "off"),
@@ -134,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
                     config_path=Path(args.config) if args.config is not None else None,
                     unigaze_device=args.unigaze_device,
                     unigaze_batch_size=args.unigaze_batch_size,
+                    unigaze_preprocessing_profile=(
+                        args.unigaze_preprocessing_profile
+                    ),
                     save_frame_images=args.save_frame_images,
                     save_crop_images=args.save_crop_images,
                     generate_qa_summary=args.generate_qa_summary,

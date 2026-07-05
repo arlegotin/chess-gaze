@@ -55,6 +55,10 @@ class FaceCropNormalizer(Protocol):
         bbox: Any,
         *,
         input_size_px: int,
+        profile: str,
+        crop_scale: float,
+        image_mean_rgb: tuple[float, float, float] | None,
+        image_std_rgb: tuple[float, float, float] | None,
     ) -> NormalizedFaceCrop: ...
 
 
@@ -297,6 +301,10 @@ class ModelBackedFrameObserver:
                 rgb_frame,
                 selected_face.bounding_box_image_px,
                 input_size_px=self.calibration.unigaze_input_size_px,
+                profile=self.calibration.unigaze_preprocessing_profile,
+                crop_scale=self.calibration.unigaze_face_crop_scale,
+                image_mean_rgb=self.calibration.unigaze_image_mean_rgb,
+                image_std_rgb=self.calibration.unigaze_image_std_rgb,
             )
         except Exception as exc:
             _append_error_once(

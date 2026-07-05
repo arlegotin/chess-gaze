@@ -16,6 +16,10 @@ import torch
 from chess_gaze.errors import ErrorCode
 from chess_gaze.geometry import BBox, CoordinateSpace, Transform2D
 from chess_gaze.model_assets import ResolvedModelAsset
+from chess_gaze.unigaze_preprocessing import (
+    DEFAULT_UNIGAZE_PREPROCESSING_PROFILE,
+    resolve_unigaze_preprocessing_profile,
+)
 
 UNIGAZE_MODEL_ID = "unigaze-h14-joint"
 UNIGAZE_BUILDER_KEY = "unigaze_h14_joint"
@@ -117,33 +121,76 @@ def normalize_face_crop(
     bbox: BBox,
     *,
     input_size_px: int,
+    profile: str = DEFAULT_UNIGAZE_PREPROCESSING_PROFILE,
+    crop_scale: float | None = None,
+    image_mean_rgb: tuple[float, float, float] | None = None,
+    image_std_rgb: tuple[float, float, float] | None = None,
 ) -> NormalizedFaceCrop:
     frame = _validate_rgb_frame(rgb_frame)
     if bbox.space is not CoordinateSpace.IMAGE_PX:
         raise ValueError("face crop bbox must be in image_px")
     if input_size_px <= 0:
         raise ValueError("input_size_px must be positive")
+    try:
+        preprocessing = resolve_unigaze_preprocessing_profile(profile)
+    except ValueError as exc:
+        raise ValueError(f"unknown unigaze preprocessing profile: {profile!r}") from exc
+    resolved_crop_scale = (
+        preprocessing.crop_scale if crop_scale is None else crop_scale
+    )
+    resolved_image_mean_rgb = (
+        preprocessing.image_mean_rgb
+        if image_mean_rgb is None and preprocessing.image_mean_rgb is not None
+        else image_mean_rgb
+    )
+    resolved_image_std_rgb = (
+        preprocessing.image_std_rgb
+        if image_std_rgb is None and preprocessing.image_std_rgb is not None
+        else image_std_rgb
+    )
+    if resolved_crop_scale <= 0.0:
+        raise ValueError("crop_scale must be positive")
+    if (resolved_image_mean_rgb is None) != (resolved_image_std_rgb is None):
+        raise ValueError("image_mean_rgb and image_std_rgb must both be set")
+    if resolved_image_mean_rgb is not None:
+        _validate_rgb_stats(resolved_image_mean_rgb, "image_mean_rgb")
+    if resolved_image_std_rgb is not None:
+        _validate_rgb_stats(resolved_image_std_rgb, "image_std_rgb")
 
     height_px, width_px, _channels = frame.shape
-    x_min = _clamp_int(math.floor(bbox.x_min), 0, width_px - 1)
-    y_min = _clamp_int(math.floor(bbox.y_min), 0, height_px - 1)
-    x_max = _clamp_int(math.ceil(bbox.x_max), x_min + 1, width_px)
-    y_max = _clamp_int(math.ceil(bbox.y_max), y_min + 1, height_px)
+    scaled_x_min, scaled_y_min, scaled_x_max, scaled_y_max = _scaled_bbox_bounds(
+        bbox, scale=resolved_crop_scale
+    )
+    x_min = _clamp_int(math.floor(scaled_x_min), 0, width_px - 1)
+    y_min = _clamp_int(math.floor(scaled_y_min), 0, height_px - 1)
+    x_max = _clamp_int(math.ceil(scaled_x_max), x_min + 1, width_px)
+    y_max = _clamp_int(math.ceil(scaled_y_max), y_min + 1, height_px)
 
     crop = frame[y_min:y_max, x_min:x_max]
     resized = cv2.resize(
         crop, (input_size_px, input_size_px), interpolation=cv2.INTER_AREA
     )
     normalized = resized.astype(np.float32) / 255.0
+    if resolved_image_mean_rgb is not None and resolved_image_std_rgb is not None:
+        mean = np.asarray(resolved_image_mean_rgb, dtype=np.float32).reshape(1, 1, 3)
+        std = np.asarray(resolved_image_std_rgb, dtype=np.float32).reshape(1, 1, 3)
+        normalized = (normalized - mean) / std
     chw = np.transpose(normalized, (2, 0, 1))
     tensor = torch.from_numpy(chw).unsqueeze(0)
 
     scale_x = (x_max - x_min) / float(input_size_px)
     scale_y = (y_max - y_min) / float(input_size_px)
+    crop_bbox = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=float(x_min),
+        y_min=float(y_min),
+        x_max=float(x_max),
+        y_max=float(y_max),
+    )
     return NormalizedFaceCrop(
         tensor=tensor,
         transform=CropTransformRecord(
-            source_bbox_image_px=bbox,
+            source_bbox_image_px=crop_bbox,
             output_size_px=input_size_px,
             image_px_from_crop_px=Transform2D(
                 source_space=CoordinateSpace.IMAGE_PX,
@@ -228,6 +275,35 @@ def _validate_rgb_frame(
     if rgb_frame.dtype != np.uint8:
         raise ValueError("rgb_frame must have dtype uint8")
     return np.ascontiguousarray(rgb_frame)
+
+
+def _scaled_bbox_bounds(
+    bbox: BBox, *, scale: float
+) -> tuple[float, float, float, float]:
+    width = bbox.x_max - bbox.x_min
+    height = bbox.y_max - bbox.y_min
+    center_x = bbox.x_min + width / 2.0
+    center_y = bbox.y_min + height / 2.0
+    scaled_width = width * scale
+    scaled_height = height * scale
+    return (
+        center_x - (scaled_width / 2.0),
+        center_y - (scaled_height / 2.0),
+        center_x + (scaled_width / 2.0),
+        center_y + (scaled_height / 2.0),
+    )
+
+
+def _validate_rgb_stats(
+    values: tuple[float, float, float], field_name: str
+) -> None:
+    if len(values) != 3:
+        raise ValueError(f"{field_name} must contain three RGB values")
+    for value in values:
+        if not math.isfinite(value):
+            raise ValueError(f"{field_name} values must be finite")
+        if field_name == "image_std_rgb" and value <= 0.0:
+            raise ValueError("image_std_rgb values must be positive")
 
 
 def _clamp_int(value: int, lower: int, upper: int) -> int:

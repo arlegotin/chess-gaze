@@ -395,10 +395,18 @@ def _normalize_face_crop(
     bbox: BBox,
     *,
     input_size_px: int,
+    profile: str,
+    crop_scale: float,
+    image_mean_rgb: tuple[float, float, float] | None,
+    image_std_rgb: tuple[float, float, float] | None,
 ) -> NormalizedFaceCrop:
     assert rgb_frame.shape == (48, 64, 3)
     assert bbox == _box(10.0, 8.0, 54.0, 44.0)
     assert input_size_px == 224
+    assert profile == "reference_face2x_imagenet"
+    assert crop_scale == 2.0
+    assert image_mean_rgb == (0.485, 0.456, 0.406)
+    assert image_std_rgb == (0.229, 0.224, 0.225)
     return NormalizedFaceCrop(
         tensor=torch.zeros((1, 3, 224, 224), dtype=torch.float32),
         transform=CropTransformRecord(

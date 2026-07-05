@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
+from chess_gaze.unigaze_preprocessing import (
+    LEGACY_UNIGAZE_FACE_CROP_SCALE,
+    LEGACY_UNIGAZE_PREPROCESSING_PROFILE,
+    UniGazePreprocessingProfile,
+)
 
 
 def _coerce_error_code_field(payload: dict[str, Any], field_name: str) -> None:
@@ -373,9 +379,84 @@ class CalibrationRecord(StrictSchemaModel):
     default_iris_diameter_uncertainty_mm: float
     unigaze_input_size_px: int
     unigaze_output_order: str
+    unigaze_preprocessing_profile: UniGazePreprocessingProfile = (
+        LEGACY_UNIGAZE_PREPROCESSING_PROFILE
+    )
+    unigaze_face_crop_scale: float = LEGACY_UNIGAZE_FACE_CROP_SCALE
+    unigaze_image_mean_rgb: tuple[float, float, float] | None = None
+    unigaze_image_std_rgb: tuple[float, float, float] | None = None
+    target_plane_origin_camera_m: tuple[float, float, float] | None = None
+    target_plane_x_axis_camera: tuple[float, float, float] | None = None
+    target_plane_y_axis_camera: tuple[float, float, float] | None = None
+    target_plane_width_m: float | None = None
+    target_plane_height_m: float | None = None
+    target_plane_mirror_horizontal: bool = False
     face_landmarker_running_mode: str
     camera_intrinsics_policy: str
     metric_translation_allowed: bool
     derived_percentile_lower: float
     derived_percentile_upper: float
     pnp_landmark_indices: PnPLandmarkIndices
+
+    @field_validator("unigaze_image_mean_rgb", "unigaze_image_std_rgb", mode="before")
+    @classmethod
+    def coerce_rgb_tuple(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @field_validator(
+        "target_plane_origin_camera_m",
+        "target_plane_x_axis_camera",
+        "target_plane_y_axis_camera",
+        mode="before",
+    )
+    @classmethod
+    def coerce_target_plane_tuple(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_unigaze_preprocessing(self) -> CalibrationRecord:
+        if self.unigaze_face_crop_scale <= 0.0:
+            raise ValueError("unigaze_face_crop_scale must be positive")
+        if (self.unigaze_image_mean_rgb is None) != (
+            self.unigaze_image_std_rgb is None
+        ):
+            raise ValueError(
+                "unigaze_image_mean_rgb and unigaze_image_std_rgb must both be set"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_target_plane(self) -> CalibrationRecord:
+        fields = (
+            self.target_plane_origin_camera_m,
+            self.target_plane_x_axis_camera,
+            self.target_plane_y_axis_camera,
+            self.target_plane_width_m,
+            self.target_plane_height_m,
+        )
+        configured = [field is not None for field in fields]
+        if any(configured) and not all(configured):
+            raise ValueError(
+                "target plane calibration fields must be all set or all null"
+            )
+        for field_name in (
+            "target_plane_origin_camera_m",
+            "target_plane_x_axis_camera",
+            "target_plane_y_axis_camera",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                if len(value) != 3:
+                    raise ValueError(f"{field_name} must contain exactly three values")
+                for coordinate in value:
+                    if not math.isfinite(coordinate):
+                        raise ValueError(f"{field_name} must contain finite values")
+        if self.target_plane_width_m is not None and self.target_plane_width_m <= 0.0:
+            raise ValueError("target_plane_width_m must be positive")
+        if self.target_plane_height_m is not None and self.target_plane_height_m <= 0.0:
+            raise ValueError("target_plane_height_m must be positive")
+        return self

@@ -24,6 +24,7 @@ from chess_gaze.artifact_runs import RunLayout, create_run_layout
 from chess_gaze.calibration import default_calibration
 from chess_gaze.configuration import (
     ConfigurationError,
+    TargetPlaneConfig,
     apply_analysis_overrides,
     load_config,
 )
@@ -130,6 +131,7 @@ class AnalyzeRequest:
     config_path: Path | None = None
     unigaze_device: str | None = None
     unigaze_batch_size: int | None = None
+    unigaze_preprocessing_profile: str | None = None
     save_frame_images: bool | None = None
     save_crop_images: bool | None = None
     generate_qa_summary: bool = False
@@ -182,6 +184,8 @@ class _ResolvedRequest:
     generate_qa_summary: bool
     unigaze_device: str
     unigaze_batch_size: int
+    unigaze_preprocessing_profile: str
+    target_plane: TargetPlaneConfig | None
 
 
 @dataclass(frozen=True)
@@ -202,7 +206,7 @@ def analyze_video(
     except VideoDecodeError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
 
-    calibration = default_calibration()
+    calibration = _default_calibration_for_request(resolved)
     resolved_model_assets: list[ResolvedModelAsset] | None = None
     prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
     inference = external_observer_inference_record()
@@ -575,6 +579,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
             models_root=request.models_root,
             unigaze_device=request.unigaze_device,
             unigaze_batch_size=request.unigaze_batch_size,
+            unigaze_preprocessing_profile=request.unigaze_preprocessing_profile,
             save_frame_images=request.save_frame_images,
             save_crop_images=request.save_crop_images,
         )
@@ -593,6 +598,25 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         generate_qa_summary=request.generate_qa_summary,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
+        unigaze_preprocessing_profile=resolved_config.unigaze_preprocessing_profile,
+        target_plane=resolved_config.target_plane,
+    )
+
+
+def _default_calibration_for_request(resolved: _ResolvedRequest) -> CalibrationRecord:
+    if resolved.target_plane is None:
+        return default_calibration(
+            unigaze_preprocessing_profile=resolved.unigaze_preprocessing_profile,
+        )
+    target_plane = resolved.target_plane
+    return default_calibration(
+        unigaze_preprocessing_profile=resolved.unigaze_preprocessing_profile,
+        target_plane_origin_camera_m=target_plane.origin_camera_m,
+        target_plane_x_axis_camera=target_plane.x_axis_camera,
+        target_plane_y_axis_camera=target_plane.y_axis_camera,
+        target_plane_width_m=target_plane.width_m,
+        target_plane_height_m=target_plane.height_m,
+        target_plane_mirror_horizontal=target_plane.mirror_horizontal,
     )
 
 

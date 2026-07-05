@@ -22,6 +22,10 @@ from chess_gaze.frame_records import (
     FrameRecord,
     PnPLandmarkIndices,
 )
+from chess_gaze.unigaze_preprocessing import (
+    DEFAULT_UNIGAZE_PREPROCESSING_PROFILE,
+    resolve_unigaze_preprocessing_profile,
+)
 
 raw_frame_image_format = "png"
 processed_frame_image_format = "jpg"
@@ -191,7 +195,19 @@ def _iris_diameter(eye: EyeRecord) -> float | None:
     return max_distance if max_distance > 0.0 else None
 
 
-def default_calibration() -> CalibrationRecord:
+def default_calibration(
+    *,
+    unigaze_preprocessing_profile: str = DEFAULT_UNIGAZE_PREPROCESSING_PROFILE,
+    target_plane_origin_camera_m: tuple[float, float, float] | None = None,
+    target_plane_x_axis_camera: tuple[float, float, float] | None = None,
+    target_plane_y_axis_camera: tuple[float, float, float] | None = None,
+    target_plane_width_m: float | None = None,
+    target_plane_height_m: float | None = None,
+    target_plane_mirror_horizontal: bool = False,
+) -> CalibrationRecord:
+    unigaze_preprocessing = resolve_unigaze_preprocessing_profile(
+        unigaze_preprocessing_profile
+    )
     return CalibrationRecord(
         raw_frame_image_format=raw_frame_image_format,
         processed_frame_image_format=processed_frame_image_format,
@@ -204,6 +220,16 @@ def default_calibration() -> CalibrationRecord:
         default_iris_diameter_uncertainty_mm=default_iris_diameter_uncertainty_mm,
         unigaze_input_size_px=unigaze_input_size_px,
         unigaze_output_order=unigaze_output_order,
+        unigaze_preprocessing_profile=unigaze_preprocessing.profile,
+        unigaze_face_crop_scale=unigaze_preprocessing.crop_scale,
+        unigaze_image_mean_rgb=unigaze_preprocessing.image_mean_rgb,
+        unigaze_image_std_rgb=unigaze_preprocessing.image_std_rgb,
+        target_plane_origin_camera_m=target_plane_origin_camera_m,
+        target_plane_x_axis_camera=target_plane_x_axis_camera,
+        target_plane_y_axis_camera=target_plane_y_axis_camera,
+        target_plane_width_m=target_plane_width_m,
+        target_plane_height_m=target_plane_height_m,
+        target_plane_mirror_horizontal=target_plane_mirror_horizontal,
         face_landmarker_running_mode=face_landmarker_running_mode,
         camera_intrinsics_policy=camera_intrinsics_policy,
         metric_translation_allowed=metric_translation_allowed,

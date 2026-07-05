@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import cast
 
 from chess_gaze.artifact_runs import RunLayout
+from chess_gaze.calibration import default_calibration
 from chess_gaze.frame_records import (
+    CalibrationRecord,
     FrameRecord,
     RunManifest,
     VideoManifest,
@@ -52,6 +54,8 @@ from chess_gaze.scene_records import (
     SceneSphereHitAngleBoundsRecord,
     SceneSphereHitRecord,
     SceneSummary,
+    SceneTargetPlaneHitRecord,
+    SceneTargetPlaneRecord,
     SceneUniGazeRayRecord,
     SceneViewerDependencyRecord,
     UnitVector3D,
@@ -63,6 +67,13 @@ from chess_gaze.sphere_projection import (
     SphereHitResult,
     build_gaze_sphere,
     intersect_ray_with_sphere,
+)
+from chess_gaze.target_plane import (
+    ConfiguredTargetPlane,
+    build_configured_target_plane,
+    intersect_ray_with_target_plane,
+    target_plane_unit_vector,
+    target_plane_vector,
 )
 from chess_gaze.viewer_dependencies import (
     THREE_CDN_PROVIDER,
@@ -111,6 +122,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         run_layout.run_dir / "video_manifest.json",
         VideoManifest,
     )
+    calibration = _load_calibration(run_layout.run_dir / "calibration.json")
     source_frames = _load_source_frames(source_frames_path)
     _validate_contiguous_frame_indices(source_frames)
 
@@ -153,6 +165,12 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         assumptions,
     )
     gaze_sphere = build_gaze_sphere(assumptions)
+    target_plane = _configured_target_plane_from_calibration(calibration)
+    target_plane_record = _target_plane_record(
+        target_plane,
+        scene_center=scene_center.point_camera_m,
+        axis_basis=axis_basis,
+    )
 
     scene_frames = [
         _build_scene_frame(
@@ -162,6 +180,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
             scene_center=scene_center.point_camera_m,
             axis_basis=axis_basis,
             gaze_sphere=gaze_sphere,
+            target_plane=target_plane,
         )
         for first_pass in first_pass_frames
     ]
@@ -178,6 +197,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         main_direction=main_direction,
         axis_basis=axis_basis,
         gaze_sphere=gaze_sphere,
+        target_plane=target_plane_record,
     )
     summary = _build_summary(
         run_id=run_manifest.run_id,
@@ -192,6 +212,7 @@ def build_scene_artifacts(run_layout: RunLayout) -> SceneArtifactResult:
         source_video_path=video_manifest.source_path,
         frames=scene_frames,
         gaze_sphere=_sphere_record(gaze_sphere),
+        target_plane=target_plane_record,
         axis_basis=axis_basis,
         assumptions=assumptions.records,
         summary=summary,
@@ -228,6 +249,7 @@ def build_viewer_scene_data(result: SceneArtifactResult) -> ViewerSceneData:
         source_video_path=result.manifest.source_video_path,
         frames=result.frames,
         gaze_sphere=result.manifest.gaze_sphere,
+        target_plane=result.manifest.target_plane,
         axis_basis=result.manifest.axis_basis,
         assumptions=result.manifest.assumptions,
         summary=result.summary,
@@ -258,6 +280,7 @@ def _build_scene_frame(
     scene_center: Vector3D,
     axis_basis: SceneAxisBasisRecord,
     gaze_sphere: GazeSphereSurface,
+    target_plane: ConfiguredTargetPlane | None,
 ) -> SceneFrameRecord:
     projection = back_project_eye_points(source_frame, camera, assumptions)
     left_eye = _final_eye_record(
@@ -292,6 +315,12 @@ def _build_scene_frame(
         ),
     )
     sphere_hit = _sphere_hit_record(sphere_hit_result)
+    target_plane_hit = _target_plane_hit_record(
+        ray,
+        target_plane=target_plane,
+        scene_center=scene_center,
+        axis_basis=axis_basis,
+    )
     head = _head_record(
         source_frame=source_frame,
         midpoint=midpoint,
@@ -299,7 +328,7 @@ def _build_scene_frame(
         scene_center=scene_center,
         axis_basis=axis_basis,
     )
-    warnings = _scene_warnings(midpoint, ray, sphere_hit)
+    warnings = _scene_warnings(midpoint, ray, sphere_hit, target_plane_hit)
     diagnostics = SceneFrameDiagnosticsRecord(
         warnings=warnings,
         source_error_codes=[_enum_value(error.code) for error in source_frame.errors],
@@ -324,6 +353,7 @@ def _build_scene_frame(
         head=head,
         unigaze_ray=ray,
         sphere_hit=sphere_hit,
+        target_plane_hit=target_plane_hit,
         diagnostics=diagnostics,
     )
 
@@ -463,6 +493,7 @@ def _build_manifest(
     main_direction: RobustDirectionEstimate,
     axis_basis: SceneAxisBasisRecord,
     gaze_sphere: GazeSphereSurface,
+    target_plane: SceneTargetPlaneRecord | None,
 ) -> SceneManifest:
     del run_layout
     return SceneManifest(
@@ -521,6 +552,7 @@ def _build_manifest(
         scene_center_camera_m=scene_center.point_camera_m,
         scene_axes_camera=axis_basis,
         gaze_sphere=_sphere_record(gaze_sphere),
+        target_plane=target_plane,
         viewer=SceneViewerDependencyRecord(
             library=THREE_PACKAGE_NAME,
             version=THREE_VERSION,
@@ -562,6 +594,12 @@ def _build_summary(
         valid_sphere_hit_frames=sum(
             1 for scene_frame in scene_frames if scene_frame.sphere_hit.valid
         ),
+        valid_target_plane_hit_frames=sum(
+            1
+            for scene_frame in scene_frames
+            if scene_frame.target_plane_hit is not None
+            and scene_frame.target_plane_hit.valid
+        ),
         invalid_sphere_hit_reasons=dict(sorted(invalid_sphere_hit_reasons.items())),
         sphere_hit_angle_bounds=_sphere_hit_angle_bounds(scene_frames),
         representative_scene_warning_frame_ids=_representative_warning_frame_ids(
@@ -582,6 +620,7 @@ def _viewer_scene_data_from_parts(
     source_video_path: str,
     frames: list[SceneFrameRecord],
     gaze_sphere: SceneGazeSphereRecord,
+    target_plane: SceneTargetPlaneRecord | None,
     axis_basis: SceneAxisBasisRecord,
     assumptions: list[SceneAssumptionRecord],
     summary: SceneSummary,
@@ -592,6 +631,7 @@ def _viewer_scene_data_from_parts(
         frame_count=len(frames),
         frames=frames,
         gaze_sphere=gaze_sphere,
+        target_plane=target_plane,
         axis_basis=axis_basis,
         assumptions=assumptions,
         summary=summary,
@@ -653,6 +693,7 @@ def _scene_warnings(
     midpoint: SceneEyeMidpointRecord,
     ray: SceneUniGazeRayRecord,
     sphere_hit: SceneSphereHitRecord,
+    target_plane_hit: SceneTargetPlaneHitRecord | None,
 ) -> list[str]:
     warnings: list[str] = []
     if not midpoint.valid and midpoint.reason_invalid is not None:
@@ -661,6 +702,14 @@ def _scene_warnings(
         warnings.append(f"unigaze_ray:{_enum_value(ray.reason_invalid)}")
     if not sphere_hit.valid and sphere_hit.reason_invalid is not None:
         warnings.append(f"sphere_hit:{_enum_value(sphere_hit.reason_invalid)}")
+    if (
+        target_plane_hit is not None
+        and not target_plane_hit.valid
+        and target_plane_hit.reason_invalid is not None
+    ):
+        warnings.append(
+            f"target_plane_hit:{_enum_value(target_plane_hit.reason_invalid)}"
+        )
     return warnings
 
 
@@ -684,6 +733,105 @@ def _sphere_hit_record(result: SphereHitResult) -> SceneSphereHitRecord:
         hemisphere=result.hemisphere,
         source_reason_invalid=result.source_reason_invalid,
         reason_invalid=result.reason_invalid,
+    )
+
+
+def _configured_target_plane_from_calibration(
+    calibration: CalibrationRecord,
+) -> ConfiguredTargetPlane | None:
+    if calibration.target_plane_origin_camera_m is None:
+        return None
+    if (
+        calibration.target_plane_x_axis_camera is None
+        or calibration.target_plane_y_axis_camera is None
+        or calibration.target_plane_width_m is None
+        or calibration.target_plane_height_m is None
+    ):
+        raise ValueError("target plane calibration fields must be all set or all null")
+    return build_configured_target_plane(
+        origin_camera_m=calibration.target_plane_origin_camera_m,
+        x_axis_camera=calibration.target_plane_x_axis_camera,
+        y_axis_camera=calibration.target_plane_y_axis_camera,
+        width_m=calibration.target_plane_width_m,
+        height_m=calibration.target_plane_height_m,
+        mirror_horizontal=calibration.target_plane_mirror_horizontal,
+    )
+
+
+def _target_plane_record(
+    target_plane: ConfiguredTargetPlane | None,
+    *,
+    scene_center: Vector3D,
+    axis_basis: SceneAxisBasisRecord,
+) -> SceneTargetPlaneRecord | None:
+    if target_plane is None:
+        return None
+    origin_camera = target_plane_vector(target_plane.origin_camera_m)
+    x_axis_camera = target_plane_unit_vector(target_plane.x_axis_camera)
+    y_axis_camera = target_plane_unit_vector(target_plane.y_axis_camera)
+    normal_camera = target_plane_unit_vector(target_plane.normal_camera)
+    return SceneTargetPlaneRecord(
+        valid=True,
+        origin_camera_m=origin_camera,
+        origin_scene_m=camera_point_to_scene(origin_camera, scene_center, axis_basis),
+        x_axis_camera=x_axis_camera,
+        y_axis_camera=y_axis_camera,
+        normal_camera=normal_camera,
+        x_axis_scene=_camera_direction_to_scene(x_axis_camera, axis_basis),
+        y_axis_scene=_camera_direction_to_scene(y_axis_camera, axis_basis),
+        normal_scene=_camera_direction_to_scene(normal_camera, axis_basis),
+        width_m=target_plane.width_m,
+        height_m=target_plane.height_m,
+        mirror_horizontal=target_plane.mirror_horizontal,
+        source="analysis_config",
+        source_reason_invalid=None,
+        reason_invalid=None,
+    )
+
+
+def _target_plane_hit_record(
+    ray: SceneUniGazeRayRecord,
+    *,
+    target_plane: ConfiguredTargetPlane | None,
+    scene_center: Vector3D,
+    axis_basis: SceneAxisBasisRecord,
+) -> SceneTargetPlaneHitRecord | None:
+    if target_plane is None:
+        return None
+    if not ray.valid or ray.origin_camera_m is None or ray.direction_camera is None:
+        return SceneTargetPlaneHitRecord(
+            valid=False,
+            point_camera_m=None,
+            point_scene_m=None,
+            target_x_normalized=None,
+            target_y_normalized=None,
+            inside_bounds=None,
+            ray_t_m=None,
+            source_reason_invalid=_first_reason(
+                ray.source_reason_invalid,
+                "unigaze ray unavailable",
+            ),
+            reason_invalid=SceneInvalidReason.UNIGAZE_INVALID,
+        )
+    hit = intersect_ray_with_target_plane(
+        origin_camera_m=ray.origin_camera_m,
+        direction_camera=_vector_tuple(ray.direction_camera),
+        plane=target_plane,
+    )
+    if not hit.valid or hit.point_camera_m is None:
+        return hit
+    return SceneTargetPlaneHitRecord(
+        valid=True,
+        point_camera_m=hit.point_camera_m,
+        point_scene_m=camera_point_to_scene(
+            hit.point_camera_m, scene_center, axis_basis
+        ),
+        target_x_normalized=hit.target_x_normalized,
+        target_y_normalized=hit.target_y_normalized,
+        inside_bounds=hit.inside_bounds,
+        ray_t_m=hit.ray_t_m,
+        source_reason_invalid=None,
+        reason_invalid=None,
     )
 
 
@@ -746,6 +894,12 @@ def _load_run_manifest(path: Path) -> RunManifest:
     return read_run_manifest_artifact_json(path.read_text(encoding="utf-8"))
 
 
+def _load_calibration(path: Path) -> CalibrationRecord:
+    if not path.exists():
+        return default_calibration()
+    return CalibrationRecord.model_validate_json(path.read_text(encoding="utf-8"))
+
+
 def _load_source_frames(path: Path) -> list[FrameRecord]:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -798,6 +952,13 @@ def _enum_value(value: object) -> str:
     if enum_value is None:
         return ""
     return str(enum_value)
+
+
+def _first_reason(*reasons: str | None) -> str:
+    for reason in reasons:
+        if reason:
+            return reason
+    return "unknown"
 
 
 def _vector_tuple(vector: UnitVector3D | Vector3D) -> tuple[float, float, float]:
