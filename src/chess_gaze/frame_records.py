@@ -8,7 +8,11 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
-from chess_gaze.unigaze_preprocessing import UniGazePreprocessingProfile
+from chess_gaze.unigaze_preprocessing import (
+    LEGACY_UNIGAZE_FACE_CROP_SCALE,
+    LEGACY_UNIGAZE_PREPROCESSING_PROFILE,
+    UniGazePreprocessingProfile,
+)
 
 
 def _coerce_error_code_field(payload: dict[str, Any], field_name: str) -> None:
@@ -375,16 +379,18 @@ class CalibrationRecord(StrictSchemaModel):
     default_iris_diameter_uncertainty_mm: float
     unigaze_input_size_px: int
     unigaze_output_order: str
-    unigaze_preprocessing_profile: UniGazePreprocessingProfile
-    unigaze_face_crop_scale: float
-    unigaze_image_mean_rgb: tuple[float, float, float] | None
-    unigaze_image_std_rgb: tuple[float, float, float] | None
-    target_plane_origin_camera_m: tuple[float, float, float] | None
-    target_plane_x_axis_camera: tuple[float, float, float] | None
-    target_plane_y_axis_camera: tuple[float, float, float] | None
-    target_plane_width_m: float | None
-    target_plane_height_m: float | None
-    target_plane_mirror_horizontal: bool
+    unigaze_preprocessing_profile: UniGazePreprocessingProfile = (
+        LEGACY_UNIGAZE_PREPROCESSING_PROFILE
+    )
+    unigaze_face_crop_scale: float = LEGACY_UNIGAZE_FACE_CROP_SCALE
+    unigaze_image_mean_rgb: tuple[float, float, float] | None = None
+    unigaze_image_std_rgb: tuple[float, float, float] | None = None
+    target_plane_origin_camera_m: tuple[float, float, float] | None = None
+    target_plane_x_axis_camera: tuple[float, float, float] | None = None
+    target_plane_y_axis_camera: tuple[float, float, float] | None = None
+    target_plane_width_m: float | None = None
+    target_plane_height_m: float | None = None
+    target_plane_mirror_horizontal: bool = False
     face_landmarker_running_mode: str
     camera_intrinsics_policy: str
     metric_translation_allowed: bool

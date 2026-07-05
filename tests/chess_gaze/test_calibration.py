@@ -262,6 +262,35 @@ def test_default_calibration_persists_configured_target_plane() -> None:
     assert calibration.target_plane_mirror_horizontal is True
 
 
+def test_legacy_calibration_payload_defaults_to_legacy_unigaze_preprocessing() -> None:
+    from chess_gaze.calibration import default_calibration
+    from chess_gaze.frame_records import CalibrationRecord
+
+    legacy_payload = default_calibration().model_dump()
+    for field_name in (
+        "unigaze_preprocessing_profile",
+        "unigaze_face_crop_scale",
+        "unigaze_image_mean_rgb",
+        "unigaze_image_std_rgb",
+        "target_plane_origin_camera_m",
+        "target_plane_x_axis_camera",
+        "target_plane_y_axis_camera",
+        "target_plane_width_m",
+        "target_plane_height_m",
+        "target_plane_mirror_horizontal",
+    ):
+        legacy_payload.pop(field_name)
+
+    calibration = CalibrationRecord.model_validate(legacy_payload)
+
+    assert calibration.unigaze_preprocessing_profile == "legacy_bbox_rgb01"
+    assert calibration.unigaze_face_crop_scale == 1.0
+    assert calibration.unigaze_image_mean_rgb is None
+    assert calibration.unigaze_image_std_rgb is None
+    assert calibration.target_plane_origin_camera_m is None
+    assert calibration.target_plane_mirror_horizontal is False
+
+
 def test_derive_setup_constants_does_not_rewrite_frame_fields() -> None:
     from chess_gaze.calibration import derive_setup_constants
 
