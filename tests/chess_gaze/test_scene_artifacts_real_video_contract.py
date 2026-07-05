@@ -124,7 +124,7 @@ def _deterministic_valid_scene_record(frame: ObserverFrame) -> FrameRecord:
 
 def test_model_free_nakamura_video_scene_artifact_contract(tmp_path: Path) -> None:
     video_path = Path("artifacts/input/nakamura_short.mp4")
-    expected_frame_count = 180
+    expected_frame_count = 1200
     assert video_path.is_file(), f"missing mandatory real-data video: {video_path}"
 
     pipeline_result = analyze_video(

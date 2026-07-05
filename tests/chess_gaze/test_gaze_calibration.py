@@ -27,8 +27,14 @@ def _make_sample(
         pitch_radians=pitch,
         head_yaw_radians=head_yaw,
         head_pitch_radians=head_pitch,
-        target_x=sum(weight * value for weight, value in zip(coefficients_x, features)),
-        target_y=sum(weight * value for weight, value in zip(coefficients_y, features)),
+        target_x=sum(
+            weight * value
+            for weight, value in zip(coefficients_x, features, strict=True)
+        ),
+        target_y=sum(
+            weight * value
+            for weight, value in zip(coefficients_y, features, strict=True)
+        ),
     )
 
 
