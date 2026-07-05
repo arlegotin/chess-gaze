@@ -24,6 +24,38 @@ def test_load_config_uses_unigaze_runtime_defaults() -> None:
 
     assert config.unigaze_device == "mps"
     assert config.unigaze_batch_size == 7
+    assert config.unigaze_preprocessing_profile == "reference_face2x_imagenet"
+
+
+def test_load_config_accepts_legacy_unigaze_preprocessing_profile(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_preprocessing_profile": "legacy_bbox_rgb01"}',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.unigaze_preprocessing_profile == "legacy_bbox_rgb01"
+
+
+def test_load_config_rejects_unknown_unigaze_preprocessing_profile(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_preprocessing_profile": "crop_it_somehow"}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ConfigurationError, match="unigaze_preprocessing_profile"
+    ) as exc_info:
+        load_config(config_path)
+
+    assert exc_info.value.code == "CONFIG_LOAD_INVALID"
 
 
 def test_load_config_accepts_save_frame_images(tmp_path: Path) -> None:

@@ -130,6 +130,7 @@ class AnalyzeRequest:
     config_path: Path | None = None
     unigaze_device: str | None = None
     unigaze_batch_size: int | None = None
+    unigaze_preprocessing_profile: str | None = None
     save_frame_images: bool | None = None
     save_crop_images: bool | None = None
     generate_qa_summary: bool = False
@@ -182,6 +183,7 @@ class _ResolvedRequest:
     generate_qa_summary: bool
     unigaze_device: str
     unigaze_batch_size: int
+    unigaze_preprocessing_profile: str
 
 
 @dataclass(frozen=True)
@@ -202,7 +204,9 @@ def analyze_video(
     except VideoDecodeError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
 
-    calibration = default_calibration()
+    calibration = default_calibration(
+        unigaze_preprocessing_profile=resolved.unigaze_preprocessing_profile
+    )
     resolved_model_assets: list[ResolvedModelAsset] | None = None
     prepared_unigaze_runtime: PreparedUniGazeRuntime | None = None
     inference = external_observer_inference_record()
@@ -575,6 +579,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
             models_root=request.models_root,
             unigaze_device=request.unigaze_device,
             unigaze_batch_size=request.unigaze_batch_size,
+            unigaze_preprocessing_profile=request.unigaze_preprocessing_profile,
             save_frame_images=request.save_frame_images,
             save_crop_images=request.save_crop_images,
         )
@@ -593,6 +598,7 @@ def _resolve_request(request: AnalyzeRequest) -> _ResolvedRequest:
         generate_qa_summary=request.generate_qa_summary,
         unigaze_device=resolved_config.unigaze_device,
         unigaze_batch_size=resolved_config.unigaze_batch_size,
+        unigaze_preprocessing_profile=resolved_config.unigaze_preprocessing_profile,
     )
 
 

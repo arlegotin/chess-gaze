@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaModel
+from chess_gaze.unigaze_preprocessing import UniGazePreprocessingProfile
 
 
 def _coerce_error_code_field(payload: dict[str, Any], field_name: str) -> None:
@@ -373,9 +374,32 @@ class CalibrationRecord(StrictSchemaModel):
     default_iris_diameter_uncertainty_mm: float
     unigaze_input_size_px: int
     unigaze_output_order: str
+    unigaze_preprocessing_profile: UniGazePreprocessingProfile
+    unigaze_face_crop_scale: float
+    unigaze_image_mean_rgb: tuple[float, float, float] | None
+    unigaze_image_std_rgb: tuple[float, float, float] | None
     face_landmarker_running_mode: str
     camera_intrinsics_policy: str
     metric_translation_allowed: bool
     derived_percentile_lower: float
     derived_percentile_upper: float
     pnp_landmark_indices: PnPLandmarkIndices
+
+    @field_validator("unigaze_image_mean_rgb", "unigaze_image_std_rgb", mode="before")
+    @classmethod
+    def coerce_rgb_tuple(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_unigaze_preprocessing(self) -> CalibrationRecord:
+        if self.unigaze_face_crop_scale <= 0.0:
+            raise ValueError("unigaze_face_crop_scale must be positive")
+        if (self.unigaze_image_mean_rgb is None) != (
+            self.unigaze_image_std_rgb is None
+        ):
+            raise ValueError(
+                "unigaze_image_mean_rgb and unigaze_image_std_rgb must both be set"
+            )
+        return self

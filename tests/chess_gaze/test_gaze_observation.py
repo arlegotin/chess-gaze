@@ -260,7 +260,15 @@ def test_normalize_face_crop_records_transform_and_returns_chw_tensor() -> None:
         y_max=30.0,
     )
 
-    normalized = normalize_face_crop(rgb_frame, bbox, input_size_px=224)
+    normalized = normalize_face_crop(
+        rgb_frame,
+        bbox,
+        input_size_px=224,
+        profile="legacy_bbox_rgb01",
+        crop_scale=1.0,
+        image_mean_rgb=None,
+        image_std_rgb=None,
+    )
 
     assert normalized.tensor.shape == (1, 3, 224, 224)
     assert normalized.tensor.dtype == torch.float32
@@ -268,6 +276,72 @@ def test_normalize_face_crop_records_transform_and_returns_chw_tensor() -> None:
     assert normalized.transform.output_size_px == 224
     assert normalized.transform.image_px_from_crop_px.m00 == pytest.approx(30.0 / 224.0)
     assert normalized.transform.image_px_from_crop_px.m11 == pytest.approx(20.0 / 224.0)
+
+
+def test_reference_unigaze_preprocessing_expands_crop_and_uses_imagenet_transform() -> (
+    None
+):
+    rgb_frame = np.zeros((80, 100, 3), dtype=np.uint8)
+    rgb_frame[:, :] = np.array([255, 128, 0], dtype=np.uint8)
+    bbox = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=30.0,
+        y_min=20.0,
+        x_max=50.0,
+        y_max=40.0,
+    )
+
+    normalized = normalize_face_crop(
+        rgb_frame,
+        bbox,
+        input_size_px=224,
+        profile="reference_face2x_imagenet",
+        crop_scale=2.0,
+        image_mean_rgb=(0.485, 0.456, 0.406),
+        image_std_rgb=(0.229, 0.224, 0.225),
+    )
+
+    assert normalized.transform.source_bbox_image_px.x_min == pytest.approx(20.0)
+    assert normalized.transform.source_bbox_image_px.y_min == pytest.approx(10.0)
+    assert normalized.transform.source_bbox_image_px.x_max == pytest.approx(60.0)
+    assert normalized.transform.source_bbox_image_px.y_max == pytest.approx(50.0)
+    assert normalized.transform.image_px_from_crop_px.m00 == pytest.approx(
+        40.0 / 224.0
+    )
+    assert normalized.transform.image_px_from_crop_px.m11 == pytest.approx(
+        40.0 / 224.0
+    )
+    assert float(normalized.tensor[0, 0, 0, 0]) == pytest.approx(
+        (1.0 - 0.485) / 0.229
+    )
+    assert float(normalized.tensor[0, 1, 0, 0]) == pytest.approx(
+        ((128.0 / 255.0) - 0.456) / 0.224
+    )
+    assert float(normalized.tensor[0, 2, 0, 0]) == pytest.approx(
+        (0.0 - 0.406) / 0.225
+    )
+
+
+def test_normalize_face_crop_rejects_unknown_preprocessing_profile() -> None:
+    rgb_frame = np.zeros((40, 60, 3), dtype=np.uint8)
+    bbox = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=20.0,
+        y_min=10.0,
+        x_max=50.0,
+        y_max=30.0,
+    )
+
+    with pytest.raises(ValueError, match="unigaze preprocessing profile"):
+        normalize_face_crop(
+            rgb_frame,
+            bbox,
+            input_size_px=224,
+            profile="unknown",
+            crop_scale=1.0,
+            image_mean_rgb=None,
+            image_std_rgb=None,
+        )
 
 
 def test_gaze_observation_no_longer_exports_pupil_geometric_helpers() -> None:

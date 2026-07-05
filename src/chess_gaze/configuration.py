@@ -6,6 +6,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
+from chess_gaze.unigaze_preprocessing import (
+    DEFAULT_UNIGAZE_PREPROCESSING_PROFILE,
+    UniGazePreprocessingProfile,
+)
+
 
 class ConfigurationError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -25,6 +30,9 @@ class AnalysisConfig(BaseModel):
     save_crop_images: bool = False
     unigaze_device: Literal["cpu", "mps"] = "mps"
     unigaze_batch_size: int = 7
+    unigaze_preprocessing_profile: UniGazePreprocessingProfile = (
+        DEFAULT_UNIGAZE_PREPROCESSING_PROFILE
+    )
 
     @field_validator("unigaze_batch_size")
     @classmethod
@@ -41,6 +49,7 @@ def apply_analysis_overrides(
     models_root: Path | None = None,
     unigaze_device: str | None = None,
     unigaze_batch_size: int | None = None,
+    unigaze_preprocessing_profile: str | None = None,
     save_frame_images: bool | None = None,
     save_crop_images: bool | None = None,
 ) -> AnalysisConfig:
@@ -54,6 +63,8 @@ def apply_analysis_overrides(
         payload["unigaze_device"] = unigaze_device
     if unigaze_batch_size is not None:
         payload["unigaze_batch_size"] = unigaze_batch_size
+    if unigaze_preprocessing_profile is not None:
+        payload["unigaze_preprocessing_profile"] = unigaze_preprocessing_profile
     if save_frame_images is not None:
         payload["save_frame_images"] = save_frame_images
     if save_crop_images is not None:

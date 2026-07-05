@@ -20,7 +20,7 @@ from PIL import Image
 from pydantic import Field
 
 from chess_gaze.calibration import default_calibration
-from chess_gaze.frame_records import FrameRecord
+from chess_gaze.frame_records import CalibrationRecord, FrameRecord
 from chess_gaze.gaze_observation import (
     UNIGAZE_MODEL_ID,
     normalize_face_crop,
@@ -794,6 +794,9 @@ def _load_forward_benchmark_crops(run_dir: Path) -> Any:
     import torch
 
     tensors = []
+    calibration = CalibrationRecord.model_validate_json(
+        (run_dir / "calibration.json").read_text(encoding="utf-8")
+    )
     frames_path = run_dir / "records" / "frames.jsonl"
     for line in frames_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -807,7 +810,11 @@ def _load_forward_benchmark_crops(run_dir: Path) -> Any:
         crop = normalize_face_crop(
             rgb,
             record.face.bounding_box,
-            input_size_px=default_calibration().unigaze_input_size_px,
+            input_size_px=calibration.unigaze_input_size_px,
+            profile=calibration.unigaze_preprocessing_profile,
+            crop_scale=calibration.unigaze_face_crop_scale,
+            image_mean_rgb=calibration.unigaze_image_mean_rgb,
+            image_std_rgb=calibration.unigaze_image_std_rgb,
         )
         tensors.append(crop.tensor)
     if not tensors:
