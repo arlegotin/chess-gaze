@@ -600,6 +600,13 @@ def _build_summary(
             if scene_frame.target_plane_hit is not None
             and scene_frame.target_plane_hit.valid
         ),
+        in_bounds_target_plane_hit_frames=sum(
+            1
+            for scene_frame in scene_frames
+            if scene_frame.target_plane_hit is not None
+            and scene_frame.target_plane_hit.valid
+            and scene_frame.target_plane_hit.inside_bounds is True
+        ),
         invalid_sphere_hit_reasons=dict(sorted(invalid_sphere_hit_reasons.items())),
         sphere_hit_angle_bounds=_sphere_hit_angle_bounds(scene_frames),
         representative_scene_warning_frame_ids=_representative_warning_frame_ids(

@@ -181,16 +181,25 @@ def _external_observer_inference_record() -> InferenceRuntimeRecord:
     )
 
 
-def _write_minimal_run(run_dir: Path) -> RunLayout:
+def _write_minimal_run(
+    run_dir: Path,
+    *,
+    frames: list[FrameRecord] | None = None,
+) -> RunLayout:
     layout = _layout(run_dir)
     layout.records_dir.mkdir(parents=True)
+    source_frames = (
+        frames
+        if frames is not None
+        else [_frame(index, gaze_valid=index != 6) for index in range(7)]
+    )
 
     video = VideoManifest(
         source_path="artifacts/input/synthetic_scene_source.mp4",
         source_sha256="a" * 64,
         frame_width=1920,
         frame_height=1080,
-        frame_count_decoded=7,
+        frame_count_decoded=len(source_frames),
     )
     run_manifest = RunManifest(
         run_id="20260626T120000Z-scene",
@@ -207,10 +216,7 @@ def _write_minimal_run(run_dir: Path) -> RunLayout:
         video.model_dump_json(), encoding="utf-8"
     )
     (layout.records_dir / "frames.jsonl").write_text(
-        "".join(
-            _frame(index, gaze_valid=index != 6).model_dump_json() + "\n"
-            for index in range(7)
-        ),
+        "".join(frame.model_dump_json() + "\n" for frame in source_frames),
         encoding="utf-8",
     )
     return layout
@@ -382,6 +388,40 @@ def test_build_scene_artifacts_projects_rays_to_configured_target_plane(
     assert len(valid_hits) == 6
     assert result.summary.valid_target_plane_hit_frames == 6
     assert all(hit.inside_bounds is True for hit in valid_hits)
+
+
+def test_build_scene_artifacts_counts_in_bounds_target_plane_hits_separately(
+    tmp_path: Path,
+) -> None:
+    frames = [
+        _frame(index).model_copy(
+            update={
+                "appearance_gaze": _gaze(
+                    valid=True,
+                    yaw_radians=yaw_radians,
+                    pitch_radians=0.0,
+                )
+            }
+        )
+        for index, yaw_radians in enumerate((0.0, 0.5))
+    ]
+    layout = _write_minimal_run(tmp_path / "run", frames=frames)
+    calibration = default_calibration(
+        target_plane_origin_camera_m=(-0.01, -0.01, 0.5),
+        target_plane_x_axis_camera=(1.0, 0.0, 0.0),
+        target_plane_y_axis_camera=(0.0, 1.0, 0.0),
+        target_plane_width_m=0.02,
+        target_plane_height_m=0.02,
+        target_plane_mirror_horizontal=False,
+    )
+    (layout.run_dir / "calibration.json").write_text(
+        calibration.model_dump_json(), encoding="utf-8"
+    )
+
+    summary = build_scene_artifacts(layout).summary
+
+    assert summary.valid_target_plane_hit_frames == 2
+    assert summary.in_bounds_target_plane_hit_frames == 1
 
 
 def test_scene_frames_preserve_source_identity_invalid_reasons_and_duplicate_hits(

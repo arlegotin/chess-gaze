@@ -890,6 +890,7 @@ class SceneSummary(SceneSchemaModel):
     valid_unigaze_ray_frames: int
     valid_sphere_hit_frames: int
     valid_target_plane_hit_frames: int = 0
+    in_bounds_target_plane_hit_frames: int | None = None
     invalid_sphere_hit_reasons: dict[str, int]
     sphere_hit_angle_bounds: SceneSphereHitAngleBoundsRecord
     representative_scene_warning_frame_ids: list[str]
