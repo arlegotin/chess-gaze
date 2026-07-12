@@ -37,6 +37,33 @@ def make_tiny_video(path: Path, frame_count: int = 3) -> None:
     container.close()
 
 
+ORIENTATION_MARKER_RGB = np.asarray(
+    (
+        ((255, 0, 0), (0, 255, 0), (0, 0, 255)),
+        ((255, 255, 0), (255, 0, 255), (0, 255, 255)),
+    ),
+    dtype=np.uint8,
+)
+
+
+def make_oriented_marker_video(path: Path, rotation_degrees: int) -> None:
+    import av
+
+    upright = np.repeat(np.repeat(ORIENTATION_MARKER_RGB, 64, axis=0), 64, axis=1)
+    stored = np.rot90(upright, k=-(rotation_degrees // 90))
+    container = av.open(str(path), mode="w")
+    stream = container.add_stream("mpeg4", rate=1)
+    stream.width = stored.shape[1]
+    stream.height = stored.shape[0]
+    stream.pix_fmt = "yuv420p"
+    stream.set_display_rotation(rotation_degrees)
+    for packet in stream.encode(av.VideoFrame.from_ndarray(stored, format="rgb24")):
+        container.mux(packet)
+    for packet in stream.encode():
+        container.mux(packet)
+    container.close()
+
+
 def test_inspect_video_reports_expected_metadata(tmp_path: Path) -> None:
     path = tmp_path / "tiny.mp4"
     make_tiny_video(path)
@@ -140,6 +167,44 @@ def test_iter_decoded_frames_yields_full_rgb_frames_in_order(tmp_path: Path) -> 
     assert pixel_values == sorted(pixel_values)
     assert pixel_values[0] == pytest.approx(0, abs=2)
     assert pixel_values[-1] == pytest.approx(120, abs=4)
+
+
+@pytest.mark.parametrize("rotation_degrees", [0, 90, 180, 270])
+def test_video_decode_applies_display_orientation(
+    tmp_path: Path, rotation_degrees: int
+) -> None:
+    import av
+
+    path = tmp_path / f"rotation_{rotation_degrees}_short.mp4"
+    make_oriented_marker_video(path, rotation_degrees)
+    with av.open(str(path)) as container:
+        stored_rgb = next(container.decode(container.streams.video[0])).to_ndarray(
+            format="rgb24"
+        )
+
+    inspection = inspect_video(path)
+    decoded = next(iter_decoded_frames(path)).rgb
+
+    assert inspection.rotation_degrees == (
+        None if rotation_degrees == 0 else rotation_degrees
+    )
+    assert inspection.video_manifest.frame_width == 192
+    assert inspection.video_manifest.frame_height == 128
+    assert decoded.shape == (128, 192, 3)
+    samples = np.asarray(
+        [
+            [decoded[row * 64 + 32, column * 64 + 32] for column in range(3)]
+            for row in range(2)
+        ]
+    )
+    np.testing.assert_allclose(samples, ORIENTATION_MARKER_RGB, atol=2)
+    if rotation_degrees == 0:
+        np.testing.assert_array_equal(decoded, stored_rgb)
+
+
+def test_video_decode_rejects_non_right_angle_display_rotation() -> None:
+    with pytest.raises(VideoDecodeError, match="45 degrees"):
+        video_decode._right_angle_rotation(45)
 
 
 def test_unsupported_video_raises_stable_error(tmp_path: Path) -> None:

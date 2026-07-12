@@ -61,11 +61,29 @@ def inspect_video(path: Path) -> VideoInspection:
 
     with _open_video_container(path) as container:
         stream = _video_stream_or_raise(container, path)
+        rotation_degrees = _rotation_from_stream(stream)
+
+        def inspected_frames() -> Iterator[av.VideoFrame]:
+            nonlocal rotation_degrees
+            for frame in container.decode(stream):
+                frame_rotation = _rotation_from_frame(frame)
+                if frame_rotation is not None:
+                    if rotation_degrees not in (None, frame_rotation):
+                        raise VideoDecodeError(
+                            CliErrorCode.UNSUPPORTED_VIDEO,
+                            "Video display rotation changes during decode",
+                        )
+                    rotation_degrees = frame_rotation
+                yield frame
+
         (
             frame_count_decoded,
             pts_sequence_sha256,
             pts_sequence_usable,
-        ) = _decoded_pts_identity(container.decode(stream))
+        ) = _decoded_pts_identity(inspected_frames())
+        frame_width, frame_height = _oriented_dimensions(
+            stream.width, stream.height, rotation_degrees
+        )
 
         return VideoInspection(
             source_path=path,
@@ -73,8 +91,8 @@ def inspect_video(path: Path) -> VideoInspection:
             video_manifest=VideoManifest(
                 source_path=str(path),
                 source_sha256=source_sha256,
-                frame_width=stream.width,
-                frame_height=stream.height,
+                frame_width=frame_width,
+                frame_height=frame_height,
                 frame_count_decoded=frame_count_decoded,
                 pts_sequence_sha256=pts_sequence_sha256,
                 pts_sequence_usable=pts_sequence_usable,
@@ -84,11 +102,11 @@ def inspect_video(path: Path) -> VideoInspection:
             stream_index=stream.index,
             codec_name=stream.name or stream.codec_context.name,
             codec_profile=stream.profile,
-            frame_width=stream.width,
-            frame_height=stream.height,
+            frame_width=frame_width,
+            frame_height=frame_height,
             nominal_fps=_fraction_to_float(stream.average_rate),
             time_base=_fraction_to_string(stream.time_base),
-            rotation_degrees=_rotation_from_stream(stream),
+            rotation_degrees=rotation_degrees,
             pixel_format=stream.pix_fmt,
             color_range=_codec_value(stream.codec_context.color_range),
             color_space=_codec_value(stream.codec_context.colorspace),
@@ -107,7 +125,7 @@ def iter_decoded_frames(path: Path) -> Iterator[DecodedFrame]:
             yield DecodedFrame(
                 frame_index=index,
                 frame_id=frame_id(index),
-                rgb=frame.to_ndarray(format="rgb24"),
+                rgb=_oriented_rgb(frame),
                 pts=frame.pts,
                 pts_seconds=_frame_pts_seconds(frame),
                 duration_seconds=_frame_duration_seconds(frame),
@@ -148,9 +166,38 @@ def _rotation_from_stream(stream: av.video.stream.VideoStream) -> int | None:
         return None
 
     try:
-        return int(raw_rotation)
+        return _right_angle_rotation(int(raw_rotation))
     except ValueError:
         return None
+
+
+def _rotation_from_frame(frame: av.VideoFrame) -> int | None:
+    rotation = _right_angle_rotation(frame.rotation)
+    return rotation or None
+
+
+def _right_angle_rotation(rotation_degrees: int) -> int:
+    normalized = rotation_degrees % 360
+    if normalized % 90:
+        raise VideoDecodeError(
+            CliErrorCode.UNSUPPORTED_VIDEO,
+            f"Unsupported video display rotation: {rotation_degrees} degrees",
+        )
+    return normalized
+
+
+def _oriented_dimensions(
+    width: int, height: int, rotation_degrees: int | None
+) -> tuple[int, int]:
+    return (height, width) if rotation_degrees in (90, 270) else (width, height)
+
+
+def _oriented_rgb(frame: av.VideoFrame) -> np.ndarray:
+    rgb = frame.to_ndarray(format="rgb24")
+    rotation = _rotation_from_frame(frame)
+    if rotation is None:
+        return rgb
+    return np.ascontiguousarray(np.rot90(rgb, k=rotation // 90))
 
 
 def _frame_count_hint(frame_count: int) -> int | None:
