@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import hashlib
+import math
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -59,7 +61,11 @@ def inspect_video(path: Path) -> VideoInspection:
 
     with _open_video_container(path) as container:
         stream = _video_stream_or_raise(container, path)
-        frame_count_decoded = sum(1 for _ in container.decode(stream))
+        (
+            frame_count_decoded,
+            pts_sequence_sha256,
+            pts_sequence_usable,
+        ) = _decoded_pts_identity(container.decode(stream))
 
         return VideoInspection(
             source_path=path,
@@ -70,6 +76,8 @@ def inspect_video(path: Path) -> VideoInspection:
                 frame_width=stream.width,
                 frame_height=stream.height,
                 frame_count_decoded=frame_count_decoded,
+                pts_sequence_sha256=pts_sequence_sha256,
+                pts_sequence_usable=pts_sequence_usable,
             ),
             container_name=container.format.name,
             container_long_name=container.format.long_name,
@@ -169,8 +177,35 @@ def _codec_value(value: int | None) -> int | None:
     return int(value)
 
 
+def _decoded_pts_identity(
+    frames: Iterable[av.VideoFrame],
+) -> tuple[int, str, bool]:
+    digest = hashlib.sha256()
+    count = 0
+    usable = True
+    previous_seconds: float | None = None
+    for frame in frames:
+        count += 1
+        time_base = frame.time_base
+        time_base_text = (
+            "null"
+            if time_base is None
+            else f"{time_base.numerator}/{time_base.denominator}"
+        )
+        digest.update(f"{frame.pts}\t{time_base_text}\n".encode())
+        seconds = _frame_pts_seconds(frame)
+        if (
+            seconds is None
+            or not math.isfinite(seconds)
+            or (previous_seconds is not None and seconds <= previous_seconds)
+        ):
+            usable = False
+        previous_seconds = seconds
+    return count, digest.hexdigest(), usable and count > 0
+
+
 def _frame_pts_seconds(frame: av.VideoFrame) -> float | None:
-    if frame.pts is None or frame.time_base is None:
+    if frame.pts is None or frame.time_base is None or frame.time_base <= 0:
         return None
     return float(frame.pts * frame.time_base)
 

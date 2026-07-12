@@ -1072,6 +1072,7 @@ def test_model_free_observer_run_manifest_records_external_observer(
         "schema_version": "inference-runtime-v1",
         "observer_source": "external_observer",
         "unigaze_model_id": None,
+        "unigaze_model_checksum_sha256": None,
         "unigaze_device": "not_applicable",
         "unigaze_batch_size": None,
         "torch_version": None,

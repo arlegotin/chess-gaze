@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import numpy as np
 import pytest
 
+from chess_gaze import video_decode
 from chess_gaze.errors import CliErrorCode
 from chess_gaze.video_decode import (
     VideoDecodeError,
@@ -64,6 +67,46 @@ def test_inspect_video_reports_expected_metadata(tmp_path: Path) -> None:
     assert inspection.pyav_version
     assert inspection.ffmpeg_versions["libavcodec"]
     assert inspection.ffmpeg_versions["libavformat"]
+
+
+def test_inspect_video_records_stable_usable_pts_identity(tmp_path: Path) -> None:
+    path = tmp_path / "tiny_short.mp4"
+    make_tiny_video(path)
+
+    inspection = inspect_video(path)
+    second = inspect_video(path)
+
+    assert inspection.video_manifest.pts_sequence_usable is True
+    assert len(inspection.video_manifest.pts_sequence_sha256 or "") == 64
+    assert second.video_manifest.pts_sequence_sha256 == (
+        inspection.video_manifest.pts_sequence_sha256
+    )
+
+
+@pytest.mark.parametrize(
+    "frames",
+    [
+        [SimpleNamespace(pts=None, time_base=Fraction(1, 30))],
+        [
+            SimpleNamespace(pts=1, time_base=Fraction(1, 30)),
+            SimpleNamespace(pts=1, time_base=Fraction(1, 30)),
+        ],
+        [
+            SimpleNamespace(pts=2, time_base=Fraction(1, 30)),
+            SimpleNamespace(pts=1, time_base=Fraction(1, 30)),
+        ],
+        [SimpleNamespace(pts=1, time_base=Fraction(0, 1))],
+    ],
+    ids=["missing-pts", "duplicate-pts", "decreasing-pts", "non-positive-time-base"],
+)
+def test_decoded_pts_identity_marks_untrustworthy_sequences_unusable(
+    frames: list[SimpleNamespace],
+) -> None:
+    count, digest, usable = video_decode._decoded_pts_identity(cast(Any, frames))
+
+    assert count == len(frames)
+    assert len(digest) == 64
+    assert usable is False
 
 
 def test_iter_decoded_frames_yields_full_rgb_frames_in_order(tmp_path: Path) -> None:

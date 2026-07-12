@@ -192,6 +192,8 @@ class VideoManifest(StrictSchemaModel):
     frame_width: int
     frame_height: int
     frame_count_decoded: int
+    pts_sequence_sha256: str | None = None
+    pts_sequence_usable: bool = False
 
 
 class InferenceRuntimeRecord(StrictSchemaModel):
@@ -202,6 +204,7 @@ class InferenceRuntimeRecord(StrictSchemaModel):
         "legacy_manifest_without_inference",
     ]
     unigaze_model_id: str | None
+    unigaze_model_checksum_sha256: str | None = None
     unigaze_device: Literal["cpu", "mps", "not_applicable"]
     unigaze_batch_size: int | None
     torch_version: str | None
@@ -222,6 +225,10 @@ class InferenceRuntimeRecord(StrictSchemaModel):
             if self.unigaze_model_id is not None:
                 issues.append(
                     f"{self.observer_source} cannot declare a UniGaze model identifier"
+                )
+            if self.unigaze_model_checksum_sha256 is not None:
+                issues.append(
+                    f"{self.observer_source} cannot declare a UniGaze model checksum"
                 )
             if self.unigaze_device != "not_applicable":
                 issues.append(
@@ -344,6 +351,7 @@ def _legacy_artifact_inference_record() -> InferenceRuntimeRecord:
     return InferenceRuntimeRecord(
         observer_source="legacy_manifest_without_inference",
         unigaze_model_id=None,
+        unigaze_model_checksum_sha256=None,
         unigaze_device="not_applicable",
         unigaze_batch_size=None,
         torch_version=None,

@@ -75,6 +75,7 @@ def test_prepare_unigaze_runtime_cpu_loads_model_without_dummy_preflight(
     assert fake_model.predict_batch_input_shapes == []
     assert prepared.inference.unigaze_device == "cpu"
     assert prepared.inference.unigaze_batch_size == 5
+    assert prepared.inference.unigaze_model_checksum_sha256 == "abc123"
     assert prepared.inference.torch_mps_available is True
     assert prepared.inference.mps_preflight_passed is None
 

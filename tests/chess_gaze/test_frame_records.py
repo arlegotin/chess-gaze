@@ -242,6 +242,40 @@ def test_inference_runtime_record_accepts_external_observer() -> None:
     assert record.unigaze_model_id is None
 
 
+def test_provenance_fields_default_for_legacy_payloads() -> None:
+    legacy_video = VideoManifest.model_validate(
+        {
+            "source_path": "artifacts/input/nakamura_short.mp4",
+            "source_sha256": "0" * 64,
+            "frame_width": 1920,
+            "frame_height": 1080,
+            "frame_count_decoded": 180,
+        }
+    )
+    legacy_inference = InferenceRuntimeRecord.model_validate(
+        _default_model_inference_payload()
+    )
+
+    assert legacy_video.pts_sequence_sha256 is None
+    assert legacy_video.pts_sequence_usable is False
+    assert legacy_inference.unigaze_model_checksum_sha256 is None
+
+
+@pytest.mark.parametrize(
+    "observer_source",
+    ["external_observer", "legacy_manifest_without_inference"],
+)
+def test_model_free_inference_records_reject_model_checksum(
+    observer_source: str,
+) -> None:
+    payload = _external_observer_inference_payload()
+    payload["observer_source"] = observer_source
+    payload["unigaze_model_checksum_sha256"] = "abc123"
+
+    with pytest.raises(ValidationError, match=observer_source):
+        InferenceRuntimeRecord(**payload)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
