@@ -17,7 +17,7 @@ from chess_gaze.qa_summary import QASummary
 from chess_gaze.scene_records import SceneSummary
 
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
-NAKAMURA_SHORT_FRAME_COUNT = 180
+NAKAMURA_SHORT_FRAME_COUNT = 1200
 
 
 def _point(x: float, y: float) -> Point2D:
