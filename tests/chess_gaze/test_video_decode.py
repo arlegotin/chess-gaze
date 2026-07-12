@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
+from av.sidedata.sidedata import Type as SideDataType
 
 from chess_gaze import video_decode
 from chess_gaze.errors import CliErrorCode
@@ -62,6 +64,30 @@ def make_oriented_marker_video(path: Path, rotation_degrees: int) -> None:
     for packet in stream.encode():
         container.mux(packet)
     container.close()
+
+
+def fake_video_container(
+    frames: list[Any], *, width: int, height: int, stream_rotation: int | None
+) -> Any:
+    stream = SimpleNamespace(
+        metadata={} if stream_rotation is None else {"rotate": str(stream_rotation)},
+        width=width,
+        height=height,
+        average_rate=Fraction(1, 1),
+        time_base=Fraction(1, 1),
+        frames=len(frames),
+        index=0,
+        name="mpeg4",
+        codec_context=SimpleNamespace(name="mpeg4", color_range=None, colorspace=None),
+        profile=None,
+        pix_fmt="rgb24",
+    )
+    container = SimpleNamespace(
+        streams=SimpleNamespace(video=[stream]),
+        format=SimpleNamespace(name="fake", long_name="fake video"),
+        decode=lambda selected_stream: iter(frames),
+    )
+    return nullcontext(container)
 
 
 def test_inspect_video_reports_expected_metadata(tmp_path: Path) -> None:
@@ -205,6 +231,71 @@ def test_video_decode_applies_display_orientation(
 def test_video_decode_rejects_non_right_angle_display_rotation() -> None:
     with pytest.raises(VideoDecodeError, match="45 degrees"):
         video_decode._right_angle_rotation(45)
+
+
+def test_stream_rotation_orients_inspection_and_decoded_pixels_consistently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import av
+
+    path = tmp_path / "legacy_rotation_short.mp4"
+    path.write_bytes(b"fake video")
+    upright = np.repeat(np.repeat(ORIENTATION_MARKER_RGB, 2, axis=0), 2, axis=1)
+    stored = np.rot90(upright, k=-1)
+    frame = av.VideoFrame.from_ndarray(stored, format="rgb24")
+    frame.pts = 0
+    frame.time_base = Fraction(1, 1)
+    frame.duration = 1
+    monkeypatch.setattr(
+        video_decode,
+        "_open_video_container",
+        lambda unused_path: fake_video_container(
+            [frame], width=stored.shape[1], height=stored.shape[0], stream_rotation=90
+        ),
+    )
+
+    inspection = inspect_video(path)
+    decoded = next(iter_decoded_frames(path)).rgb
+
+    assert inspection.rotation_degrees == 90
+    assert (inspection.frame_width, inspection.frame_height) == (
+        upright.shape[1],
+        upright.shape[0],
+    )
+    assert decoded.shape == upright.shape
+    np.testing.assert_array_equal(decoded, upright)
+
+
+def test_inspect_video_rejects_display_rotation_changing_to_explicit_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "changing_rotation_short.mp4"
+    path.write_bytes(b"fake video")
+    display_matrix = {SideDataType.DISPLAYMATRIX: object()}
+    frames = [
+        SimpleNamespace(
+            rotation=90,
+            side_data=display_matrix,
+            pts=0,
+            time_base=Fraction(1, 1),
+        ),
+        SimpleNamespace(
+            rotation=0,
+            side_data=display_matrix,
+            pts=1,
+            time_base=Fraction(1, 1),
+        ),
+    ]
+    monkeypatch.setattr(
+        video_decode,
+        "_open_video_container",
+        lambda unused_path: fake_video_container(
+            frames, width=4, height=2, stream_rotation=None
+        ),
+    )
+
+    with pytest.raises(VideoDecodeError, match="changes during decode"):
+        inspect_video(path)
 
 
 def test_unsupported_video_raises_stable_error(tmp_path: Path) -> None:
