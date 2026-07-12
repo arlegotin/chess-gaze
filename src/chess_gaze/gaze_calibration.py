@@ -58,11 +58,15 @@ def fit_affine_gaze_calibrator(
         raise ValueError("fit_affine_gaze_calibrator requires at least 5 samples")
 
     design_matrix, targets = _design_matrix_and_targets(samples)
-    regularizer = np.eye(_AFFINE_FEATURE_COUNT, dtype=np.float64) * ridge_lambda
-    coefficients_t = np.linalg.solve(
-        design_matrix.T @ design_matrix + regularizer,
-        design_matrix.T @ targets,
-    )
+    if ridge_lambda == 0.0:
+        coefficients_t = np.linalg.lstsq(design_matrix, targets, rcond=None)[0]
+    else:
+        regularizer = np.eye(_AFFINE_FEATURE_COUNT, dtype=np.float64) * ridge_lambda
+        regularizer[0, 0] = 0.0
+        coefficients_t = np.linalg.solve(
+            design_matrix.T @ design_matrix + regularizer,
+            design_matrix.T @ targets,
+        )
     coefficients = coefficients_t.T
     training_metrics = _evaluate_coefficients(coefficients, design_matrix, targets)
     return AffineGazeCalibrator(
@@ -116,9 +120,7 @@ def _feature_vector(sample: GazeCalibrationSample) -> npt.NDArray[np.float64]:
 def _target_vector(sample: GazeCalibrationSample) -> npt.NDArray[np.float64]:
     values = np.asarray((sample.target_x, sample.target_y), dtype=np.float64)
     if not np.isfinite(values).all():
-        raise ValueError(
-            "gaze calibration samples must not contain non-finite targets"
-        )
+        raise ValueError("gaze calibration samples must not contain non-finite targets")
     return values
 
 
