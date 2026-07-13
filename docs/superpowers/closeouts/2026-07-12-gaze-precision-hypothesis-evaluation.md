@@ -3,20 +3,23 @@
 Date: 2026-07-13
 Branch: `improvements-1`
 Plan base: `34d7876`
-Implementation HEAD before the closeout commit: `050b82d`
+Implementation HEAD before the original closeout commit: `050b82d`
+Resumed H1 campaign base: `023a8e57bca4df17ec166fda0aa1f94a2cbd5f59`
+Resumed H1 implementation commit: `af8ed2e`
 
 ## Result
 
 All H0-H10 proposals in `docs/gaze-precision-hypotheses.md` received the
-smallest valid experiment allowed by the three `*_short.mp4` inputs. Four
+smallest valid experiment allowed by the three `*_short.mp4` inputs. Five
 durable correctness surfaces were kept: experiment provenance/comparability,
-finite target-plane accounting, calibration numerics, and declared video
-orientation. No proxy was promoted to an accuracy claim.
+finite target-plane accounting, calibration numerics, declared video
+orientation, and the pinned UniGaze geometric input/output contract. No proxy
+was promoted to an accuracy claim.
 
 | Hypothesis | Question tested | Valid gate | Outcome | Retained result |
 | --- | --- | --- | --- | --- |
 | H0 measurement | Can a paired run prove input/model/timestamp identity and report time-normalized, finite-plane observables? | Invalid pairs abort; one-variable pairs reproduce on every clip | **kept** | PTS/model provenance, strict v2 comparator, finite-plane count, corrected short-video constants |
-| H1 geometry | Can the official UniGaze geometric path be reproduced with verified inputs and redistributable geometry? | Revision, digest, six-point mapping, and asset-license gates all pass | **blocked** | None; `face_model.txt` redistribution permission is unresolved |
+| H1 geometry | Can the official UniGaze geometric path be reproduced with verified inputs and redistributable geometry? | Revision, digest, six-point mapping, asset/license, independent oracle, QA, comparator, and coverage gates all pass | **kept** | `official_geometric_v1` default; `reference_face2x_imagenet` rollback; zero valid-gaze coverage loss; no accuracy claim |
 | H2 calibration | Does the existing affine fit behave correctly on rank-deficient and ridge cases? | Focused numerical regressions | **kept** | `lstsq` at zero ridge; intercept excluded from ridge penalty |
 | H3 identity | Does continuity, prior ROI, or MediaPipe VIDEO fix all five confirmed face-selection failures without new swaps or excessive coverage loss? | 5/5 fixed, no new reviewed failure, aggregate loss <=2 pp, per-clip loss <=5 pp, then resume equivalence | **rejected** | None; variants fixed 3/5, 2/5, and 0/5 respectively |
 | H4 orientation/mirror | Is there an independently reproducible orientation/sign defect? | Synthetic orientation oracle or labeled horizontal-direction truth | **kept** | Decode/display-orientation correctness fix; mirror policy remains inconclusive |
@@ -50,13 +53,16 @@ The retained H0/H3/H5-H7/H10 records use `unigaze-h14-joint`, model SHA-256
 and `reference_face2x_imagenet`. Native face work used
 `models/mediapipe/face_landmarker.task`, SHA-256
 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff`.
+The resumed H1 campaign used the same two assets plus
+`models/unigaze/face_model.txt`, SHA-256
+`0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7`.
 
 Evidence routing after cleanup:
 
 | Hypotheses | Per-clip inference source | Report path before/after cleanup |
 | --- | --- | --- |
 | H0 | The six reference/legacy run paths listed below | Three persisted `artifacts/output/gaze-hypotheses/h0/*-comparison.json` reports |
-| H1 | Direct frames 0/midpoint/last from each approved source | Deleted `artifacts/experiments/2026-07-12-gaze-precision/h1/`; hashes summarized here |
+| H1 | Six exact paired MPS runs listed below; native frame 0 from each approved source; prior 0/midpoint/last mapping review | Three persisted `artifacts/output/gaze-hypotheses/h1/*-comparison.json` reports, six run-local `qa_summary.json` files, `coverage-gate.json`, and the summarized deleted mapping evidence |
 | H2 | Synthetic calibration samples; no video | Focused tracked tests; no generated report |
 | H3, H5, H6, H7 | The exact three H0 reference run paths below | Deleted `h3-review.json`, `h3-variants/`, `h5-quality.json`, `h6-filter.json`, and `h7-iris.json`; hashes summarized here |
 | H4 | Direct approved frames 0/midpoint/last plus generated `rotation_*_short.mp4` | Deleted `h4/orientation.json` and `h4/flip-equivariance.json`; hashes summarized here |
@@ -97,7 +103,8 @@ source-bound fixture repair `050b82d`.
 
 ## H1: Official UniGaze Geometry
 
-Verified on 2026-07-12 against official UniGaze revision
+Initially verified on 2026-07-12 and refreshed on 2026-07-13 against official
+UniGaze revision
 `9c240fbe33f3d6146970a77b7c8fa06a7e60019e`. The pinned face-model SHA-256 is
 `0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7`.
 The operational mapping `[33,133,362,263,98,327]` to dlib
@@ -116,12 +123,109 @@ SHA-256 `f6412a4db03ea2cdf2cd4c190d7cef88e05566fa973ece17d37adf506b872e83`;
 the manual checklist SHA-256 was
 `6922829d31e30e14ca21cdc2ad3c7312eed627de2c6d5fd03a0f5de6d82bc389`.
 
-The official root/model license covers the model, while `normalize.py` carries
-CC BY-NC-SA 4.0 terms. The numeric `face_model.txt` has no file-level source,
-license, citation, or redistribution notice, and the sole addition commit says
-only `fixed missing file`. Assigning either neighboring license to that data
-would be an unsupported inference. H1 was therefore blocked before production
-implementation; planned Tasks 6-7 and ADR-0007 were skipped.
+The first closeout stopped here because the numeric `face_model.txt` had no
+file-level notice. On 2026-07-13 `repo_owner` explicitly approved its use and
+redistribution under `MG-NC-RAI-2.0`. The registry now records that dated
+authorization decision, the pinned raw source, the SHA above, the finite 50 x 3
+input contract, the six selected rows, and the MediaPipe mapping. This records
+the repository owner's authorization; it is not independent legal advice.
+
+The independent implementation reproduces the pinned pose/normalization
+contract without a new dependency:
+
+```text
+six crop-local landmarks + six pinned face-model points
+  -> solvePnP pose and face centre
+  -> W = K_norm * S * R * K_crop^-1
+  -> 224 x 224 ImageNet-normalized tensor
+  -> UniGaze model vector in normalized coordinates
+  -> R^-1 into camera coordinates
+  -> repository physical-ray pitch/yaw convention
+```
+
+The output-sign derivation required a plan correction. The pinned training
+preparation stores `vector_to_pitchyaw(-gaze_norm)`, while the pinned video path
+inverse-rotates the model vector and projects the physical ray with a negative
+length. Therefore, for `model_vector_camera = R^-1 @ model_vector_normalized`,
+repository pitch is `asin(model_vector_camera.y)` and yaw is
+`atan2(-model_vector_camera.x, model_vector_camera.z)`. The existing scene
+conversion `(x,-y,-z)` then reconstructs the physical ray
+`-model_vector_camera`. The original plan's more direct model-vector/physical-
+ray treatment was the root cause; equation, sign, rotation, flip, and native
+fixed-frame regressions now protect the corrected composition.
+
+All six campaign runs used Apple Silicon MPS, batch size 7, PyTorch 2.12.1,
+MPS preflight passing, and unset MPS fallback/fast-math/prefer-Metal overrides.
+They explicitly selected their profile; the only calibration differences were
+the profile plus the official path's face-model ID/checksum. Source SHA,
+dimensions, decoded count, PTS sequence, model checkpoint, runtime, crop scale,
+ImageNet statistics, input size, and output order matched within each pair.
+
+| Clip | Reference run | Official run | Comparator report / SHA-256 |
+| --- | --- | --- | --- |
+| Carlsen | `artifacts/output/gaze-hypotheses/h1/reference/carlsen_short/runs/20260713T060135Z-b85b647c` | `artifacts/output/gaze-hypotheses/h1/official/carlsen_short/runs/20260713T061256Z-2cfab469` | `artifacts/output/gaze-hypotheses/h1/carlsen_short-comparison.json` / `97fe260b76ca2dd92fd607ce09a09bcc7c914dd1d801a91dd80cc560a488ecb9` |
+| Nakamura | `artifacts/output/gaze-hypotheses/h1/reference/nakamura_short/runs/20260713T060354Z-1d7a1750` | `artifacts/output/gaze-hypotheses/h1/official/nakamura_short/runs/20260713T061520Z-2013413b` | `artifacts/output/gaze-hypotheses/h1/nakamura_short-comparison.json` / `5dd0b7541b57cbf2f5268db20e89c4a17b43e887dce0058afbb98c1b1a1bcb16` |
+| Nepomniachtchi | `artifacts/output/gaze-hypotheses/h1/reference/nepo_short/runs/20260713T060833Z-2e32fec2` | `artifacts/output/gaze-hypotheses/h1/official/nepo_short/runs/20260713T061857Z-58672092` | `artifacts/output/gaze-hypotheses/h1/nepo_short-comparison.json` / `c00a06a0861bc1d162849657feb0c5b0b6a835ff992ae834b84d8a1914736c62` |
+
+The ignored run artifacts are bound by these independently rechecked SHA-256
+values; each profile pair shares the listed video manifest:
+
+| Clip | Reference `run_manifest.json` | Official `run_manifest.json` | Pair `video_manifest.json` |
+| --- | --- | --- | --- |
+| Carlsen | `0c8055e3118915fad7f947dba264ad87f40b3fb1a7388f49f2fe53ec88a3c19d` | `099d6ac4443a26ee301812a923cfc573024e27b20a5ab189e2f9e58925c75714` | `0571845de7ba4f1e2f0192bb1a392d59d24f7be35c56a268f3530efe3faad402` |
+| Nakamura | `faad847eaf4ec4ebfcc873f7c6117157e259b5325ce662dc82fe37acd66dc63b` | `3aad04d513f3394f94353a35449cef5a16f772fd1c042209ac10f4dc323d6410` | `24a516c210918c71c45d45ace03293bf0dde06f802f3b54ed57d395881ccf2ef` |
+| Nepomniachtchi | `999a4bc42dc6893279e107e21431469fac7a2b499444fff5616c63ff59a3a814` | `27595860ed6178ecbb5204925c5bc07d915566c200996e444c106eda8bf6bbb7` | `15d34140b89515c2104f0127c1d4dfb6183950438c0cb41109cecda94ec5b7f6` |
+
+All three reference calibrations hash to
+`3b7ba5f021dd027048781a71de87c92808e0f54ebceac5eea9ba04c5bc1590e0`;
+all three official calibrations hash to
+`6038d7a3ff203cc5e7be97ba8441f16a9ed89bc4a9d71c4c8dccf7f1260d3950`.
+
+The corresponding reference/official `qa_summary.json` SHA-256 pairs were:
+
+- Carlsen: `ed5aef6e693c59e1adecb4b4908105ba551a12fc795c9ce517ef1ec641597716`
+  / `ca073dd4641ef49c8443cd1b33308a98880c7b325e36d333f09ed06e68a7b068`;
+- Nakamura: `31db1b191931a7f225f95802a33a94389981f1b8126c4a2e45cd58dc95689592`
+  / `c0ebe945fc5c39a1dead1906d51e28c090c05d9d7651ffcce15d37a9a527e638`;
+- Nepomniachtchi:
+  `7bbb090832e9e19c54054424a8ba9dcc4df19d888969208732bed3b1873ae32c`
+  / `3caafcb04cf087f41bc5d9900f0d06cd3ef512ed8a2df9843178d06aa93f0baf`.
+
+Every QA summary is complete, schema-valid, count-matched, and has no
+validation error. Carlsen retained the same 70 multiple-candidate warnings in
+both runs, Nakamura had none, and Nepomniachtchi retained the same 20 face-not-
+found warnings and ten representative failure IDs in both runs.
+
+Reference-to-official descriptive results:
+
+| Clip | Valid gaze | Median step radians | P95 step radians | Median speed deg/s | P95 speed deg/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Carlsen | 600 -> 600 | 0.028216 -> 0.014602 | 0.130138 -> 0.111701 | 48.4997 -> 25.0983 | 223.6912 -> 192.0007 |
+| Nakamura | 1,200 -> 1,200 | 0.042889 -> 0.009241 | 0.211610 -> 0.060684 | 147.4409 -> 31.7672 | 727.4605 -> 208.6179 |
+| Nepomniachtchi | 1,190 -> 1,190 | 0.029888 -> 0.007827 | 0.155000 -> 0.060800 | 102.7479 -> 26.9057 | 532.8520 -> 209.0154 |
+
+`artifacts/output/gaze-hypotheses/h1/coverage-gate.json`, SHA-256
+`92074c83627691a91657fb8c12d6a150e8903ae55c627c981d6bc84abb09a1e3`,
+records zero valid-frame loss per clip and aggregate: 2,990/3,000 valid for
+both profiles. The independent correctness and coverage gates therefore retain
+H1 and select `official_geometric_v1` as the default; the direct-resize
+`reference_face2x_imagenet` profile remains the rollback.
+
+The lower motion proxies occur on all three clips, but they mix estimator noise
+with real eye/head motion. With no gaze target or fixation truth, they do not
+prove lower bias, better fixation precision, or higher gaze accuracy.
+
+The run artifacts do not embed a Git tree/dirty fingerprint. As separate
+operator/process evidence, before retention/default edits the root agent froze
+HEAD `023a8e57bca4df17ec166fda0aa1f94a2cbd5f59` and repeatedly verified
+`git diff --binary HEAD -- src/chess_gaze pyproject.toml uv.lock` at SHA-256
+`2f57202d87d25be3a6cc8c673c66d5d44ea277f343bbae417ad0e4ea6eafcd8b`,
+with no untracked runtime files. This is not represented as embedded artifact
+provenance. Subsequent retention edits are limited to default selection,
+historical benchmark/fallback compatibility, documentation, and tests; they do
+not alter the already-campaigned per-profile equations. The accepted decision
+is recorded in
+[ADR-0007](../../development/decisions/0007-restore-unigaze-geometric-normalization.md).
 
 ## H2: Calibration Numerics
 
@@ -354,7 +458,7 @@ downloaded, dependency changed, or adapter written.
 
 | Candidate | Code / weight terms | Published labeled condition (not comparable across rows) | Apple MPS evidence |
 | --- | --- | --- | --- |
-| UniGaze-H14 joint | MG-NC-RAI-2.0 model/checkpoint; normalizer separately CC BY-NC-SA 4.0; face-model data permission unresolved | Joint-H angular error 4.46° ETH-XGaze, 5.08° MPIIFaceGaze, 3.20° GazeCapture, 5.16° EYEDIAP, 9.07° Gaze360 | Existing local model-backed campaigns pass |
+| UniGaze-H14 joint | MG-NC-RAI-2.0 model/checkpoint and repository-owner-approved face-model asset; normalizer separately CC BY-NC-SA 4.0 | Joint-H angular error 4.46° ETH-XGaze, 5.08° MPIIFaceGaze, 3.20° GazeCapture, 5.16° EYEDIAP, 9.07° Gaze360 | Existing local model-backed campaigns pass |
 | ST-Gaze | MIT code; applicability to committed checkpoint unverified | 2.58° angular and 2.87 cm point-of-gaze on labeled EVE single-view test | None verified; official environment is CUDA/NVIDIA-oriented |
 | L2CS-Net | MIT code; external checkpoint has no separate terms, manifest, or checksum | 3.92° MPIIFaceGaze leave-one-person-out; 10.41° Gaze360 | None verified |
 | 3DGazeNet | No root code license; external bundles have no verified weight license/checksum | 4.2° ETH-XGaze, 3.3° GazeCapture, 8.8° Gaze360, 4.3° MPIIFaceGaze under its published multi-dataset setup | None verified; official environments are CUDA-oriented |
@@ -408,15 +512,28 @@ mechanism was retained.
 | `e31f931`; `scene_records.py`, `scene_artifacts.py` | Fresh summary had no in-bounds count | Aggregation collapsed valid infinite-plane intersections with finite-plane hits | Compatible `in_bounds_target_plane_hit_frames` and shared aggregation regression proving 2 intersections / 1 in-bounds | 94 passed (host loopback gate) | Reinterpretation of historical `valid_target_plane_hit_frames` |
 | `50d4235`; `gaze_precision_benchmark.py` | 19 RED failures accepted unrelated sources/settings and lacked speed/finite-hit fields | Comparator did not load full manifests/identity and divided motion by frames | Exact declared-variable allowlist, embedded/standalone validation, source/model/runtime/calibration/frame/PTS equality, deg/s from positive PTS, v2 report | 24 focused; 230 non-socket broad | Permanent experiment service or accuracy metric without labels |
 | `04aef4f`; three real-video contract tests | Exact RED gate: 6 failed, 1 passed, each `1200 == 180` | Ignored Nakamura input changed while constants remained stale | Three expected counts corrected to independently inspected 1,200 | 7 passed in exact host-native gate | Runtime-derived/loosened expectation |
+| `af8ed2e`; `unigaze_preprocessing.py`, `gaze_observation.py`, `frame_observation.py`, `pipeline.py`, asset/calibration schemas | Direct-resize preprocessing omitted the pinned perspective warp and treated the predicted model vector too directly as a physical camera ray | The default profile did not implement the checkpoint's six-point camera normalization; the initial sign plan missed that training labels `-gaze_norm` | `official_geometric_v1` reproduces `W = K_norm * S * R * K_crop^-1`, applies row-aligned `R^-1`, composes the upstream label sign with repository scene axes, persists face-model provenance, and validates the face asset only for the official profile | 84 focused passed; native pinned-frame oracle 1 passed over all three short clips; 513 broad passed | New dependency, silent geometry fallback, invented confidence, or accuracy claim from motion proxies |
+| `af8ed2e`; `scene_artifacts.py` | After the default flip, loading a historical run with no `calibration.json` would synthesize official face-model provenance | The missing-artifact compatibility path inherited the mutable current runtime default instead of preserving the former reference-profile meaning | Pin that fallback to `reference_face2x_imagenet`; regression asserts null face-model provenance | Focused RED 1 failed, GREEN 1 passed; included in the 521-test final broad gate | Reinterpreting or rewriting historical run artifacts |
 | `74310a2`; `gaze_calibration.py` | Singular zero-ridge solve; ridge shrank constant intercept | Normal equations square conditioning; identity penalty included intercept | `lstsq` for zero ridge; slope-only ridge penalty; two public regressions | 6 passed | Runtime calibration or target-accuracy claim |
 | `33a2651`, `199c6b0`; `video_decode.py` | 90/180/270 marker failures; later legacy-stream pixel mismatch and explicit 90-to-0 change accepted | Shared decoder read stream metadata but not frame DISPLAYMATRIX consistently; inspection/pixel paths diverged | One `_frames_with_rotation` owner; explicit frame matrix (including 0) overrides stream fallback; right-angle validation; oriented dimensions/RGB | 17 passed including approved-short contracts | Mirror/sign policy or downstream coordinate heuristic |
 | `050b82d`; `test_face_observation_real_video.py` | Final native gate passed presence/bounds but failed two exact-box ledgers on all seven Nakamura samples | Expectations were last refreshed for ignored SHA `6364e160...` / 180 frames, while the filename now resolves to approved SHA `65249288...` / 1,200 frames; the exact ledger had no source binding | Assert the approved source SHA before exact comparisons and replace only the seven boxes after original-resolution visual review | Exact two native nodes passed twice, 2/2 in 1.88 s each | Detector/runtime change or loosened geometric bounds |
 
-No default runtime profile changed, no new module or ownership boundary was
-introduced, and H1 was blocked. Therefore README, source-layout, and ADR files
-did not require updates.
+The resumed H1 work changes the default runtime profile but introduces no new
+production module or dependency. README now documents the extra pinned asset,
+default, and rollback command; source-layout records the existing modules'
+geometry, model-vector, selective-asset, and orchestration ownership; and
+ADR-0007 records the architecture-significant retention decision. The legacy
+forward-only crop benchmark must remain explicitly pinned to its historical
+direct-resize profile. Its frame records contain landmarks, but the benchmark
+loader does not provide them and the face-model points to preprocessing or
+preserve per-row inverse rotations; adding those semantics would be a separate
+change to its established device/batch timing and equivalence contract.
 
 ## Temporary-Evidence Cleanup And Leftover Audit
+
+The cleanup statements in the next two paragraphs describe the original Task
+19 closeout state before H1 resumed on 2026-07-13; they are historical, not a
+claim that the current worktree still contains only this closeout.
 
 After extracting the paths, hashes, labels, and metrics above, Task 19 removed
 `artifacts/experiments/2026-07-12-gaze-precision`. The retained H0 run/report
@@ -448,8 +565,9 @@ No branch change introduced a hidden non-short empirical path.
 
 ## Verification
 
-Fresh Task 19 gate results are recorded here after cleanup. Native MediaPipe/MPS
-tests are serialized and run separately from the non-native suite.
+Historical Task 19 gate results are recorded here as they stood after cleanup
+and before H1 resumed. Native MediaPipe/MPS tests were serialized and run
+separately from the non-native suite.
 
 | Gate | Fresh result |
 | --- | --- |
@@ -463,32 +581,83 @@ tests are serialized and run separately from the non-native suite.
 | Focused source-binding repair gate | The exact two failed native nodes passed twice: **2 passed** in 1.88 s, then **2 passed** in 1.88 s |
 | Final post-review exact approved-input native gate | **10 passed, 18 warnings** in 792.63 s; all nodes used only the approved `*_short.mp4` inputs |
 
-None of the four format-drift files changed between plan base `34d7876` and
-implementation HEAD `050b82d`; their latest shared source commit is `9a9d45a`
-from 2026-07-05. They were not reformatted because that would be unrelated,
-untested scope and would obscure the hypothesis diff.
+The resumed H1 implementation and campaign added these fresh gates across the
+pre-default implementation snapshot and the final post-default verification:
 
-The final native gate ran after commit `050b82d` and after independent review,
-serialized without another native/MPS process. It intentionally excluded the
-two exact non-short node IDs above. H1 was not retained, so
-`tests/chess_gaze/test_unigaze_preprocessing_real_video.py` was also excluded.
+| H1 gate | Fresh result |
+| --- | --- |
+| Focused geometry/observation/asset/configuration/calibration suite | **84 passed** |
+| `tests/chess_gaze/test_unigaze_preprocessing_real_video.py -m native_mediapipe -q` | **1 passed**; the single looped contract opened frame 0 from each of the three exact approved `*_short.mp4` files and matched the pinned oracle |
+| Broad local suite | **513 passed** |
+| Ruff check, Ruff format check, mypy, and `git diff --check` | **passed** in the Task 6 snapshot |
+| Six MPS analyses and run-local QA summaries | **6/6 complete**; all schema/count checks passed |
+| Three v2 comparators and H1 coverage gate | **3/3 provenance-safe comparisons passed**; **0** per-clip and aggregate valid-gaze loss |
+| Final post-default non-native partition | **521 passed, 15 deselected, 18 warnings** in 49.28 s |
+| Final host loopback partition | Sandbox reproduced two `socket.bind` permission failures; host rerun: **2 passed, 534 deselected** in 1.43 s |
+| Final exact approved-input native partition | **11 passed, 18 warnings** in 824.60 s; only the three approved `*_short.mp4` sources were opened |
+| Final whole-tree static gates | Ruff check passed; Ruff format check reported **80 files already formatted**; mypy reported **no issues in 80 source files**; `git diff --check` passed |
 
-The fresh independent final reviewer approved the retained source diff after
-134 focused inference-free tests, scoped Ruff, and `git diff --check`. The sole
+These results establish equation/sign correctness, runtime viability, and
+coverage only. The final post-default partitions include the explicit
+historical crop-replay benchmark regression, the official-default observer and
+pipeline paths, both artifact-retention modes, and the three-clip native
+geometry oracle.
+
+At the original Task 19 checkpoint, four format-drift files had not changed
+between plan base `34d7876` and implementation HEAD `050b82d`, so they were
+left untouched as unrelated scope. That historical exception no longer
+applies: resumed H1 intentionally changes those files, and the final
+whole-tree format gate reports all 80 files formatted.
+
+The original final native gate ran after commit `050b82d` and after independent
+review, serialized without another native/MPS process. It intentionally
+excluded the two exact non-short node IDs above and, at that historical point,
+the then-blocked H1 test. The resumed H1 native oracle is reported separately
+above and reads only the approved short clips.
+
+The original pre-H1 final reviewer approved the then-retained source diff after
+134 focused inference-free tests, scoped Ruff, and `git diff --check`. Its sole
 Important completion finding was the then-pending post-`050b82d` full native
-rerun. The 10/10 final native result above remediates it; subsequent changes
-were limited to recording final gate evidence in this closeout, so the reviewer
-required no further review.
+rerun. The historical 10/10 native result above remediated that finding. This
+review predates the resumed H1 production work and is not evidence for the
+current diff; the resumed implementation has its own final review below.
+
+A separate independent reviewer audited the complete resumed H1 production,
+test, decision, plan, and closeout diff. It found no Critical or production-
+correctness issue: official geometry/default propagation, pinned equations and
+signs, row alignment, frame-local failure, selective asset trust, compatibility
+pins, comparator allowlist, and short-only campaign scope matched the approved
+contract. Its Important findings were completion-document inconsistencies:
+stale pre-H1 wording, unchecked plan steps, an incomplete staging list, missing
+ignored-artifact hashes, the omitted legacy-calibration repair, and unresolved
+commit/gate placeholders. Those findings and its minor wording findings were
+corrected. Remediation re-review confirmed that only this explicit current-
+review record remained, that the worktree had no production/test delta after
+`af8ed2e`, and that its fresh static and non-native results matched the evidence
+above. The reviewer did not rerun the host-socket or native partitions; the
+root-owned 2-test host-socket result and serialized 11-node approved-input
+native result above supply that separate evidence.
 
 ## Residual Risk
 
 - The allowed corpus cannot establish gaze accuracy, point-of-gaze accuracy,
   fixation precision, target-switch lag, calibration benefit, chess focus, or
   comparative model quality.
-- H0 run artifacts are ignored local evidence. The closeout preserves exact
-  paths and hashes, but a clone without those artifacts retains only the
+- H0 and H1 run artifacts are ignored local evidence. The closeout preserves
+  exact paths and hashes, but a clone without those artifacts retains only the
   summarized results and regression tests.
-- H1 remains blocked on asset-level permission, not geometry or mapping parity.
+- H1 is retained for pinned contract conformance and zero coverage loss. The
+  corpus has no target/fixation truth, so lower step/speed proxies do not prove
+  accuracy, reduced bias, or fixation precision; operators can roll back with
+  `reference_face2x_imagenet`.
+- H1 run artifacts embed source/model/PTS/runtime identity but not Git tree,
+  dirty-state, host, or full package fingerprints. The frozen HEAD/diff hash is
+  separate process evidence, not artifact provenance.
+- The forward-only batch benchmark is explicitly pinned to the historical
+  direct-resize profile rather than the runtime default. Its loader does not
+  supply persisted landmarks and face-model points or preserve inverse
+  rotations; adding them requires a separate decision about its timing and
+  equivalence contract.
 - H3 manual review targets worst events rather than every frame. It is adequate
   to reject the tested variants, not to estimate global face-selection error.
 - H4 fixes declared orientation but does not infer subregion mirroring.
@@ -502,11 +671,13 @@ required no further review.
 
 ## Primary Sources And Verification Dates
 
-H1 official UniGaze repository, pinned video path, normalizer, face model,
-license, README/model card, repository tree, and asset history were checked on
-2026-07-12. H9 refreshed official UniGaze, ST-Gaze, L2CS-Net, and 3DGazeNet
-repositories/papers/checkpoint metadata on 2026-07-13 at the revisions recorded
-above. Local checkpoint and runtime hashes were verified on the same task dates.
+H1 official UniGaze repository, pinned video path, training preparation,
+normalizer, face model, root license, README/model card, repository tree, and
+asset bytes were refreshed on 2026-07-13. The pinned raw face-model bytes still
+matched the registered SHA. H9 refreshed official UniGaze, ST-Gaze, L2CS-Net,
+and 3DGazeNet repositories/papers/checkpoint metadata on 2026-07-13 at the
+revisions recorded above. Local checkpoint and runtime hashes were verified on
+the same task dates.
 
 Primary URLs:
 
@@ -516,6 +687,12 @@ Primary URLs:
   <https://openaccess.thecvf.com/content/WACV2026/papers/Qin_UniGaze_Towards_Universal_Gaze_Estimation_via_Large-scale_Pre-Training_WACV_2026_paper.pdf>,
   <https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/predict_gaze_video.py>,
   <https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/gazelib/gaze/normalize.py>.
+- UniGaze pinned training-label sign, root license, face-model bytes, and HF
+  model card:
+  <https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/gazedata_preparation/normalize_xgaze.py>,
+  <https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/LICENSE.txt>,
+  <https://raw.githubusercontent.com/ut-vision/UniGaze/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/data/face_model.txt>,
+  <https://huggingface.co/UniGaze/UniGaze-models/blob/d3f8335cd4b7d249adbc32389986ce49b52f6f72/README.md>.
 - ST-Gaze project, pinned repository, and paper:
   <https://u0172623.pages.gitlab.kuleuven.be/ST-Gaze/>,
   <https://gitlab.kuleuven.be/u0172623/ST-Gaze/-/tree/43abefaba5c1e92cd5f65f3c2e85ba0a3587cf31>,

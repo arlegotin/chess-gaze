@@ -615,8 +615,9 @@ gate, corrected vector-sign derivation, and non-accuracy boundary are recorded
 in
 [ADR-0007](../../development/decisions/0007-restore-unigaze-geometric-normalization.md)
 and the closeout. The default flip and historical crop-replay benchmark pin are
-implemented. Task 7 step 5 remains pending until documentation, fresh gates,
-and the retained H1 commit land together.
+implemented. Task 7 step 5 passed with the fresh broad, socket, static, and
+11-node approved-input native gates; retained implementation commit `af8ed2e`
+landed on the current branch.
 
 **Files:**
 - Produce ignored runs under: `artifacts/output/gaze-hypotheses/h1/`
@@ -660,7 +661,7 @@ face-model local path/checksum/license, Apple-MPS assumptions, input/output and
 matrix direction contracts, lack of confidence, the exact non-accuracy claim,
 and rollback profile.
 
-- [ ] **Step 5: Verify and commit only a kept H1**
+- [x] **Step 5: Verify and commit only a kept H1**
 
 ```sh
 UV_CACHE_DIR=.uv-cache uv run pytest tests/chess_gaze -q -m 'not native_mediapipe and not local_socket'
