@@ -4,6 +4,7 @@ import importlib
 import io
 import math
 import os
+from collections.abc import Sequence
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from typing import Any
@@ -14,10 +15,14 @@ import numpy.typing as npt
 import torch
 
 from chess_gaze.errors import ErrorCode
-from chess_gaze.geometry import BBox, CoordinateSpace, Transform2D
+from chess_gaze.geometry import BBox, CoordinateSpace, Point2D, Transform2D
 from chess_gaze.model_assets import ResolvedModelAsset
 from chess_gaze.unigaze_preprocessing import (
     DEFAULT_UNIGAZE_PREPROCESSING_PROFILE,
+    OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE,
+    UNIGAZE_MEDIAPIPE_LANDMARK_INDICES,
+    UNIGAZE_NORMALIZED_SIZE_PX,
+    normalize_unigaze_face_geometry,
     resolve_unigaze_preprocessing_profile,
 )
 
@@ -31,13 +36,17 @@ UNIGAZE_CONFIDENCE_SOURCE = "not_provided_by_unigaze"
 class CropTransformRecord:
     source_bbox_image_px: BBox
     output_size_px: int
-    image_px_from_crop_px: Transform2D
+    image_px_from_crop_px: Transform2D | None
 
 
 @dataclass(frozen=True)
 class NormalizedFaceCrop:
     tensor: torch.Tensor
     transform: CropTransformRecord
+    camera_from_normalized_rotation: npt.NDArray[np.float64] | None = None
+    normalized_image_from_cropped_image_homography: npt.NDArray[np.float64] | None = (
+        None
+    )
 
 
 @dataclass(frozen=True)
@@ -86,12 +95,22 @@ class UniGazeModel:
         return gazes[0]
 
     def predict_batch(
-        self, normalized_batch: torch.Tensor
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
     ) -> tuple[FaceModelGaze, ...]:
         if normalized_batch.ndim != 4 or normalized_batch.shape[1] != 3:
             raise ValueError("normalized_batch must have shape (batch, 3, H, W)")
         if normalized_batch.shape[0] < 1:
             raise ValueError("normalized_batch must contain a non-empty batch")
+        if camera_from_normalized_rotations is not None and len(
+            camera_from_normalized_rotations
+        ) != int(normalized_batch.shape[0]):
+            raise ValueError(
+                "camera_from_normalized_rotations requires one inverse "
+                "rotation per batch row"
+            )
 
         normalized_batch = normalized_batch.to(self._device)
         with torch.inference_mode():
@@ -110,6 +129,17 @@ class UniGazeModel:
             )
 
         pred_gaze_cpu = pred_gaze.detach().cpu()
+        if camera_from_normalized_rotations is not None:
+            return tuple(
+                camera_gaze_from_unigaze_prediction(
+                    pitch_radians=float(pred_gaze_cpu[index][0]),
+                    yaw_radians=float(pred_gaze_cpu[index][1]),
+                    camera_from_normalized_rotation=(
+                        camera_from_normalized_rotations[index]
+                    ),
+                )
+                for index in range(pred_gaze_cpu.shape[0])
+            )
         return tuple(
             _face_model_gaze_from_pred_row(pred_gaze_cpu[index])
             for index in range(pred_gaze_cpu.shape[0])
@@ -125,6 +155,8 @@ def normalize_face_crop(
     crop_scale: float | None = None,
     image_mean_rgb: tuple[float, float, float] | None = None,
     image_std_rgb: tuple[float, float, float] | None = None,
+    landmarks_image_px: Sequence[Point2D] | None = None,
+    face_model_points: npt.ArrayLike | None = None,
 ) -> NormalizedFaceCrop:
     frame = _validate_rgb_frame(rgb_frame)
     if bbox.space is not CoordinateSpace.IMAGE_PX:
@@ -135,9 +167,7 @@ def normalize_face_crop(
         preprocessing = resolve_unigaze_preprocessing_profile(profile)
     except ValueError as exc:
         raise ValueError(f"unknown unigaze preprocessing profile: {profile!r}") from exc
-    resolved_crop_scale = (
-        preprocessing.crop_scale if crop_scale is None else crop_scale
-    )
+    resolved_crop_scale = preprocessing.crop_scale if crop_scale is None else crop_scale
     resolved_image_mean_rgb = (
         preprocessing.image_mean_rgb
         if image_mean_rgb is None and preprocessing.image_mean_rgb is not None
@@ -167,9 +197,37 @@ def normalize_face_crop(
     y_max = _clamp_int(math.ceil(scaled_y_max), y_min + 1, height_px)
 
     crop = frame[y_min:y_max, x_min:x_max]
-    resized = cv2.resize(
-        crop, (input_size_px, input_size_px), interpolation=cv2.INTER_AREA
-    )
+    camera_from_normalized_rotation = None
+    normalized_image_from_cropped_image_homography = None
+    if preprocessing.profile == OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE:
+        if input_size_px != UNIGAZE_NORMALIZED_SIZE_PX:
+            raise ValueError("official_geometric_v1 requires UniGaze input size 224")
+        if landmarks_image_px is None or face_model_points is None:
+            raise ValueError(
+                "official_geometric_v1 requires face landmarks and face model points"
+            )
+        landmarks_crop_px = _unigaze_landmarks_in_crop(
+            landmarks_image_px,
+            crop_x_min=x_min,
+            crop_y_min=y_min,
+        )
+        geometry = normalize_unigaze_face_geometry(
+            crop,
+            landmarks_crop_px,
+            face_model_points,
+        )
+        resized = geometry.warped_rgb
+        camera_from_normalized_rotation = geometry.camera_from_normalized_rotation
+        normalized_image_from_cropped_image_homography = (
+            geometry.normalized_image_from_image_homography
+        )
+    else:
+        resized = np.ascontiguousarray(
+            cv2.resize(
+                crop, (input_size_px, input_size_px), interpolation=cv2.INTER_AREA
+            ),
+            dtype=np.uint8,
+        )
     normalized = resized.astype(np.float32) / 255.0
     if resolved_image_mean_rgb is not None and resolved_image_std_rgb is not None:
         mean = np.asarray(resolved_image_mean_rgb, dtype=np.float32).reshape(1, 1, 3)
@@ -192,16 +250,24 @@ def normalize_face_crop(
         transform=CropTransformRecord(
             source_bbox_image_px=crop_bbox,
             output_size_px=input_size_px,
-            image_px_from_crop_px=Transform2D(
-                source_space=CoordinateSpace.IMAGE_PX,
-                target_space=CoordinateSpace.IMAGE_PX,
-                m00=scale_x,
-                m01=0.0,
-                m02=float(x_min),
-                m10=0.0,
-                m11=scale_y,
-                m12=float(y_min),
+            image_px_from_crop_px=(
+                None
+                if preprocessing.profile == OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE
+                else Transform2D(
+                    source_space=CoordinateSpace.IMAGE_PX,
+                    target_space=CoordinateSpace.IMAGE_PX,
+                    m00=scale_x,
+                    m01=0.0,
+                    m02=float(x_min),
+                    m10=0.0,
+                    m11=scale_y,
+                    m12=float(y_min),
+                )
             ),
+        ),
+        camera_from_normalized_rotation=camera_from_normalized_rotation,
+        normalized_image_from_cropped_image_homography=(
+            normalized_image_from_cropped_image_homography
         ),
     )
 
@@ -219,22 +285,59 @@ def pitch_yaw_to_unit_vector(
     )
 
 
+def camera_gaze_from_unigaze_prediction(
+    *,
+    pitch_radians: float,
+    yaw_radians: float,
+    camera_from_normalized_rotation: npt.ArrayLike,
+) -> FaceModelGaze:
+    rotation = np.asarray(camera_from_normalized_rotation, dtype=np.float64)
+    if rotation.shape != (3, 3) or not np.isfinite(rotation).all():
+        raise ValueError(
+            "camera_from_normalized_rotation must be finite with shape (3, 3)"
+        )
+    if not math.isfinite(pitch_radians) or not math.isfinite(yaw_radians):
+        return _invalid_unigaze_gaze()
+
+    model_vector_camera = rotation @ np.asarray(
+        pitch_yaw_to_unit_vector(
+            pitch_radians=pitch_radians,
+            yaw_radians=yaw_radians,
+        ),
+        dtype=np.float64,
+    )
+    norm = float(np.linalg.norm(model_vector_camera))
+    if not np.isfinite(norm) or norm <= np.finfo(np.float64).eps:
+        return _invalid_unigaze_gaze()
+    model_vector_camera /= norm
+
+    camera_pitch = math.asin(min(1.0, max(-1.0, float(model_vector_camera[1]))))
+    camera_yaw = math.atan2(
+        -float(model_vector_camera[0]),
+        float(model_vector_camera[2]),
+    )
+    return FaceModelGaze(
+        valid=True,
+        method=UNIGAZE_METHOD,
+        pitch_radians=camera_pitch,
+        yaw_radians=camera_yaw,
+        unit_vector=pitch_yaw_to_unit_vector(
+            pitch_radians=camera_pitch,
+            yaw_radians=camera_yaw,
+        ),
+        confidence=None,
+        confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
+        reason_invalid=None,
+    )
+
+
 def _face_model_gaze_from_pred_row(pred_row: torch.Tensor) -> FaceModelGaze:
     pitch_radians = float(pred_row[0])
     # UniGaze's reference drawing treats positive yaw as image-left. Frame
     # records and overlays use positive yaw as image-right.
     yaw_radians = -float(pred_row[1])
     if not math.isfinite(pitch_radians) or not math.isfinite(yaw_radians):
-        return FaceModelGaze(
-            valid=False,
-            method=UNIGAZE_METHOD,
-            pitch_radians=None,
-            yaw_radians=None,
-            unit_vector=None,
-            confidence=None,
-            confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
-            reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
-        )
+        return _invalid_unigaze_gaze()
     return FaceModelGaze(
         valid=True,
         method=UNIGAZE_METHOD,
@@ -246,6 +349,19 @@ def _face_model_gaze_from_pred_row(pred_row: torch.Tensor) -> FaceModelGaze:
         confidence=None,
         confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
         reason_invalid=None,
+    )
+
+
+def _invalid_unigaze_gaze() -> FaceModelGaze:
+    return FaceModelGaze(
+        valid=False,
+        method=UNIGAZE_METHOD,
+        pitch_radians=None,
+        yaw_radians=None,
+        unit_vector=None,
+        confidence=None,
+        confidence_source=UNIGAZE_CONFIDENCE_SOURCE,
+        reason_invalid=ErrorCode.GAZE_MODEL_FAILED,
     )
 
 
@@ -294,9 +410,32 @@ def _scaled_bbox_bounds(
     )
 
 
-def _validate_rgb_stats(
-    values: tuple[float, float, float], field_name: str
-) -> None:
+def _unigaze_landmarks_in_crop(
+    landmarks_image_px: Sequence[Point2D],
+    *,
+    crop_x_min: int,
+    crop_y_min: int,
+) -> npt.NDArray[np.float64]:
+    if len(landmarks_image_px) <= max(UNIGAZE_MEDIAPIPE_LANDMARK_INDICES):
+        raise ValueError("official_geometric_v1 requires all mapped face landmarks")
+    selected: list[tuple[float, float]] = []
+    for index in UNIGAZE_MEDIAPIPE_LANDMARK_INDICES:
+        point = landmarks_image_px[index]
+        if point.space is not CoordinateSpace.IMAGE_PX:
+            raise ValueError("official_geometric_v1 landmarks must be in image_px")
+        selected.append(
+            (
+                point.x - float(crop_x_min),
+                point.y - float(crop_y_min),
+            )
+        )
+    result = np.asarray(selected, dtype=np.float64)
+    if not np.isfinite(result).all():
+        raise ValueError("official_geometric_v1 landmarks must be finite")
+    return result
+
+
+def _validate_rgb_stats(values: tuple[float, float, float], field_name: str) -> None:
     if len(values) != 3:
         raise ValueError(f"{field_name} must contain three RGB values")
     for value in values:

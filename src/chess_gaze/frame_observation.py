@@ -26,7 +26,9 @@ from chess_gaze.gaze_observation import (
     NormalizedFaceCrop,
     normalize_face_crop,
 )
+from chess_gaze.geometry import BBox, Point2D
 from chess_gaze.head_pose import HeadPoseObservation, ImageSize, estimate_head_pose
+from chess_gaze.unigaze_preprocessing import OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE
 
 FRAME_WARNING_ERROR_CODES = frozenset({ErrorCode.MULTIPLE_FACE_CANDIDATES})
 
@@ -52,20 +54,27 @@ class FaceCropNormalizer(Protocol):
     def __call__(
         self,
         rgb_frame: npt.NDArray[np.uint8],
-        bbox: Any,
+        bbox: BBox,
         *,
         input_size_px: int,
         profile: str,
         crop_scale: float,
         image_mean_rgb: tuple[float, float, float] | None,
         image_std_rgb: tuple[float, float, float] | None,
+        landmarks_image_px: Sequence[Point2D] | None,
+        face_model_points: npt.NDArray[np.float64] | None,
     ) -> NormalizedFaceCrop: ...
 
 
 class FaceGazeModel(Protocol):
-    def predict(self, normalized_batch: Any) -> FaceModelGaze: ...
+    def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze: ...
 
-    def predict_batch(self, normalized_batch: Any) -> tuple[FaceModelGaze, ...]: ...
+    def predict_batch(
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
+    ) -> tuple[FaceModelGaze, ...]: ...
 
 
 class ModelInferenceError(RuntimeError):
@@ -91,6 +100,7 @@ class ModelBackedFrameObserver:
     gaze_model: FaceGazeModel
     calibration: CalibrationRecord
     run_layout: RunLayout
+    unigaze_face_model_points: npt.NDArray[np.float64] | None = None
     eye_observer: EyeObserver = observe_eyes
     head_pose_estimator: HeadPoseEstimator = estimate_head_pose
     face_crop_normalizer: FaceCropNormalizer = normalize_face_crop
@@ -102,16 +112,32 @@ class ModelBackedFrameObserver:
     def observe_batch(self, frames: Sequence[Any]) -> list[FrameRecord]:
         evidence_items = [self._collect_frame_evidence(frame) for frame in frames]
         crop_items = [
-            (index, evidence.normalized_face_crop.tensor)
+            (index, evidence.normalized_face_crop)
             for index, evidence in enumerate(evidence_items)
             if evidence.selected_face is not None
             and evidence.normalized_face_crop is not None
         ]
         appearance_by_index: dict[int, FaceModelGaze] = {}
         if crop_items:
-            batch = torch.cat([tensor for _index, tensor in crop_items], dim=0)
+            batch = torch.cat([crop.tensor for _index, crop in crop_items], dim=0)
             try:
-                gazes = self.gaze_model.predict_batch(batch)
+                rotations = tuple(
+                    crop.camera_from_normalized_rotation for _index, crop in crop_items
+                )
+                if all(rotation is None for rotation in rotations):
+                    gazes = self.gaze_model.predict_batch(batch)
+                elif all(rotation is not None for rotation in rotations):
+                    geometric_rotations = tuple(
+                        rotation for rotation in rotations if rotation is not None
+                    )
+                    gazes = self.gaze_model.predict_batch(
+                        batch,
+                        camera_from_normalized_rotations=geometric_rotations,
+                    )
+                else:
+                    raise ValueError(
+                        "Appearance crops mixed geometric and legacy normalization"
+                    )
                 if len(gazes) != len(crop_items):
                     raise ValueError(
                         "Appearance gaze model returned a different number of rows"
@@ -120,7 +146,7 @@ class ModelBackedFrameObserver:
                 raise ModelInferenceError(
                     f"UniGaze batch inference failed: {exc}"
                 ) from exc
-            for (index, _tensor), gaze in zip(crop_items, gazes, strict=True):
+            for (index, _crop), gaze in zip(crop_items, gazes, strict=True):
                 appearance_by_index[index] = gaze
 
         records: list[FrameRecord] = []
@@ -297,7 +323,7 @@ class ModelBackedFrameObserver:
         errors: list[ErrorRecord],
     ) -> NormalizedFaceCrop | None:
         try:
-            return self.face_crop_normalizer(
+            normalized = self.face_crop_normalizer(
                 rgb_frame,
                 selected_face.bounding_box_image_px,
                 input_size_px=self.calibration.unigaze_input_size_px,
@@ -305,7 +331,21 @@ class ModelBackedFrameObserver:
                 crop_scale=self.calibration.unigaze_face_crop_scale,
                 image_mean_rgb=self.calibration.unigaze_image_mean_rgb,
                 image_std_rgb=self.calibration.unigaze_image_std_rgb,
+                landmarks_image_px=selected_face.landmarks_image_px,
+                face_model_points=self.unigaze_face_model_points,
             )
+            if (
+                self.calibration.unigaze_preprocessing_profile
+                == OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE
+                and (
+                    normalized.camera_from_normalized_rotation is None
+                    or normalized.normalized_image_from_cropped_image_homography is None
+                )
+            ):
+                raise ValueError(
+                    "official_geometric_v1 did not produce geometric transforms"
+                )
+            return normalized
         except Exception as exc:
             _append_error_once(
                 errors,

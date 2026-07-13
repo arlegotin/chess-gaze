@@ -75,6 +75,7 @@ from chess_gaze.target_plane import (
     target_plane_unit_vector,
     target_plane_vector,
 )
+from chess_gaze.unigaze_preprocessing import REFERENCE_UNIGAZE_PREPROCESSING_PROFILE
 from chess_gaze.viewer_dependencies import (
     THREE_CDN_PROVIDER,
     THREE_LICENSE,
@@ -903,7 +904,9 @@ def _load_run_manifest(path: Path) -> RunManifest:
 
 def _load_calibration(path: Path) -> CalibrationRecord:
     if not path.exists():
-        return default_calibration()
+        return default_calibration(
+            unigaze_preprocessing_profile=REFERENCE_UNIGAZE_PREPROCESSING_PROFILE
+        )
     return CalibrationRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
 

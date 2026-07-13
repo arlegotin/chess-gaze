@@ -12,6 +12,7 @@ from _pytest.capture import CaptureFixture
 from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import ErrorCode, FrameStatus
 from chess_gaze.frame_records import (
+    CalibrationRecord,
     CropImageRetentionPolicy,
     ErrorRecord,
     EyeRecord,
@@ -148,8 +149,11 @@ def _write_run(
         unigaze_preprocessing_profile=preprocessing_profile
     )
     if candidate_face_score_min is not None:
-        calibration = calibration.model_copy(
-            update={"candidate_face_score_min": candidate_face_score_min}
+        calibration = CalibrationRecord.model_validate(
+            {
+                **calibration.model_dump(mode="python"),
+                "candidate_face_score_min": candidate_face_score_min,
+            }
         )
     (run_dir / "calibration.json").write_text(
         calibration.model_dump_json(), encoding="utf-8"
@@ -339,6 +343,77 @@ def test_compare_gaze_precision_runs_reports_candidate_deltas(tmp_path: Path) ->
     assert report.baseline.pts_sequence_usable is True
     assert report.baseline.unigaze_model_checksum_sha256 == "c" * 64
     json.loads(report.model_dump_json())
+
+
+def test_compare_gaze_precision_runs_allows_official_face_model_provenance(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_run(
+        baseline,
+        yaws=(0.0, 0.1),
+        preprocessing_profile="reference_face2x_imagenet",
+    )
+    _write_run(
+        candidate,
+        yaws=(0.0, 0.1),
+        preprocessing_profile="official_geometric_v1",
+    )
+
+    baseline_calibration = json.loads(
+        (baseline / "calibration.json").read_text(encoding="utf-8")
+    )
+    candidate_calibration = json.loads(
+        (candidate / "calibration.json").read_text(encoding="utf-8")
+    )
+    assert baseline_calibration["unigaze_face_model_id"] is None
+    assert baseline_calibration["unigaze_face_model_checksum_sha256"] is None
+    assert candidate_calibration["unigaze_face_model_id"] == "unigaze-face-model-v1"
+    assert candidate_calibration["unigaze_face_model_checksum_sha256"] == (
+        "0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7"
+    )
+
+    report = compare_gaze_precision_runs(
+        baseline,
+        candidate,
+        experimental_variable="unigaze_preprocessing",
+    )
+
+    assert report.baseline.unigaze_preprocessing_profile == (
+        "reference_face2x_imagenet"
+    )
+    assert report.candidate.unigaze_preprocessing_profile == "official_geometric_v1"
+
+
+def test_compare_gaze_precision_runs_still_rejects_unrelated_official_difference(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_run(
+        baseline,
+        yaws=(0.0, 0.1),
+        preprocessing_profile="reference_face2x_imagenet",
+    )
+    _write_run(
+        candidate,
+        yaws=(0.0, 0.1),
+        preprocessing_profile="official_geometric_v1",
+        candidate_face_score_min=0.2,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        compare_gaze_precision_runs(
+            baseline,
+            candidate,
+            experimental_variable="unigaze_preprocessing",
+        )
+
+    assert str(exc_info.value) == (
+        "runs differ outside declared experimental variable: "
+        "calibration.candidate_face_score_min"
+    )
 
 
 @pytest.mark.parametrize(

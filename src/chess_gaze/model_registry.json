@@ -35,6 +35,27 @@
       "output_contract": {
         "order": "pitch_yaw_radians"
       }
+    },
+    {
+      "model_id": "unigaze-face-model-v1",
+      "task_name": "face_geometry",
+      "expected_relative_path": "unigaze/face_model.txt",
+      "checksum_sha256": "0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7",
+      "source_url": "https://raw.githubusercontent.com/ut-vision/UniGaze/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/data/face_model.txt",
+      "license": "MG-NC-RAI-2.0",
+      "requires_license_approval": true,
+      "license_approved": true,
+      "license_approved_by": "repo_owner",
+      "license_approved_at": "2026-07-13",
+      "input_contract": {
+        "file_shape": [50, 3],
+        "selected_rows": [20, 23, 26, 29, 15, 19],
+        "mediapipe_landmark_indices": [33, 133, 362, 263, 98, 327]
+      },
+      "output_contract": {
+        "selected_face_model_points_shape": [6, 3],
+        "coordinate_order": "xyz"
+      }
     }
   ]
 }

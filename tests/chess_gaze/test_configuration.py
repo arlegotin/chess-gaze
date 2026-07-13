@@ -24,7 +24,7 @@ def test_load_config_uses_unigaze_runtime_defaults() -> None:
 
     assert config.unigaze_device == "mps"
     assert config.unigaze_batch_size == 7
-    assert config.unigaze_preprocessing_profile == "reference_face2x_imagenet"
+    assert config.unigaze_preprocessing_profile == "official_geometric_v1"
     assert config.target_plane is None
 
 
@@ -40,6 +40,20 @@ def test_load_config_accepts_legacy_unigaze_preprocessing_profile(
     config = load_config(config_path)
 
     assert config.unigaze_preprocessing_profile == "legacy_bbox_rgb01"
+
+
+def test_load_config_accepts_official_unigaze_preprocessing_profile(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"unigaze_preprocessing_profile": "official_geometric_v1"}',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.unigaze_preprocessing_profile == "official_geometric_v1"
 
 
 def test_load_config_rejects_unknown_unigaze_preprocessing_profile(

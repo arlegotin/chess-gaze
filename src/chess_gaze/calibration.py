@@ -224,6 +224,10 @@ def default_calibration(
         unigaze_face_crop_scale=unigaze_preprocessing.crop_scale,
         unigaze_image_mean_rgb=unigaze_preprocessing.image_mean_rgb,
         unigaze_image_std_rgb=unigaze_preprocessing.image_std_rgb,
+        unigaze_face_model_id=unigaze_preprocessing.face_model_id,
+        unigaze_face_model_checksum_sha256=(
+            unigaze_preprocessing.face_model_checksum_sha256
+        ),
         target_plane_origin_camera_m=target_plane_origin_camera_m,
         target_plane_x_axis_camera=target_plane_x_axis_camera,
         target_plane_y_axis_camera=target_plane_y_axis_camera,

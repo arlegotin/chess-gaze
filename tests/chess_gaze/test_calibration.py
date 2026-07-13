@@ -3,6 +3,9 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from chess_gaze.frame_records import FrameRecord
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 
@@ -214,10 +217,14 @@ def test_default_calibration_persists_named_constants() -> None:
         "default_iris_diameter_uncertainty_mm": 0.5,
         "unigaze_input_size_px": 224,
         "unigaze_output_order": "pitch_yaw_radians",
-        "unigaze_preprocessing_profile": "reference_face2x_imagenet",
+        "unigaze_preprocessing_profile": "official_geometric_v1",
         "unigaze_face_crop_scale": 2.0,
         "unigaze_image_mean_rgb": (0.485, 0.456, 0.406),
         "unigaze_image_std_rgb": (0.229, 0.224, 0.225),
+        "unigaze_face_model_id": "unigaze-face-model-v1",
+        "unigaze_face_model_checksum_sha256": (
+            "0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7"
+        ),
         "target_plane_origin_camera_m": None,
         "target_plane_x_axis_camera": None,
         "target_plane_y_axis_camera": None,
@@ -240,6 +247,34 @@ def test_default_calibration_persists_named_constants() -> None:
             "right_mouth_corner": 61,
         },
     }
+
+
+def test_official_calibration_persists_pinned_face_model_provenance() -> None:
+    from chess_gaze.calibration import default_calibration
+
+    calibration = default_calibration(
+        unigaze_preprocessing_profile="official_geometric_v1"
+    )
+
+    assert calibration.unigaze_preprocessing_profile == "official_geometric_v1"
+    assert calibration.unigaze_face_model_id == "unigaze-face-model-v1"
+    assert calibration.unigaze_face_model_checksum_sha256 == (
+        "0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7"
+    )
+
+
+def test_official_calibration_rejects_unpinned_face_model_provenance() -> None:
+    from chess_gaze.calibration import default_calibration
+    from chess_gaze.frame_records import CalibrationRecord
+
+    payload = default_calibration(
+        unigaze_preprocessing_profile="official_geometric_v1"
+    ).model_dump()
+    payload["unigaze_face_model_id"] = "different-face-model"
+    payload["unigaze_face_model_checksum_sha256"] = "0" * 64
+
+    with pytest.raises(ValidationError, match="official_geometric_v1"):
+        CalibrationRecord.model_validate(payload)
 
 
 def test_default_calibration_persists_configured_target_plane() -> None:
@@ -272,6 +307,8 @@ def test_legacy_calibration_payload_defaults_to_legacy_unigaze_preprocessing() -
         "unigaze_face_crop_scale",
         "unigaze_image_mean_rgb",
         "unigaze_image_std_rgb",
+        "unigaze_face_model_id",
+        "unigaze_face_model_checksum_sha256",
         "target_plane_origin_camera_m",
         "target_plane_x_axis_camera",
         "target_plane_y_axis_camera",
@@ -287,6 +324,8 @@ def test_legacy_calibration_payload_defaults_to_legacy_unigaze_preprocessing() -
     assert calibration.unigaze_face_crop_scale == 1.0
     assert calibration.unigaze_image_mean_rgb is None
     assert calibration.unigaze_image_std_rgb is None
+    assert calibration.unigaze_face_model_id is None
+    assert calibration.unigaze_face_model_checksum_sha256 is None
     assert calibration.target_plane_origin_camera_m is None
     assert calibration.target_plane_mirror_horizontal is False
 

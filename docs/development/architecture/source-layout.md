@@ -10,19 +10,22 @@ package instead of accidentally importing Python files from the repository root.
 - `src/chess_gaze/` is the importable package. Active modules are named after
   the behavior they own:
   - `artifact_runs.py` owns run directory layout and artifact-relative paths.
-  - `calibration.py`, `configuration.py`, and `unigaze_preprocessing.py` own
-    analysis configuration records, persisted calibration defaults, and named
-    UniGaze preprocessing profiles.
+  - `calibration.py` and `configuration.py` own analysis configuration records
+    and persisted calibration defaults. `unigaze_preprocessing.py` owns named
+    UniGaze preprocessing profiles, the pinned six-point face-model contract,
+    the camera-normalization equation, and homography/rotation direction.
   - `video_decode.py`, `image_io.py`, and `visualization.py` own frame IO,
     optional debug-image writes, and processed-frame rendering.
-  - `model_assets.py` and `model_registry.json` own local model trust and
-    checksum validation.
+  - `model_assets.py` and `model_registry.json` own local model trust, license
+    approval, checksum validation, and profile-selective required-asset sets.
   - `face_landmark_indices.py` owns named MediaPipe face landmark indices that
     encode anatomical left/right semantics.
   - `face_observation.py`, `eye_observation.py`, `head_pose.py`,
     `gaze_observation.py`, and `frame_observation.py` own per-frame evidence
     extraction, including in-memory crop geometry and optional retained eye
-    crop debug artifacts.
+    crop debug artifacts. `gaze_observation.py` specifically owns UniGaze model
+    input, strict batch-row/inverse-rotation alignment, and conversion from the
+    upstream model-vector sign convention to repository camera-ray angles.
   - `unigaze_runtime.py` owns UniGaze device/batch runtime validation, MPS
     preflight, synchronization, and inference metadata assembly.
   - `gaze_calibration.py` owns labeled per-person affine gaze calibration and
@@ -49,11 +52,18 @@ package instead of accidentally importing Python files from the repository root.
   - `run_equivalence.py` owns strict run-to-run artifact equivalence checks for
     CPU/MPS optimization validation.
   - `unigaze_batch_benchmark.py` owns the Nakamura UniGaze device/batch
-    benchmark harness and selected-batch report schema.
+    benchmark harness, its explicit historical direct-resize analysis/crop-
+    replay profile, and the selected-batch report schema. It does not inherit
+    the runtime geometric default: its loader does not supply persisted
+    landmarks and face-model points to preprocessing or preserve per-row
+    inverse rotations, and those additions would change the established
+    forward-only timing/equivalence contract.
   - `gaze_precision_benchmark.py` owns run-to-run gaze precision proxy metrics
     for preprocessing/calibration comparisons.
   - `pipeline.py`, `qa_summary.py`, and `cli.py` own orchestration,
-    policy-aware artifact validation, and command-line entry points.
+    policy-aware artifact validation, and command-line entry points. Pipeline
+    orchestration resolves the model-asset set required by the selected
+    preprocessing profile and loads face geometry only for the official path.
 
 Source-layout review, 2026-07-03: `qa_summary.py` is intentionally deep at
 1,093 lines after the streaming closeout repair. It still owns one cohesive
@@ -81,6 +91,14 @@ of the existing orchestration boundary rather than an independent workflow:
 frame processing, derived scene/viewer artifacts, QA validation, and completion
 seal ordering must stay coordinated. The previous split candidates remain the
 right ones if this file grows further.
+
+Source-layout review, 2026-07-13: H1 added profile-conditioned face-model
+resolution and observer construction to `pipeline.py`. This remains part of
+the existing analysis orchestration invariant: configuration, asset trust,
+persisted calibration, and observer inputs must agree before any frame is
+processed. It does not justify a pass-through asset adapter. The previous split
+candidates remain in force if the module grows toward 1,500 lines or acquires a
+second workflow.
 
 Source-layout review, 2026-06-29: `face_observation.py` is intentionally deep
 at 1,203 lines, still below the 1,500-line split-plan trigger. It owns one

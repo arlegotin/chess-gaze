@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import torch
 
+import chess_gaze.gaze_observation as gaze_observation
 from chess_gaze.errors import ErrorCode
 from chess_gaze.gaze_observation import (
     UniGazeModel,
@@ -163,6 +164,214 @@ def test_unigaze_predict_batch_maps_each_output_row(
     assert all(gaze.valid for gaze in gazes)
 
 
+def test_camera_gaze_conversion_composes_model_and_physical_ray_signs() -> None:
+    identity = np.eye(3, dtype=np.float64)
+
+    centre = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.0,
+        yaw_radians=0.0,
+        camera_from_normalized_rotation=identity,
+    )
+    positive_physical_x = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.0,
+        yaw_radians=-0.2,
+        camera_from_normalized_rotation=identity,
+    )
+    positive_model_x = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.0,
+        yaw_radians=0.2,
+        camera_from_normalized_rotation=identity,
+    )
+    positive_physical_image_up = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.15,
+        yaw_radians=0.0,
+        camera_from_normalized_rotation=identity,
+    )
+
+    assert centre.valid is True
+    assert centre.pitch_radians == pytest.approx(0.0)
+    assert centre.yaw_radians == pytest.approx(0.0)
+    assert positive_physical_x.yaw_radians == pytest.approx(0.2)
+    assert positive_physical_x.unit_vector is not None
+    assert positive_physical_x.unit_vector[0] > 0.0
+    assert positive_model_x.yaw_radians == pytest.approx(-0.2)
+    assert positive_physical_image_up.pitch_radians == pytest.approx(0.15)
+    assert positive_physical_image_up.unit_vector is not None
+    assert positive_physical_image_up.unit_vector[1] > 0.0
+
+
+def test_camera_gaze_conversion_applies_known_yaw_rotation() -> None:
+    yaw = np.pi / 6.0
+    camera_from_normalized = np.asarray(
+        [
+            [np.cos(yaw), 0.0, np.sin(yaw)],
+            [0.0, 1.0, 0.0],
+            [-np.sin(yaw), 0.0, np.cos(yaw)],
+        ],
+        dtype=np.float64,
+    )
+
+    gaze = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.0,
+        yaw_radians=0.0,
+        camera_from_normalized_rotation=camera_from_normalized,
+    )
+
+    assert gaze.pitch_radians == pytest.approx(0.0)
+    assert gaze.yaw_radians == pytest.approx(-yaw)
+
+
+def test_camera_gaze_conversion_matches_pinned_inverse_rotation_oracle() -> None:
+    normalized_from_camera = np.asarray(
+        [
+            [0.9992439432689036, 0.038828770502339856, -0.001966830365993612],
+            [-0.03875766751308453, 0.9988477511771979, 0.028302176191941107],
+            [0.003063502792093412, -0.028204548383746697, 0.9995974781886515],
+        ],
+        dtype=np.float64,
+    )
+
+    gaze = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.125,
+        yaw_radians=-0.25,
+        camera_from_normalized_rotation=np.linalg.inv(normalized_from_camera),
+    )
+
+    assert gaze.pitch_radians == pytest.approx(0.08799865007484307)
+    assert gaze.yaw_radians == pytest.approx(0.250754738938695)
+    assert gaze.unit_vector == pytest.approx(
+        (0.2471750345974333, 0.08788512060118626, 0.9649770504259014)
+    )
+
+
+def test_camera_gaze_conversion_reconstructs_negative_model_vector_as_scene_ray() -> (
+    None
+):
+    camera_from_normalized = np.asarray(
+        [
+            [0.98, 0.0, 0.2],
+            [0.0, 1.0, 0.0],
+            [-0.2, 0.0, 0.98],
+        ],
+        dtype=np.float64,
+    )
+    raw_pitch = 0.12
+    raw_yaw = -0.22
+
+    gaze = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=raw_pitch,
+        yaw_radians=raw_yaw,
+        camera_from_normalized_rotation=camera_from_normalized,
+    )
+
+    model_vector_camera = camera_from_normalized @ np.asarray(
+        pitch_yaw_to_unit_vector(
+            pitch_radians=raw_pitch,
+            yaw_radians=raw_yaw,
+        )
+    )
+    model_vector_camera /= np.linalg.norm(model_vector_camera)
+    assert gaze.unit_vector is not None
+    repository_x, repository_image_up_y, repository_z = gaze.unit_vector
+    scene_camera_ray = np.asarray((repository_x, -repository_image_up_y, -repository_z))
+    np.testing.assert_allclose(scene_camera_ray, -model_vector_camera, atol=1e-12)
+
+
+def test_camera_gaze_conversion_is_horizontally_flip_equivariant() -> None:
+    positive = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.1,
+        yaw_radians=0.35,
+        camera_from_normalized_rotation=np.eye(3),
+    )
+    negative = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=0.1,
+        yaw_radians=-0.35,
+        camera_from_normalized_rotation=np.eye(3),
+    )
+
+    assert positive.yaw_radians is not None
+    assert negative.yaw_radians is not None
+    assert positive.pitch_radians is not None
+    assert negative.pitch_radians is not None
+    assert positive.yaw_radians == pytest.approx(-negative.yaw_radians)
+    assert positive.pitch_radians == pytest.approx(negative.pitch_radians)
+    assert positive.unit_vector is not None
+    assert negative.unit_vector is not None
+    assert positive.unit_vector[0] == pytest.approx(-negative.unit_vector[0])
+    assert positive.unit_vector[1:] == pytest.approx(negative.unit_vector[1:])
+
+
+def test_unigaze_predict_batch_uses_row_aligned_inverse_rotations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: FakeUniGazeBackend()
+    )
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+    yaw = 0.3
+    yaw_rotation = np.asarray(
+        [
+            [np.cos(yaw), 0.0, np.sin(yaw)],
+            [0.0, 1.0, 0.0],
+            [-np.sin(yaw), 0.0, np.cos(yaw)],
+        ],
+        dtype=np.float64,
+    )
+
+    first, second = model.predict_batch(
+        torch.zeros((2, 3, 224, 224), dtype=torch.float32),
+        camera_from_normalized_rotations=(np.eye(3), yaw_rotation),
+    )
+
+    assert first.yaw_radians == pytest.approx(0.25)
+    expected_second = gaze_observation.camera_gaze_from_unigaze_prediction(
+        pitch_radians=1.125,
+        yaw_radians=-1.25,
+        camera_from_normalized_rotation=yaw_rotation,
+    )
+    assert second.pitch_radians == pytest.approx(expected_second.pitch_radians)
+    assert second.yaw_radians == pytest.approx(expected_second.yaw_radians)
+
+
+def test_unigaze_predict_batch_rejects_misaligned_inverse_rotations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_path = tmp_path / "unigaze_h14_joint.safetensors"
+    asset_path.write_bytes(b"weights")
+    unigaze_loader = importlib.import_module("unigaze.loader")
+    monkeypatch.setattr(
+        unigaze_loader, "build_unigaze_model", lambda _key: FakeUniGazeBackend()
+    )
+    model = UniGazeModel.from_local_asset(_asset(asset_path), device="cpu")
+
+    with pytest.raises(ValueError, match="one inverse rotation per batch row"):
+        model.predict_batch(
+            torch.zeros((2, 3, 224, 224), dtype=torch.float32),
+            camera_from_normalized_rotations=(np.eye(3),),
+        )
+
+
+def test_camera_gaze_conversion_rejects_invalid_inverse_rotation() -> None:
+    with pytest.raises(ValueError, match="camera_from_normalized_rotation"):
+        gaze_observation.camera_gaze_from_unigaze_prediction(
+            pitch_radians=0.0,
+            yaw_radians=0.0,
+            camera_from_normalized_rotation=np.zeros((2, 2)),
+        )
+
+    invalid = np.eye(3)
+    invalid[0, 0] = np.nan
+    with pytest.raises(ValueError, match="camera_from_normalized_rotation"):
+        gaze_observation.camera_gaze_from_unigaze_prediction(
+            pitch_radians=0.0,
+            yaw_radians=0.0,
+            camera_from_normalized_rotation=invalid,
+        )
+
+
 def test_unigaze_predict_batch_rejects_empty_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -274,8 +483,10 @@ def test_normalize_face_crop_records_transform_and_returns_chw_tensor() -> None:
     assert normalized.tensor.dtype == torch.float32
     assert normalized.transform.source_bbox_image_px == bbox
     assert normalized.transform.output_size_px == 224
-    assert normalized.transform.image_px_from_crop_px.m00 == pytest.approx(30.0 / 224.0)
-    assert normalized.transform.image_px_from_crop_px.m11 == pytest.approx(20.0 / 224.0)
+    crop_transform = normalized.transform.image_px_from_crop_px
+    assert crop_transform is not None
+    assert crop_transform.m00 == pytest.approx(30.0 / 224.0)
+    assert crop_transform.m11 == pytest.approx(20.0 / 224.0)
 
 
 def test_reference_unigaze_preprocessing_expands_crop_and_uses_imagenet_transform() -> (
@@ -305,21 +516,32 @@ def test_reference_unigaze_preprocessing_expands_crop_and_uses_imagenet_transfor
     assert normalized.transform.source_bbox_image_px.y_min == pytest.approx(10.0)
     assert normalized.transform.source_bbox_image_px.x_max == pytest.approx(60.0)
     assert normalized.transform.source_bbox_image_px.y_max == pytest.approx(50.0)
-    assert normalized.transform.image_px_from_crop_px.m00 == pytest.approx(
-        40.0 / 224.0
-    )
-    assert normalized.transform.image_px_from_crop_px.m11 == pytest.approx(
-        40.0 / 224.0
-    )
-    assert float(normalized.tensor[0, 0, 0, 0]) == pytest.approx(
-        (1.0 - 0.485) / 0.229
-    )
+    crop_transform = normalized.transform.image_px_from_crop_px
+    assert crop_transform is not None
+    assert crop_transform.m00 == pytest.approx(40.0 / 224.0)
+    assert crop_transform.m11 == pytest.approx(40.0 / 224.0)
+    assert float(normalized.tensor[0, 0, 0, 0]) == pytest.approx((1.0 - 0.485) / 0.229)
     assert float(normalized.tensor[0, 1, 0, 0]) == pytest.approx(
         ((128.0 / 255.0) - 0.456) / 0.224
     )
-    assert float(normalized.tensor[0, 2, 0, 0]) == pytest.approx(
-        (0.0 - 0.406) / 0.225
+    assert float(normalized.tensor[0, 2, 0, 0]) == pytest.approx((0.0 - 0.406) / 0.225)
+
+
+def test_default_unigaze_preprocessing_requires_official_geometry_inputs() -> None:
+    rgb_frame = np.zeros((80, 100, 3), dtype=np.uint8)
+    bbox = BBox(
+        space=CoordinateSpace.IMAGE_PX,
+        x_min=30.0,
+        y_min=20.0,
+        x_max=50.0,
+        y_max=40.0,
     )
+
+    with pytest.raises(
+        ValueError,
+        match="official_geometric_v1 requires face landmarks and face model points",
+    ):
+        normalize_face_crop(rgb_frame, bbox, input_size_px=224)
 
 
 def test_normalize_face_crop_rejects_unknown_preprocessing_profile() -> None:

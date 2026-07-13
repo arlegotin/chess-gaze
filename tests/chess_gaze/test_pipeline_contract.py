@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from chess_gaze.artifact_runs import RunLayout
+from chess_gaze.calibration import default_calibration
 from chess_gaze.errors import CliErrorCode, ErrorCode, FrameStatus
 from chess_gaze.frame_observation import ModelInferenceError
 from chess_gaze.frame_records import FrameRecord
@@ -34,6 +35,10 @@ from chess_gaze.scene_artifacts import (
     build_scene_artifacts as real_build_scene_artifacts,
 )
 from chess_gaze.scene_records import SceneSummary, ViewerSceneData
+from chess_gaze.unigaze_preprocessing import (
+    UNIGAZE_FACE_MODEL_CHECKSUM_SHA256,
+    UNIGAZE_FACE_MODEL_ID,
+)
 
 
 def make_tiny_video(path: Path, frame_count: int = 3) -> None:
@@ -50,6 +55,182 @@ def make_tiny_video(path: Path, frame_count: int = 3) -> None:
     for packet in stream.encode():
         container.mux(packet)
     container.close()
+
+
+def test_default_observer_factory_loads_official_face_model_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from chess_gaze import face_observation, frame_observation, pipeline
+
+    face_model_path = tmp_path / "unigaze" / "face_model.txt"
+    loaded_paths: list[Path] = []
+    face_model_points = np.arange(18, dtype=np.float64).reshape(6, 3)
+    captured: dict[str, object] = {}
+
+    class FakeMediaPipeFaceObserver:
+        def __init__(self, **kwargs: object) -> None:
+            captured["face_observer_kwargs"] = kwargs
+
+    class FakeModelBackedFrameObserver:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def observe_batch(self, frames: Sequence[object]) -> list[object]:
+            return list(frames)
+
+        def close(self) -> None:
+            pass
+
+    def load_once(path: Path) -> np.ndarray:
+        loaded_paths.append(path)
+        return face_model_points
+
+    monkeypatch.setattr(
+        face_observation,
+        "MediaPipeFaceObserver",
+        FakeMediaPipeFaceObserver,
+    )
+    monkeypatch.setattr(
+        frame_observation,
+        "ModelBackedFrameObserver",
+        FakeModelBackedFrameObserver,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "load_unigaze_face_model_points",
+        load_once,
+        raising=False,
+    )
+    assets = [
+        ResolvedModelAsset(
+            model_id="mediapipe-face-landmarker",
+            task_name="face_landmarks",
+            resolved_path=tmp_path / "mediapipe" / "face_landmarker.task",
+            source_url="https://example.invalid/mediapipe",
+            checksum_sha256="1" * 64,
+            license="Google AI Edge Terms",
+        ),
+        ResolvedModelAsset(
+            model_id=UNIGAZE_FACE_MODEL_ID,
+            task_name="face_geometry",
+            resolved_path=face_model_path,
+            source_url="https://example.invalid/unigaze-face-model",
+            checksum_sha256=UNIGAZE_FACE_MODEL_CHECKSUM_SHA256,
+            license="MG-NC-RAI-2.0",
+        ),
+    ]
+
+    pipeline._default_observer_bundle_factory(
+        assets,
+        default_calibration(unigaze_preprocessing_profile="official_geometric_v1"),
+        cast(RunLayout, object()),
+        object(),
+        False,
+    )
+
+    assert loaded_paths == [face_model_path]
+    assert captured["unigaze_face_model_points"] is face_model_points
+
+
+def test_default_observer_factory_rejects_unpinned_official_face_model_asset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from chess_gaze import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "load_unigaze_face_model_points",
+        lambda _path: pytest.fail("mismatched asset must not be loaded"),
+    )
+    assets = [
+        ResolvedModelAsset(
+            model_id="mediapipe-face-landmarker",
+            task_name="face_landmarks",
+            resolved_path=tmp_path / "mediapipe" / "face_landmarker.task",
+            source_url="https://example.invalid/mediapipe",
+            checksum_sha256="1" * 64,
+            license="Google AI Edge Terms",
+        ),
+        ResolvedModelAsset(
+            model_id=UNIGAZE_FACE_MODEL_ID,
+            task_name="face_geometry",
+            resolved_path=tmp_path / "unigaze" / "face_model.txt",
+            source_url="https://example.invalid/unigaze-face-model",
+            checksum_sha256="0" * 64,
+            license="MG-NC-RAI-2.0",
+        ),
+    ]
+
+    with pytest.raises(PipelineError) as exc_info:
+        pipeline._default_observer_bundle_factory(
+            assets,
+            default_calibration(unigaze_preprocessing_profile="official_geometric_v1"),
+            cast(RunLayout, object()),
+            object(),
+            False,
+        )
+
+    assert exc_info.value.code is CliErrorCode.MODEL_ASSET_CHECKSUM_MISMATCH
+
+
+@pytest.mark.parametrize(
+    ("profile", "expected_model_ids"),
+    [
+        (
+            "reference_face2x_imagenet",
+            {"mediapipe-face-landmarker", "unigaze-h14-joint"},
+        ),
+        (
+            "official_geometric_v1",
+            {
+                "mediapipe-face-landmarker",
+                "unigaze-h14-joint",
+                UNIGAZE_FACE_MODEL_ID,
+            },
+        ),
+    ],
+)
+def test_pipeline_validates_only_assets_required_by_preprocessing_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile: str,
+    expected_model_ids: set[str],
+) -> None:
+    from chess_gaze import pipeline
+
+    captured: dict[str, object] = {}
+
+    def validate_assets(
+        registry: object,
+        models_root: Path,
+        approved_licenses: set[str],
+        *,
+        required_model_ids: set[str] | None = None,
+    ) -> list[ResolvedModelAsset]:
+        del registry, approved_licenses
+        captured["models_root"] = models_root
+        captured["required_model_ids"] = required_model_ids
+        return []
+
+    monkeypatch.setattr(pipeline, "validate_required_assets", validate_assets)
+
+    pipeline._validate_model_assets(
+        pipeline.DEFAULT_MODEL_REGISTRY_PATH,
+        cast(
+            Any,
+            SimpleNamespace(
+                models_root=tmp_path,
+                unigaze_preprocessing_profile=profile,
+            ),
+        ),
+    )
+
+    assert captured == {
+        "models_root": tmp_path,
+        "required_model_ids": expected_model_ids,
+    }
 
 
 def _point(x: float, y: float) -> Point2D:
@@ -247,10 +428,12 @@ def _jsonl(path: Path) -> list[dict[str, object]]:
 def _write_model_registry_with_assets(models_root: Path, registry_path: Path) -> None:
     mediapipe_path = models_root / "mediapipe" / "face_landmarker.task"
     unigaze_path = models_root / "unigaze" / "unigaze_h14_joint.safetensors"
+    face_model_path = models_root / "unigaze" / "face_model.txt"
     mediapipe_path.parent.mkdir(parents=True)
     unigaze_path.parent.mkdir(parents=True)
     mediapipe_path.write_bytes(b"mediapipe")
     unigaze_path.write_bytes(b"unigaze")
+    face_model_path.write_bytes(b"face model")
     registry_path.write_text(
         json.dumps(
             {
@@ -284,6 +467,20 @@ def _write_model_registry_with_assets(models_root: Path, registry_path: Path) ->
                         "license_approved_at": "2026-06-25",
                         "input_contract": {"input_size_px": 224},
                         "output_contract": {"order": "pitch_yaw_radians"},
+                    },
+                    {
+                        "model_id": UNIGAZE_FACE_MODEL_ID,
+                        "task_name": "face_geometry",
+                        "expected_relative_path": "unigaze/face_model.txt",
+                        "checksum_sha256": None,
+                        "source_url": "https://example.invalid/unigaze-face-model",
+                        "license": "MG-NC-RAI-2.0",
+                        "requires_license_approval": True,
+                        "license_approved": True,
+                        "license_approved_by": "repo_owner",
+                        "license_approved_at": "2026-07-13",
+                        "input_contract": {"row_count": 50},
+                        "output_contract": {"selected_point_count": 6},
                     },
                 ]
             }
@@ -1338,12 +1535,14 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
             calibration: object,
             run_layout: object,
             save_crop_images: bool,
+            unigaze_face_model_points: object | None = None,
         ) -> None:
             captured["face_observer"] = face_observer
             captured["gaze_model"] = gaze_model
             captured["calibration"] = calibration
             captured["run_layout"] = run_layout
             captured["save_crop_images"] = save_crop_images
+            captured["unigaze_face_model_points"] = unigaze_face_model_points
 
         def __call__(self, frame: ObserverFrame) -> FrameRecord:
             return _fake_record(frame)
@@ -1363,7 +1562,9 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
     monkeypatch.setattr(
         frame_observation, "ModelBackedFrameObserver", FakeModelBackedFrameObserver
     )
-    calibration = default_calibration()
+    calibration = default_calibration(
+        unigaze_preprocessing_profile="reference_face2x_imagenet"
+    )
     run_layout = cast(Any, object())
     resolved_assets = [
         ResolvedModelAsset(
@@ -1391,6 +1592,7 @@ def test_default_observer_bundle_factory_uses_prepared_gaze_model_and_batch_path
     assert captured["face_model_asset_path"] == face_path
     assert captured["gaze_model"] is prepared_model
     assert captured["save_crop_images"] is False
+    assert captured["unigaze_face_model_points"] is None
     assert bundle.frame_batch_observer is not None
     assert bundle.close is not None
 
@@ -1568,6 +1770,7 @@ def test_config_models_root_controls_default_model_observer_factory(
     assert result.decoded_frame_count == 1
     assert sorted(path.relative_to(models_root) for path in captured_asset_paths) == [
         Path("mediapipe/face_landmarker.task"),
+        Path("unigaze/face_model.txt"),
         Path("unigaze/unigaze_h14_joint.safetensors"),
     ]
     assert captured_runtime_requests == [("mps", 7)]

@@ -176,6 +176,19 @@ def test_analyze_unigaze_preprocessing_profile_reaches_request(
     assert request.unigaze_preprocessing_profile == "legacy_bbox_rgb01"
 
 
+def test_analyze_parser_accepts_official_unigaze_preprocessing_profile() -> None:
+    args = cli.build_parser().parse_args(
+        [
+            "analyze",
+            "fixture_short.mp4",
+            "--unigaze-preprocessing-profile",
+            "official_geometric_v1",
+        ]
+    )
+
+    assert args.unigaze_preprocessing_profile == "official_geometric_v1"
+
+
 def test_analyze_enables_resume_by_default(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

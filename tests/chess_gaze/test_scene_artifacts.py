@@ -24,6 +24,7 @@ from chess_gaze.frame_records import (
 )
 from chess_gaze.geometry import BBox, CoordinateSpace, Point2D
 from chess_gaze.scene_artifacts import (
+    _load_calibration,
     build_scene_artifacts,
     build_viewer_scene_data,
     load_scene_frames,
@@ -53,6 +54,16 @@ EXPECTED_MODULE_URLS = {
     "three/addons/": THREE_ADDONS_URL,
     "three/addons/controls/OrbitControls.js": ORBIT_CONTROLS_URL,
 }
+
+
+def test_missing_calibration_uses_reference_preprocessing_compatibility(
+    tmp_path: Path,
+) -> None:
+    calibration = _load_calibration(tmp_path / "missing-calibration.json")
+
+    assert calibration.unigaze_preprocessing_profile == "reference_face2x_imagenet"
+    assert calibration.unigaze_face_model_id is None
+    assert calibration.unigaze_face_model_checksum_sha256 is None
 
 
 def _layout(run_dir: Path) -> RunLayout:

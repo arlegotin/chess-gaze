@@ -2,6 +2,17 @@
 
 Research and repository review date: 2026-07-12
 
+Current decision update: 2026-07-13. H1 is **kept** and
+`official_geometric_v1` is the selected default after the repository owner
+approved the pinned face-model asset under `MG-NC-RAI-2.0`, the independent
+geometry/sign oracles passed, and paired runs on all three `*_short.mp4` clips
+lost zero valid-gaze coverage. This is a model-contract correction, not a gaze-
+accuracy claim; the motion/jitter changes are descriptive because the clips
+contain no target truth. See
+[ADR-0007](development/decisions/0007-restore-unigaze-geometric-normalization.md)
+and the
+[evaluation closeout](superpowers/closeouts/2026-07-12-gaze-precision-hypothesis-evaluation.md#h1-official-unigaze-geometry).
+
 This is an experiment backlog for future coding agents, not a claim that any
 proposed change is guaranteed to improve accuracy. The shortest sensible path is:
 
@@ -54,26 +65,26 @@ PyAV decode
   -> MediaPipe Face Landmarker in independent IMAGE mode
   -> per-frame primary-face selection, sometimes across ten fixed regions
   -> eye landmarks and head pose
-  -> 2x face bbox, direct 224x224 resize, ImageNet channel normalization
+  -> 2x face bbox and six mapped face landmarks
+  -> pinned face-model pose solve and 224x224 perspective normalization
+  -> ImageNet channel normalization
   -> UniGaze-H14 joint checkpoint
-  -> hard-coded yaw sign flip
+  -> inverse normalization rotation and explicit UniGaze label-sign conversion
   -> apparent-gaze ray
   -> optional pseudo-metric 3D scene / configured target plane
 ```
 
 The most important findings are:
 
-- The current crop performs only bbox expansion, resize, and channel
-  normalization
-  ([`gaze_observation.py:119`](../src/chess_gaze/gaze_observation.py#L119)).
-  UniGaze's current official video path also estimates head pose, applies a
-  perspective normalization warp, predicts in normalized coordinates, and
-  applies the inverse normalization rotation before using the vector in camera
-  coordinates. The repository does not do those geometric steps.
-- Head pose is computed but not passed into UniGaze preprocessing. UniGaze angles
-  are treated as camera-space after only a drawing-derived yaw negation
-  ([`gaze_observation.py:222`](../src/chess_gaze/gaze_observation.py#L222),
-  [`scene_geometry.py:483`](../src/chess_gaze/scene_geometry.py#L483)).
+- The retained `official_geometric_v1` profile now reproduces the pinned
+  six-point pose solve, perspective warp, and row-aligned inverse rotation. The
+  former `reference_face2x_imagenet` direct-resize path remains available only
+  for explicit rollback and comparisons.
+- UniGaze's predicted vector is the opposite of the physical eye-to-target ray.
+  The corrected conversion applies `R^-1`, stores pitch from model-vector y and
+  yaw from negated model-vector x, then relies on the existing scene conversion
+  `(x,-y,-z)` to recover the full physical camera ray. Synthetic and pinned-
+  frame tests protect this sign composition.
 - Face detection is forced to stateless `IMAGE` mode with up to four faces
   ([`face_observation.py:155`](../src/chess_gaze/face_observation.py#L155)). The
   model does not expose candidate scores through this API, so selection falls
@@ -85,37 +96,30 @@ The most important findings are:
   offsets are computed but not used by inference or calibration
   ([`eye_observation.py:214`](../src/chess_gaze/eye_observation.py#L214),
   [`eye_observation.py:484`](../src/chess_gaze/eye_observation.py#L484)).
-- The existing affine calibrator is isolated from the runtime. Raw appearance
-  gaze is copied directly to recommended gaze
-  ([`frame_observation.py:260`](../src/chess_gaze/frame_observation.py#L260)).
-  Its unregularized normal-equation solve can fail on rank-deficient real
-  samples, and ridge currently penalizes the intercept
-  ([`gaze_calibration.py:52`](../src/chess_gaze/gaze_calibration.py#L52)).
-- The current benchmark measures coverage and radians per frame, not target
-  accuracy. It ignores timestamps
-  ([`gaze_precision_benchmark.py:172`](../src/chess_gaze/gaze_precision_benchmark.py#L172))
-  and does not reject comparisons made from different source videos.
-- The benchmark's target-plane count includes valid mathematical intersections
-  outside the configured plane bounds
-  ([`scene_artifacts.py:597`](../src/chess_gaze/scene_artifacts.py#L597)). It is
-  not board/screen coverage.
-- Decode records rotation metadata but does not explicitly apply an orientation
-  transform. If PTS is unavailable, the pipeline stores raw frame index as
-  `timestamp_seconds`, which must not be used as seconds
-  ([`video_decode.py:94`](../src/chess_gaze/video_decode.py#L94),
-  [`pipeline.py:866`](../src/chess_gaze/pipeline.py#L866)).
+- The existing affine calibrator remains isolated from runtime, although its
+  zero-ridge and intercept-penalty numerical defects were repaired. Raw
+  appearance gaze is still copied to recommended gaze because the corpus has no
+  calibration targets.
+- The v2 benchmark now proves source, model, settings, decoded PTS identity, and
+  one declared variable before comparing runs. It reports time-normalized
+  motion and separate finite-plane hits, but still has no target-accuracy
+  metric because no allowed input supplies labels.
+- Decode now applies declared right-angle display orientation and distinguishes
+  usable PTS from frame-index fallback. Mirror policy remains unresolved
+  without independent direction truth.
 - The 3D viewer's camera and depth are explicitly approximate: focal length is
   `max(frame_width, frame_height)` and depth assumes a 63 mm adult-male IPD
   ([`scene_geometry.py:69`](../src/chess_gaze/scene_geometry.py#L69),
   [`scene_calibration.py:10`](../src/chess_gaze/scene_calibration.py#L10)). Keep
   this useful visualization, but do not use it as screen truth.
 
-### Fresh descriptive measurements
+### Pre-H1 descriptive measurements (2026-07-12)
 
-Fresh inference completed on two current 20-second local clips; the third run
-was interrupted after 12.47 seconds. These values mix real gaze/head movement
-with estimator noise and have no target labels. They are descriptive baselines,
-not accuracy results.
+Before H1 resumed, reference-profile inference completed on two current
+20-second local clips; the third run was interrupted after 12.47 seconds. These
+values mix real gaze/head movement with estimator noise and have no target
+labels. They are historical descriptive baselines, not accuracy results or the
+retained H1 campaign.
 
 | Clip | Frames / fps | Valid gaze | Median step | p95 step | p95 speed | Median face bbox |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -127,20 +131,18 @@ Median detected eye boxes are only about `16-35 px` wide and `4-9 px` high in
 these clips. That makes raw iris offsets and eyelid geometry noisy even when
 MediaPipe returns subpixel coordinates.
 
-The historical 2026-07-05 A/B did find that the current 2x + ImageNet profile
+The historical 2026-07-05 A/B did find that the then-current 2x + ImageNet profile
 reduced Nakamura median frame-step angle from `0.066635` to `0.042889` radians
 (`-35.64%`), p95 by `19.16%`, and p99 by `18.24%`, without losing gaze coverage
 ([closeout](superpowers/closeouts/2026-07-05-gaze-precision-improvement.md#L88)).
 That is good evidence that model input matters, but it remains a jitter proxy.
 
-There is also local-input drift: `artifacts/` is ignored, the current Nakamura
-file has 1200 frames and SHA-256
-`6524928897505e614a0eae419a1b7bd0e2a8dff25ffed22db2706d02bbf909bc`, while
-two real-video tests still expect 180 frames
-([decode test](../tests/chess_gaze/test_video_decode_real_video.py#L9),
-[pipeline test](../tests/chess_gaze/test_pipeline_real_video_contract.py#L21)).
-This is another reason to repair benchmark identity checks before interpreting
-future deltas.
+The 2026-07-12 audit also found local-input drift: `artifacts/` is ignored, and
+the Nakamura file had changed to 1,200 frames with SHA-256
+`6524928897505e614a0eae419a1b7bd0e2a8dff25ffed22db2706d02bbf909bc`
+while two real-video tests still expected 180. The retained H0 repair now binds
+those tests and benchmark runs to the approved source hash, 1,200-frame count,
+and decoded PTS identity before interpreting deltas.
 
 ## Dependency and model audit
 
@@ -205,26 +207,32 @@ Relevant dependency caveats:
 This does not directly improve gaze. It makes every claimed improvement
 falsifiable and is therefore the first code change.
 
-Why it should be done:
+**Decision, 2026-07-12:** kept. Comparator schema v2 now enforces source,
+decoded PTS, model/runtime, and non-variable identity, reports degrees/second,
+and distinguishes finite-plane hits. The remaining target-accuracy fields still
+require a future labeled recording.
 
-- The current comparator can compare different source videos and call the result
+Why it was needed:
+
+- The old comparator could compare different source videos and call the result
   a preprocessing delta.
-- Radians per frame makes 30 fps and 60 fps incomparable.
+- Its radians-per-frame metric made 30 fps and 60 fps incomparable.
 - Consecutive-frame motion includes real saccades and head motion.
 - Calibration training error is already reported, but it is not held-out error.
 
-Minimum code change:
+Retained implementation:
 
-- Extend `gaze_precision_benchmark.py`; do not build another harness.
-- Require an explicitly declared experimental variable. Source SHA, dimensions,
-  decoded-frame count, and usable PTS sequence must always match; model SHA and
-  other settings must match unless that exact field is the declared variable.
-- Add degrees/second from positive timestamp deltas. Mark the frame-index
-  timestamp fallback as unusable for time metrics.
+- `gaze_precision_benchmark.py` remains the single harness.
+- An explicitly declared experimental variable is required. Source SHA,
+  dimensions, decoded-frame count, usable PTS sequence, model SHA, and other
+  settings must match unless the exact field belongs to the declared variable.
+- Degrees/second uses positive timestamp deltas; frame-index fallback is
+  unusable for time metrics.
 - With a target file, add per-fixation held-out error, dispersion, coverage, and
   switch lag. Rename the current calibration `mean_absolute_error` in reporting
   or state clearly that it is mean Euclidean target-coordinate distance.
-- Count in-bounds target-plane hits separately from merely valid intersections.
+- In-bounds target-plane hits are counted separately from valid infinite-plane
+  intersections.
 
 Smallest controlled recording:
 
@@ -269,6 +277,12 @@ ceremony.
 This is the strongest code hypothesis because it fixes a known model-contract
 mismatch rather than adding a heuristic.
 
+**Decision, 2026-07-13:** keep the contract correction as
+`official_geometric_v1`; retain `reference_face2x_imagenet` for rollback. The
+independent equation, mapping, sign, native-frame, QA, provenance-comparator,
+and zero-coverage-loss gates passed. Lower step/speed proxies on all three clips
+are descriptive and do not prove reduced bias or improved gaze accuracy.
+
 The official UniGaze video inference currently:
 
 - expands a landmark face box by 2x;
@@ -280,26 +294,29 @@ The official UniGaze video inference currently:
 - predicts gaze in normalized coordinates; and
 - applies `R^-1` to the predicted 3D vector before camera-space use.
 
-The released normalizer computes `W = K_norm * S * R * K^-1`. See the
-[official inference script](https://github.com/ut-vision/UniGaze/blob/main/unigaze/predict_gaze_video.py),
-[normalizer](https://github.com/ut-vision/UniGaze/blob/main/unigaze/gazelib/gaze/normalize.py),
+The released normalizer computes `W = K_norm * S * R * K^-1`. See the pinned
+[official inference script](https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/predict_gaze_video.py),
+[normalizer](https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/gazelib/gaze/normalize.py),
 and [WACV paper](https://openaccess.thecvf.com/content/WACV2026/papers/Qin_UniGaze_Towards_Universal_Gaze_Estimation_via_Large-scale_Pre-Training_WACV_2026_paper.pdf).
 
-Minimum implementation direction:
+Retained implementation:
 
-- Add one explicit `official_geometric_v1` preprocessing profile. Preserve the
-  current profile only for paired rollback.
-- Reuse current MediaPipe landmarks, current head-pose evidence, NumPy, and
-  OpenCV. Do not add `face_alignment` as a production dependency.
-- First reproduce the official crop/rotation on a handful of fixed frames as an
-  offline oracle. Then map the required eye/nose landmarks to MediaPipe.
-- Persist the normalization matrix/rotation or enough parameters to reproduce
-  it. Convert model angles to a unit vector and apply `R^-1` before any repo
-  coordinate convention.
-- Re-derive yaw/pitch signs from vector tests. Do not preserve the current
-  drawing-derived yaw negation by assumption.
-- Test a synthetic known camera/pose round trip, left/centre/right directions,
-  horizontal flip equivariance, and a real fixed-frame reference.
+- `official_geometric_v1` is explicit and default;
+  `reference_face2x_imagenet` remains the paired rollback.
+- Existing MediaPipe landmarks, NumPy, and OpenCV implement the contract; no
+  `face_alignment` production dependency was added.
+- Synthetic equations and fixed frames from every approved clip reproduce the
+  pinned crop/rotation oracle after the reviewed eye/nose mapping.
+- Persisted landmarks, profile, source dimensions, and pinned asset provenance
+  reproduce the normalization transform. Model angles become a unit vector and
+  receive row-aligned `R^-1` before repository-coordinate conversion.
+- Preserve UniGaze's label direction explicitly: training stores the negated
+  physical gaze ray. After `R^-1`, negate model-vector x when deriving repo yaw
+  while retaining model-vector y for repo pitch; the existing scene conversion
+  then reconstructs the full negative model vector as the physical camera ray.
+- Vector tests re-derived yaw/pitch signs instead of assuming the former
+  drawing-derived negation.
+- Synthetic pose/sign/flip tests and the real fixed-frame oracle are retained.
 
 Expected effect:
 
@@ -309,9 +326,11 @@ Expected effect:
   this checkpoint or these videos.
 - The earlier local partial-contract fix improved median jitter by `35.64%`, but
   that also is not an accuracy forecast.
-- Accept this hypothesis only on held-out targets using the gates above. A
-  meaningful starting result is at least 10% / 0.5° lower median error without
-  worse tail error or more than two points of coverage loss.
+- Accept the model-contract correction on the independent oracle, provenance,
+  and coverage gates above. Claim reduced bias or improved gaze accuracy only
+  on held-out targets; a meaningful starting accuracy result would be at least
+  10% / 0.5° lower median error without worse tail error or more than two
+  points of coverage loss.
 
 Licensing matters but does not require new process. The UniGaze model is
 MG-NC-RAI-2.0. The released normalizer is CC BY-NC-SA 4.0 and requests citation.
@@ -537,13 +556,13 @@ Expected effect and test:
 ### Hypothesis 9: another model may help after the current model is used correctly
 
 Do not switch models before hypotheses 0-2. Otherwise a new model can win merely
-because its demo performs normalization that the current integration omitted.
+because its demo performs normalization that this integration formerly omitted.
 
 Primary-source candidate matrix, verified 2026-07-12:
 
 | Candidate | Checkpoint / license | Relevant evidence | Integration risk and decision |
 | --- | --- | --- | --- |
-| Current UniGaze-H14 joint | Local 2.4 GB safetensors; MG-NC-RAI-2.0, approved for this noncommercial project | Final within-dataset H errors: 3.96° XGaze, 4.07° MPII, 3.01° GazeCapture, 4.34° EYEDIAP, 9.44° Gaze360. Joint H: 4.46/5.08/3.20/5.16/9.07°. | Already runs on local MPS. Keep as baseline and fix its geometric contract. |
+| Current UniGaze-H14 joint | Local 2.4 GB safetensors; MG-NC-RAI-2.0, approved for this noncommercial project | Final within-dataset H errors: 3.96° XGaze, 4.07° MPII, 3.01° GazeCapture, 4.34° EYEDIAP, 9.44° Gaze360. Joint H: 4.46/5.08/3.20/5.16/9.07°. | Runs on local MPS; the retained H1 path now restores and verifies its geometric contract. Keep as baseline. |
 | [ST-Gaze](https://u0172623.pages.gitlab.kuleuven.be/ST-Gaze/) | MIT code and released approximately 83 MiB checkpoint | EVE: 2.58° / 2.87 cm; no-GRU ablation 2.88°, pool-before-GRU 2.79°. 21M parameters, 6.39 GFLOPs, reported 105 fps / 800 MB on RTX 4090. | Serious later candidate. Needs separate 128x128 eye/face crops, temporal state, EVE preprocessing; upstream requirements are broad/CUDA-oriented and RTX speed does not predict MPS. Test in isolation; do not copy its whole environment into this project. |
 | [L2CS-Net](https://github.com/Ahmednull/L2CS-Net) | MIT code; Gaze360 weights hosted externally without a model card/checksum or clear separate weight terms | Paper reports 3.92° MPII and 10.41° Gaze360: mixed, not categorically worse than UniGaze across datasets. | Legitimate independent sanity model. Official packaging pulls GUI OpenCV and a Git face detector, conflicting with the lean headless stack. Isolate a minimal checkpoint adapter and license/checksum it before use. |
 | [3DGazeNet](https://github.com/eververas/3DGazeNet) | Public code and Drive checkpoint, but no root license | Paper/project claim up to 23% generalization gain. | Not verified open source; old Python 3.8/CUDA environment and GPU-only extras. Exclude under this project's FOSS/simple constraints unless licensing is clarified. |
@@ -603,9 +622,10 @@ not be treated as recovered gaze evidence.
   and one-face MediaPipe video ROI are tested.
 - Do not use same-scene gaze-target models such as Gazelle/Gaze-LLE as if a
   facecam sees the streamer's monitor; it does not.
-- Do not add broad source refactors, experiment registries, dashboards, ADRs, PR
-  ceremonies, or services for this work. Extend the existing benchmark and
-  calibration modules.
+- Do not add broad source refactors, experiment registries, dashboards, or
+  services for follow-up experiments. Extend the existing benchmark and
+  calibration modules, and record only architecture-significant retained
+  decisions as ADRs.
 - Do not keep adding streamer-layout-specific detection regions. Temporal
   acquisition/reacquisition should replace that direction if it works.
 - Do not call stability accuracy, valid intersections board hits, or heuristic
@@ -615,17 +635,19 @@ not be treated as recovered gaze evidence.
 
 ## Recommended execution order for future agents
 
-1. Patch the existing comparator's identity/timestamp checks and target metrics.
-   Record the one 90-second clip.
-2. Implement `official_geometric_v1` with inverse rotation and run the paired
-   held-out comparison.
-3. Repair and integrate offset-only plus affine calibration; keep the simplest
-   model that wins held-out.
-4. Add explicit mirror/orientation handling and previous-face continuity.
-5. Evaluate individual quality signals, then the three-frame vector filter.
-6. Try iris features and coarse chess regions only if the earlier steps plateau.
-7. Run isolated ST-Gaze and L2CS bakeoffs only if the correctly normalized and
-   calibrated UniGaze result is still insufficient.
+1. Preserve the retained v2 comparator's source/model/PTS/declared-variable
+   checks and keep target-plane intersections separate from in-bounds hits.
+2. Maintain `official_geometric_v1` as the pinned contract-correct default and
+   `reference_face2x_imagenet` as the explicit rollback/comparison profile.
+3. Acquire controlled held-out target/fixation evidence before integrating
+   runtime calibration, quality gates, temporal filtering, iris correction, or
+   chess-focus classification.
+4. Revisit mirror policy or temporal identity only with independent direction
+   truth or newly confirmed selection failures; the tested H3 variants failed
+   their gate.
+5. Run alternate-model bakeoffs only after the labeled benchmark exists and
+   every candidate checkpoint has verified license, checksum, preprocessing,
+   output convention, and MPS behavior.
 
 Change one experimental variable at a time and retain raw outputs. Stop an idea
 as soon as it misses its decision gate; a negative result is cheaper and more
@@ -633,12 +655,13 @@ useful than permanent speculative machinery.
 
 ## Primary sources
 
-All were checked on 2026-07-12.
+The H1 sources were refreshed at pinned revisions on 2026-07-13; the remaining
+backlog sources were checked on 2026-07-12.
 
 - UniGaze [paper](https://openaccess.thecvf.com/content/WACV2026/papers/Qin_UniGaze_Towards_Universal_Gaze_Estimation_via_Large-scale_Pre-Training_WACV_2026_paper.pdf),
-  [repository](https://github.com/ut-vision/UniGaze),
-  [video inference](https://github.com/ut-vision/UniGaze/blob/main/unigaze/predict_gaze_video.py),
-  and [normalizer](https://github.com/ut-vision/UniGaze/blob/main/unigaze/gazelib/gaze/normalize.py)
+  [pinned repository](https://github.com/ut-vision/UniGaze/tree/9c240fbe33f3d6146970a77b7c8fa06a7e60019e),
+  [video inference](https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/predict_gaze_video.py),
+  and [normalizer](https://github.com/ut-vision/UniGaze/blob/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/gazelib/gaze/normalize.py)
 - [Revisiting Data Normalization for Appearance-Based Gaze Estimation](https://www.collaborative-ai.org/publications/zhang18_etra/)
 - MediaPipe [Face Landmarker Python guide](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/python)
   and [options reference](https://ai.google.dev/edge/api/mediapipe/python/mp/tasks/vision/FaceLandmarkerOptions)

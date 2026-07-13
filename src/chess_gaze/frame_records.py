@@ -11,6 +11,9 @@ from chess_gaze.geometry import BBox, Point2D, RotationRadians, StrictSchemaMode
 from chess_gaze.unigaze_preprocessing import (
     LEGACY_UNIGAZE_FACE_CROP_SCALE,
     LEGACY_UNIGAZE_PREPROCESSING_PROFILE,
+    OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE,
+    UNIGAZE_FACE_MODEL_CHECKSUM_SHA256,
+    UNIGAZE_FACE_MODEL_ID,
     UniGazePreprocessingProfile,
 )
 
@@ -393,6 +396,8 @@ class CalibrationRecord(StrictSchemaModel):
     unigaze_face_crop_scale: float = LEGACY_UNIGAZE_FACE_CROP_SCALE
     unigaze_image_mean_rgb: tuple[float, float, float] | None = None
     unigaze_image_std_rgb: tuple[float, float, float] | None = None
+    unigaze_face_model_id: str | None = None
+    unigaze_face_model_checksum_sha256: str | None = None
     target_plane_origin_camera_m: tuple[float, float, float] | None = None
     target_plane_x_axis_camera: tuple[float, float, float] | None = None
     target_plane_y_axis_camera: tuple[float, float, float] | None = None
@@ -434,6 +439,22 @@ class CalibrationRecord(StrictSchemaModel):
         ):
             raise ValueError(
                 "unigaze_image_mean_rgb and unigaze_image_std_rgb must both be set"
+            )
+        face_model_provenance = (
+            self.unigaze_face_model_id,
+            self.unigaze_face_model_checksum_sha256,
+        )
+        if self.unigaze_preprocessing_profile == OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE:
+            if face_model_provenance != (
+                UNIGAZE_FACE_MODEL_ID,
+                UNIGAZE_FACE_MODEL_CHECKSUM_SHA256,
+            ):
+                raise ValueError(
+                    "official_geometric_v1 requires the pinned UniGaze face model"
+                )
+        elif face_model_provenance != (None, None):
+            raise ValueError(
+                "UniGaze face model provenance is only valid for official_geometric_v1"
             )
         return self
 

@@ -54,6 +54,12 @@ from chess_gaze.qa_summary import (
 )
 from chess_gaze.scene_artifacts import build_scene_artifacts
 from chess_gaze.scene_viewer import build_scene_viewer
+from chess_gaze.unigaze_preprocessing import (
+    OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE,
+    UNIGAZE_FACE_MODEL_CHECKSUM_SHA256,
+    UNIGAZE_FACE_MODEL_ID,
+    load_unigaze_face_model_points,
+)
 from chess_gaze.unigaze_runtime import (
     PreparedUniGazeRuntime,
     UniGazeDevice,
@@ -653,11 +659,15 @@ def _validate_model_assets(
     approved_licenses = {
         model.license for model in registry.models if model.license_approved
     } | set(DEFAULT_APPROVED_LICENSES)
+    required_model_ids = {"mediapipe-face-landmarker", UNIGAZE_MODEL_ID}
+    if resolved.unigaze_preprocessing_profile == OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE:
+        required_model_ids.add(UNIGAZE_FACE_MODEL_ID)
     try:
         return validate_required_assets(
             registry,
             resolved.models_root,
             approved_licenses,
+            required_model_ids=required_model_ids,
         )
     except ModelAssetError as exc:
         raise PipelineError(exc.code, str(exc)) from exc
@@ -674,6 +684,25 @@ def _default_observer_bundle_factory(
     from chess_gaze.frame_observation import ModelBackedFrameObserver
 
     face_asset = _asset_by_id(resolved_assets, "mediapipe-face-landmarker")
+    unigaze_face_model_points = None
+    if (
+        calibration.unigaze_preprocessing_profile
+        == OFFICIAL_UNIGAZE_PREPROCESSING_PROFILE
+    ):
+        unigaze_face_asset = _asset_by_id(resolved_assets, UNIGAZE_FACE_MODEL_ID)
+        expected_checksum = calibration.unigaze_face_model_checksum_sha256
+        if (
+            expected_checksum != UNIGAZE_FACE_MODEL_CHECKSUM_SHA256
+            or unigaze_face_asset.checksum_sha256 != expected_checksum
+        ):
+            raise PipelineError(
+                CliErrorCode.MODEL_ASSET_CHECKSUM_MISMATCH,
+                "Official UniGaze face-model checksum does not match the "
+                "pinned calibration contract",
+            )
+        unigaze_face_model_points = load_unigaze_face_model_points(
+            unigaze_face_asset.resolved_path
+        )
     observer = ModelBackedFrameObserver(
         face_observer=MediaPipeFaceObserver(
             model_asset_path=face_asset.resolved_path,
@@ -683,6 +712,7 @@ def _default_observer_bundle_factory(
         calibration=calibration,
         run_layout=run_layout,
         save_crop_images=save_crop_images,
+        unigaze_face_model_points=unigaze_face_model_points,
     )
     return ObserverBundle(
         frame_observer=observer,

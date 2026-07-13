@@ -12,11 +12,13 @@ When you run `chess-gaze analyze <video>`, it:
 
 1. Decodes the video.
 2. Finds the face, eyes, and head pose with MediaPipe.
-3. Builds UniGaze inputs with the default precision profile: expanded face
-   framing, ImageNet normalization, and persisted preprocessing metadata.
+3. Builds UniGaze inputs with the default `official_geometric_v1` profile:
+   six-point face pose, a 224 x 224 perspective-normalization warp, ImageNet
+   normalization, and persisted geometry/asset metadata.
 4. Runs [UniGaze](https://github.com/ut-vision/UniGaze) from local weights.
-5. Writes calibration metadata and per-frame records with head pose, gaze
-   angles, gaze rays, and projection metadata.
+5. Applies each crop's inverse normalization rotation, converts the UniGaze
+   model vector to the repository camera-ray convention, and writes calibration
+   metadata and per-frame gaze evidence.
 6. Projects gaze rays onto the 3D gaze sphere and, when configured, a calibrated
    screen or board target plane.
 7. Builds a local browser viewer.
@@ -34,7 +36,11 @@ Download the model files and put them here:
 | Local path | Source |
 | --- | --- |
 | `models/mediapipe/face_landmarker.task` | [MediaPipe Face Landmarker model bundle](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task) |
-| `models/unigaze/unigaze_h14_joint.safetensors` | [UniGaze `unigaze_h14_joint.safetensors`](https://huggingface.co/UniGaze/UniGaze-models/blob/main/unigaze_h14_joint.safetensors) |
+| `models/unigaze/unigaze_h14_joint.safetensors` | [Pinned UniGaze `unigaze_h14_joint.safetensors` revision](https://huggingface.co/UniGaze/UniGaze-models/blob/d3f8335cd4b7d249adbc32389986ce49b52f6f72/unigaze_h14_joint.safetensors) |
+| `models/unigaze/face_model.txt` | [Pinned UniGaze six-point face-geometry source](https://raw.githubusercontent.com/ut-vision/UniGaze/9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/data/face_model.txt) |
+
+The model registry validates exact checksums. The face-geometry asset is needed
+only by `official_geometric_v1`; the rollback profiles do not require it.
 
 Analyze a video:
 
@@ -54,12 +60,23 @@ Open the printed `viewer/index.html`, or serve the viewer on localhost:
 uv run chess-gaze view artifacts/output/<video-stem>/runs/<run-id>
 ```
 
-Default inference expects Apple Silicon MPS, UniGaze batch size `7`, and the
-precision preprocessing profile. For a portable CPU run:
+Default inference expects Apple Silicon MPS, UniGaze batch size `7`, and
+`official_geometric_v1`. For a portable CPU run:
 
 ```sh
 uv run chess-gaze analyze video.mp4 --unigaze-device cpu --unigaze-batch-size 1
 ```
+
+To reproduce the former direct-resize path during rollback or comparison:
+
+```sh
+uv run chess-gaze analyze video.mp4 \
+  --unigaze-preprocessing-profile reference_face2x_imagenet
+```
+
+The geometric default restores the pinned model contract; the available
+streamer clips do not provide gaze targets, so this is not a measured accuracy
+claim. See [ADR-0007](docs/development/decisions/0007-restore-unigaze-geometric-normalization.md).
 
 ## Analysis artifacts
 

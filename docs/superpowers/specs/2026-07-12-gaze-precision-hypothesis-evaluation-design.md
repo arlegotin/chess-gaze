@@ -4,6 +4,14 @@ Date: 2026-07-12
 
 Status: approved
 
+Implementation update, 2026-07-13: H1 resumed after `repo_owner` approved the
+pinned `face_model.txt` asset under `MG-NC-RAI-2.0`. The equation, sign, native-
+frame, asset, QA, comparator, and coverage gates passed, so
+`official_geometric_v1` is retained as the default under
+[ADR-0007](../../development/decisions/0007-restore-unigaze-geometric-normalization.md).
+The paired short-video motion metrics remain descriptive; no gaze-accuracy or
+fixation-precision claim is authorized.
+
 ## Goal
 
 Evaluate every hypothesis in `docs/gaze-precision-hypotheses.md` in rank order,
@@ -123,9 +131,9 @@ because no allowed input supplies those labels.
 selected face + mapped landmarks + verified camera/face geometry
   -> perspective warp and inverse normalization rotation
   -> normalized UniGaze tensor
-  -> normalized gaze vector
+  -> normalized UniGaze model vector
   -> inverse rotation into camera coordinates
-  -> existing yaw/pitch record
+  -> convert the model vector to the existing physical-ray yaw/pitch convention
 ```
 
 `unigaze_preprocessing.py` owns the normalization contract and
@@ -135,10 +143,24 @@ The equation implementation must match the official normalizer on identical
 inputs and must reproduce the official inverse-rotation result before it can be
 retained.
 
+UniGaze's training preparation stores `vector_to_pitchyaw(-gaze_norm)`: its
+predicted vector is the opposite of the physical eye-to-target ray. The pinned
+video inference preserves that convention through `R^-1` and negates the vector
+when projecting the physical ray. After inverse rotation, repository pitch is
+therefore `asin(model_vector_camera.y)` and repository yaw is
+`atan2(-model_vector_camera.x, model_vector_camera.z)`. This composes with the
+existing scene conversion `(x, -y, -z)` to recover the physical camera ray
+`-model_vector_camera`.
+
 If upstream face-model values are required, they must be registered with a
 source URL, license, local checksum, and citation. If those facts or a stable
 MediaPipe-to-reference landmark mapping cannot be verified, H1 is blocked and
 the experimental code is removed.
+
+That conditional gate resolved on 2026-07-13 with repository-owner approval,
+the pinned asset checksum, and 9/9 original-resolution landmark reviews. The
+accepted implementation keeps required-asset validation profile-selective so
+rollback profiles do not acquire an unused face-model dependency.
 
 ### Temporal face identity
 
@@ -192,7 +214,7 @@ runtime stack and does not select a new production model.
 
 | Candidate | Verified availability and license | Task fit and runtime risk | Decision |
 | --- | --- | --- | --- |
-| UniGaze-H14 joint | Existing local 2.4 GB safetensors, SHA-256 `a336e7234738e9a9517fc6af7a9bc69cee16958388ad648d48c0f6b0df42ac8f`; model card says MG-NC-RAI-2.0; `unigaze==0.1.3` is already locked | Current MPS path runs locally. Input is a normalized face image and output is pitch/yaw without confidence. Current integration omits official geometric normalization. | Keep as baseline; repair and verify its documented contract before any bakeoff. |
+| UniGaze-H14 joint | Existing local 2.4 GB safetensors, SHA-256 `a336e7234738e9a9517fc6af7a9bc69cee16958388ad648d48c0f6b0df42ac8f`; model card says MG-NC-RAI-2.0; `unigaze==0.1.3` is already locked | The design-time MPS path ran locally but omitted official geometric normalization. The 2026-07-13 implementation update above repairs that contract and keeps the pitch/yaw-without-confidence output. | Keep as baseline with the retained, verified geometric contract before any bakeoff. |
 | ST-Gaze | Official project exposes code and an EfficientNet-B3 checkpoint; GitLab identifies an MIT license | Requires temporal sequences, eye/face preprocessing, state, and a separate checkpoint. Published EVE conditions do not match the unlabeled streamer clips; RTX evidence does not establish MPS behavior. | Serious later candidate; blocked here by unavailable accuracy truth. |
 | L2CS-Net | Official repository is MIT; checkpoint is a separately downloaded `L2CSNet_gaze360.pkl` without a verified local checksum in this repo | ResNet50 pipeline and its own face-processing integration conflict with the existing headless, MediaPipe-owned path. It outputs yaw/pitch but no task-relevant calibrated confidence contract. | Serious independent later candidate; do not download or integrate for a proxy-only comparison. |
 | 3DGazeNet | Official repository provides Drive-hosted checkpoints but no root license file or release; no local checksum | Requires a separate old/CUDA-oriented environment, face preprocessing, and 3D eye-mesh output integration. Reuse rights are unverified. | Exclude unless code and weight licensing is clarified. |

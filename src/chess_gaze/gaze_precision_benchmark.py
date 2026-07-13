@@ -33,6 +33,8 @@ EXPERIMENTAL_VARIABLE_FIELDS: dict[
             "calibration.unigaze_face_crop_scale",
             "calibration.unigaze_image_mean_rgb",
             "calibration.unigaze_image_std_rgb",
+            "calibration.unigaze_face_model_id",
+            "calibration.unigaze_face_model_checksum_sha256",
         }
     )
 }
