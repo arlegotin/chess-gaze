@@ -8,6 +8,7 @@ from typing import Literal
 from pytest import CaptureFixture, MonkeyPatch
 
 import chess_gaze.unigaze_batch_benchmark as benchmark
+from chess_gaze.model_assets import ResolvedModelAsset
 from chess_gaze.run_equivalence import EquivalenceReport, EquivalenceTolerances
 from chess_gaze.unigaze_batch_benchmark import (
     BenchmarkCandidateResult,
@@ -25,6 +26,43 @@ BenchmarkStatus = Literal[
     "unsupported_op",
 ]
 ForwardStatus = Literal["not_run", "passed", "failed"]
+
+
+def test_forward_benchmark_resolves_only_its_unigaze_asset(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    unigaze_asset = ResolvedModelAsset(
+        model_id="unigaze-h14-joint",
+        task_name="gaze_estimation",
+        resolved_path=tmp_path / "unigaze_h14_joint.safetensors",
+        source_url="https://example.invalid/unigaze",
+        checksum_sha256="1" * 64,
+        license="MG-NC-RAI-2.0",
+    )
+    captured: dict[str, object] = {}
+
+    def validate_assets(
+        registry: object,
+        models_root: Path,
+        approved_licenses: set[str],
+        *,
+        required_model_ids: set[str] | None = None,
+    ) -> list[ResolvedModelAsset]:
+        del registry, approved_licenses
+        captured["models_root"] = models_root
+        captured["required_model_ids"] = required_model_ids
+        return [unigaze_asset]
+
+    monkeypatch.setattr(benchmark, "validate_required_assets", validate_assets)
+
+    resolved = benchmark._resolved_unigaze_asset(tmp_path)
+
+    assert resolved is unigaze_asset
+    assert captured == {
+        "models_root": tmp_path,
+        "required_model_ids": {"unigaze-h14-joint"},
+    }
 
 
 def test_benchmark_report_selects_fastest_passing_mps_batch_size() -> None:
@@ -381,6 +419,8 @@ def test_benchmark_cli_writes_candidate_rows_and_removes_mps_env(
     assert all(command[:2] == ["chess-gaze", "analyze"] for command in commands)
     for command in commands:
         assert "--qa-summary" in command
+        profile_index = command.index("--unigaze-preprocessing-profile")
+        assert command[profile_index + 1] == "reference_face2x_imagenet"
     for env in subprocess_envs:
         assert "PYTORCH_ENABLE_MPS_FALLBACK" not in env
         assert "PYTORCH_MPS_FAST_MATH" not in env

@@ -93,7 +93,22 @@ def validate_required_assets(
     registry: ModelRegistry,
     models_root: Path,
     approved_licenses: set[str],
+    *,
+    required_model_ids: set[str] | None = None,
 ) -> list[ResolvedModelAsset]:
+    entries = registry.models
+    if required_model_ids is not None:
+        registry_model_ids = {entry.model_id for entry in registry.models}
+        missing_model_ids = required_model_ids - registry_model_ids
+        if missing_model_ids:
+            missing_model_id = min(missing_model_ids)
+            raise ModelAssetError(
+                CliErrorCode.MODEL_ASSET_MISSING,
+                f"Model registry entry not found: {missing_model_id}",
+            )
+        entries = [
+            entry for entry in registry.models if entry.model_id in required_model_ids
+        ]
     manifest = load_model_manifest(models_root / "manifest.json")
     manifest_paths = {
         entry.model_id: entry.installed_relative_path
@@ -102,7 +117,7 @@ def validate_required_assets(
     }
 
     resolved_assets: list[ResolvedModelAsset] = []
-    for entry in registry.models:
+    for entry in entries:
         if entry.requires_license_approval and (
             not entry.license_approved
             or entry.license_approved_by is None

@@ -7,7 +7,7 @@ import pytest
 from chess_gaze.video_decode import inspect_video, iter_decoded_frames
 
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
-NAKAMURA_SHORT_FRAME_COUNT = 180
+NAKAMURA_SHORT_FRAME_COUNT = 1200
 
 
 @pytest.mark.parametrize(

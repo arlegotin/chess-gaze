@@ -38,6 +38,7 @@ from chess_gaze.run_equivalence import (
     EquivalenceTolerances,
     compare_runs,
 )
+from chess_gaze.unigaze_preprocessing import REFERENCE_UNIGAZE_PREPROCESSING_PROFILE
 from chess_gaze.unigaze_runtime import (
     prepare_unigaze_runtime,
     synchronize_if_needed,
@@ -545,6 +546,8 @@ def _run_analysis_subprocess(
         device,
         "--unigaze-batch-size",
         str(batch_size),
+        "--unigaze-preprocessing-profile",
+        REFERENCE_UNIGAZE_PREPROCESSING_PROFILE,
     ]
     return subprocess.run(
         command,
@@ -701,7 +704,11 @@ def _benchmark_unigaze_forward(
                 asset,
                 device=device,
                 batch_size=batch_size,
-                input_size_px=default_calibration().unigaze_input_size_px,
+                input_size_px=default_calibration(
+                    unigaze_preprocessing_profile=(
+                        REFERENCE_UNIGAZE_PREPROCESSING_PROFILE
+                    )
+                ).unigaze_input_size_px,
             )
         except Exception as exc:
             preflight_seconds = time.perf_counter() - preflight_start
@@ -828,6 +835,7 @@ def _resolved_unigaze_asset(models_root: Path) -> ResolvedModelAsset:
         registry,
         models_root,
         set(DEFAULT_APPROVED_LICENSES),
+        required_model_ids={UNIGAZE_MODEL_ID},
     )
     for asset in assets:
         if asset.model_id == UNIGAZE_MODEL_ID:

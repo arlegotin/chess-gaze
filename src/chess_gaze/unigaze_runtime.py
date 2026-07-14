@@ -66,6 +66,7 @@ def prepare_unigaze_runtime(
         inference=InferenceRuntimeRecord(
             observer_source="default_model_observer",
             unigaze_model_id=asset.model_id,
+            unigaze_model_checksum_sha256=asset.checksum_sha256,
             unigaze_device=device,
             unigaze_batch_size=batch_size,
             torch_version=torch.__version__,
@@ -82,6 +83,7 @@ def external_observer_inference_record() -> InferenceRuntimeRecord:
     return InferenceRuntimeRecord(
         observer_source="external_observer",
         unigaze_model_id=None,
+        unigaze_model_checksum_sha256=None,
         unigaze_device="not_applicable",
         unigaze_batch_size=None,
         torch_version=None,

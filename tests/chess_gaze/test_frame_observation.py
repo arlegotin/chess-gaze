@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,7 @@ from chess_gaze.face_observation import (
     FaceSelection,
 )
 from chess_gaze.frame_observation import ModelBackedFrameObserver, ModelInferenceError
-from chess_gaze.frame_records import ErrorRecord
+from chess_gaze.frame_records import CalibrationRecord, ErrorRecord
 from chess_gaze.gaze_observation import (
     CropTransformRecord,
     FaceModelGaze,
@@ -100,9 +101,13 @@ class _FakeGazeModel:
         return self.predict_batch(normalized_batch)[0]
 
     def predict_batch(
-        self, normalized_batch: torch.Tensor
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
     ) -> tuple[FaceModelGaze, ...]:
         assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
+        assert camera_from_normalized_rotations is None
         return tuple(
             FaceModelGaze(
                 valid=True,
@@ -126,9 +131,13 @@ class _DisagreeingGazeModel:
         return self.predict_batch(normalized_batch)[0]
 
     def predict_batch(
-        self, normalized_batch: torch.Tensor
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
     ) -> tuple[FaceModelGaze, ...]:
         assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
+        assert camera_from_normalized_rotations is None
         return tuple(
             FaceModelGaze(
                 valid=True,
@@ -152,9 +161,13 @@ class _OneInvalidRowGazeModel:
         return self.predict_batch(normalized_batch)[0]
 
     def predict_batch(
-        self, normalized_batch: torch.Tensor
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
     ) -> tuple[FaceModelGaze, ...]:
         assert tuple(normalized_batch.shape[1:]) == (3, 224, 224)
+        assert camera_from_normalized_rotations is None
         return (
             FaceModelGaze(
                 valid=True,
@@ -187,9 +200,12 @@ class _RaisingBatchGazeModel:
         return self.predict_batch(normalized_batch)[0]
 
     def predict_batch(
-        self, normalized_batch: torch.Tensor
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
     ) -> tuple[FaceModelGaze, ...]:
-        del normalized_batch
+        del normalized_batch, camera_from_normalized_rotations
         raise ValueError(
             "UniGaze pred_gaze must have shape (batch, 2) matching input batch"
         )
@@ -399,6 +415,8 @@ def _normalize_face_crop(
     crop_scale: float,
     image_mean_rgb: tuple[float, float, float] | None,
     image_std_rgb: tuple[float, float, float] | None,
+    landmarks_image_px: Sequence[Point2D] | None = None,
+    face_model_points: np.ndarray | None = None,
 ) -> NormalizedFaceCrop:
     assert rgb_frame.shape == (48, 64, 3)
     assert bbox == _box(10.0, 8.0, 54.0, 44.0)
@@ -407,6 +425,8 @@ def _normalize_face_crop(
     assert crop_scale == 2.0
     assert image_mean_rgb == (0.485, 0.456, 0.406)
     assert image_std_rgb == (0.229, 0.224, 0.225)
+    assert landmarks_image_px == _candidate().landmarks_image_px
+    assert face_model_points is None
     return NormalizedFaceCrop(
         tensor=torch.zeros((1, 3, 224, 224), dtype=torch.float32),
         transform=CropTransformRecord(
@@ -423,6 +443,85 @@ def _normalize_face_crop(
                 m12=0.0,
             ),
         ),
+    )
+
+
+def _reference_calibration() -> CalibrationRecord:
+    return default_calibration(
+        unigaze_preprocessing_profile="reference_face2x_imagenet"
+    )
+
+
+class _RotationCapturingGazeModel:
+    def __init__(self) -> None:
+        self.rotations: tuple[np.ndarray, ...] = ()
+
+    def predict(self, normalized_batch: torch.Tensor) -> FaceModelGaze:
+        return self.predict_batch(normalized_batch)[0]
+
+    def predict_batch(
+        self,
+        normalized_batch: torch.Tensor,
+        *,
+        camera_from_normalized_rotations: Sequence[np.ndarray] | None = None,
+    ) -> tuple[FaceModelGaze, ...]:
+        assert camera_from_normalized_rotations is not None
+        self.rotations = tuple(
+            np.asarray(rotation).copy() for rotation in camera_from_normalized_rotations
+        )
+        return tuple(
+            FaceModelGaze(
+                valid=True,
+                method="fake_unigaze",
+                pitch_radians=0.02,
+                yaw_radians=0.01,
+                unit_vector=pitch_yaw_to_unit_vector(
+                    pitch_radians=0.02,
+                    yaw_radians=0.01,
+                ),
+                confidence=None,
+                confidence_source="not_provided_by_unigaze",
+                reason_invalid=None,
+            )
+            for _ in range(normalized_batch.shape[0])
+        )
+
+
+def _normalize_geometric_face_crop(
+    rgb_frame: np.ndarray,
+    bbox: BBox,
+    *,
+    input_size_px: int,
+    profile: str,
+    crop_scale: float,
+    image_mean_rgb: tuple[float, float, float] | None,
+    image_std_rgb: tuple[float, float, float] | None,
+    landmarks_image_px: Sequence[Point2D] | None = None,
+    face_model_points: np.ndarray | None = None,
+) -> NormalizedFaceCrop:
+    del bbox, crop_scale, image_mean_rgb, image_std_rgb
+    assert input_size_px == 224
+    assert profile == "official_geometric_v1"
+    assert landmarks_image_px == _candidate().landmarks_image_px
+    assert face_model_points is not None
+    angle = float(rgb_frame[0, 0, 0]) / 10.0
+    rotation = np.asarray(
+        [
+            [np.cos(angle), 0.0, np.sin(angle)],
+            [0.0, 1.0, 0.0],
+            [-np.sin(angle), 0.0, np.cos(angle)],
+        ],
+        dtype=np.float64,
+    )
+    return NormalizedFaceCrop(
+        tensor=torch.zeros((1, 3, 224, 224), dtype=torch.float32),
+        transform=CropTransformRecord(
+            source_bbox_image_px=_box(10.0, 8.0, 54.0, 44.0),
+            output_size_px=224,
+            image_px_from_crop_px=None,
+        ),
+        camera_from_normalized_rotation=rotation,
+        normalized_image_from_cropped_image_homography=np.eye(3),
     )
 
 
@@ -447,7 +546,7 @@ def test_model_backed_frame_observer_maps_model_outputs_to_frame_record(
     observer = ModelBackedFrameObserver(
         face_observer=face_observer,
         gaze_model=_FakeGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -483,7 +582,7 @@ def test_model_backed_frame_observer_preserves_missing_right_eye_reason(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
         gaze_model=_FakeGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=_observe_eyes_missing_right,
         head_pose_estimator=_estimate_head_pose,
@@ -513,7 +612,7 @@ def test_model_backed_frame_observer_records_missing_face_without_later_models(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_missing_face_observation()),
         gaze_model=_FakeGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=fail_eye_observer,
         head_pose_estimator=_estimate_head_pose,
@@ -542,7 +641,7 @@ def test_model_backed_frame_observer_uses_unigaze_without_disagreement_status(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
         gaze_model=_DisagreeingGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -579,7 +678,7 @@ def test_model_backed_frame_observer_marks_multiple_face_candidates_as_warning(
             )
         ),
         gaze_model=_FakeGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -618,7 +717,7 @@ def test_model_backed_observer_marks_multiple_candidates_without_gaze_warning(
             )
         ),
         gaze_model=_DisagreeingGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -647,7 +746,7 @@ def test_model_backed_frame_observer_batch_maps_model_rows_to_frames(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
         gaze_model=_FakeGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=run_layout,
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -682,7 +781,7 @@ def test_model_backed_frame_observer_batch_preserves_missing_face_record(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_missing_face_observation()),
         gaze_model=_FakeGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=_run_layout(tmp_path),
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -704,7 +803,7 @@ def test_model_backed_frame_observer_batch_marks_only_invalid_model_row(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
         gaze_model=_OneInvalidRowGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=_run_layout(tmp_path),
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -738,7 +837,7 @@ def test_model_backed_frame_observer_batch_propagates_model_contract_errors(
     observer = ModelBackedFrameObserver(
         face_observer=_FakeFaceObserver(_face_observation(candidate)),
         gaze_model=_RaisingBatchGazeModel(),
-        calibration=default_calibration(),
+        calibration=_reference_calibration(),
         run_layout=_run_layout(tmp_path),
         eye_observer=_observe_eyes,
         head_pose_estimator=_estimate_head_pose,
@@ -747,3 +846,101 @@ def test_model_backed_frame_observer_batch_propagates_model_contract_errors(
 
     with pytest.raises(ModelInferenceError, match="pred_gaze must have shape"):
         observer.observe_batch([_observer_frame()])
+
+
+def test_model_backed_frame_observer_threads_each_geometric_inverse_rotation(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    gaze_model = _RotationCapturingGazeModel()
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=gaze_model,
+        calibration=default_calibration(
+            unigaze_preprocessing_profile="official_geometric_v1"
+        ),
+        run_layout=_run_layout(tmp_path),
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=_normalize_geometric_face_crop,
+        unigaze_face_model_points=np.zeros((6, 3), dtype=np.float64),
+    )
+    second = ObserverFrame(
+        frame_id="f000000001",
+        frame_index=1,
+        timestamp_seconds=1.0,
+        rgb=np.full((48, 64, 3), 1, dtype=np.uint8),
+        pts=None,
+        pts_seconds=None,
+        duration_seconds=None,
+    )
+
+    records = observer.observe_batch([_observer_frame(), second])
+
+    assert len(gaze_model.rotations) == 2
+    np.testing.assert_allclose(gaze_model.rotations[0], np.eye(3), atol=1e-12)
+    assert gaze_model.rotations[1][0, 2] > 0.0
+    assert all(record.appearance_gaze.valid for record in records)
+
+
+def test_geometric_normalization_failure_invalidates_only_its_frame(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    gaze_model = _RotationCapturingGazeModel()
+
+    def fail_second_frame(
+        rgb_frame: np.ndarray,
+        bbox: BBox,
+        *,
+        input_size_px: int,
+        profile: str,
+        crop_scale: float,
+        image_mean_rgb: tuple[float, float, float] | None,
+        image_std_rgb: tuple[float, float, float] | None,
+        landmarks_image_px: Sequence[Point2D] | None,
+        face_model_points: np.ndarray | None,
+    ) -> NormalizedFaceCrop:
+        if int(rgb_frame[0, 0, 0]) == 1:
+            raise ValueError("degenerate geometric normalization")
+        return _normalize_geometric_face_crop(
+            rgb_frame,
+            bbox,
+            input_size_px=input_size_px,
+            profile=profile,
+            crop_scale=crop_scale,
+            image_mean_rgb=image_mean_rgb,
+            image_std_rgb=image_std_rgb,
+            landmarks_image_px=landmarks_image_px,
+            face_model_points=face_model_points,
+        )
+
+    observer = ModelBackedFrameObserver(
+        face_observer=_FakeFaceObserver(_face_observation(candidate)),
+        gaze_model=gaze_model,
+        calibration=default_calibration(
+            unigaze_preprocessing_profile="official_geometric_v1"
+        ),
+        run_layout=_run_layout(tmp_path),
+        eye_observer=_observe_eyes,
+        head_pose_estimator=_estimate_head_pose,
+        face_crop_normalizer=fail_second_frame,
+        unigaze_face_model_points=np.zeros((6, 3), dtype=np.float64),
+    )
+    second = ObserverFrame(
+        frame_id="f000000001",
+        frame_index=1,
+        timestamp_seconds=1.0,
+        rgb=np.full((48, 64, 3), 1, dtype=np.uint8),
+        pts=None,
+        pts_seconds=None,
+        duration_seconds=None,
+    )
+
+    first_record, second_record = observer.observe_batch([_observer_frame(), second])
+
+    assert first_record.appearance_gaze.valid is True
+    assert second_record.appearance_gaze.valid is False
+    assert second_record.status is FrameStatus.ERROR
+    assert ErrorCode.GAZE_MODEL_FAILED in {error.code for error in second_record.errors}
+    assert len(gaze_model.rotations) == 1

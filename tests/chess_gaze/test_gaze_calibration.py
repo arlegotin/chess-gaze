@@ -92,6 +92,63 @@ def test_fit_affine_gaze_calibrator_recovers_exact_affine_mapping() -> None:
     assert held_out_metrics.root_mean_squared_error == pytest.approx(0.0, abs=1e-12)
 
 
+def test_fit_affine_gaze_calibrator_handles_rank_deficient_zero_ridge() -> None:
+    coefficients_x = (0.5, 1.0, -0.25, 0.0, 0.0)
+    coefficients_y = (-0.75, -0.5, 0.75, 0.0, 0.0)
+    samples = [
+        _make_sample(
+            yaw=value,
+            pitch=2.0 * value,
+            head_yaw=0.0,
+            head_pitch=0.0,
+            coefficients_x=coefficients_x,
+            coefficients_y=coefficients_y,
+        )
+        for value in (0.0, 1.0, 1.0, 2.0, 3.0)
+    ]
+    held_out = _make_sample(
+        yaw=4.0,
+        pitch=8.0,
+        head_yaw=0.0,
+        head_pitch=0.0,
+        coefficients_x=coefficients_x,
+        coefficients_y=coefficients_y,
+    )
+
+    model = fit_affine_gaze_calibrator(samples, ridge_lambda=0.0)
+
+    assert np.isfinite(model.coefficients).all()
+    assert np.isfinite(model.predict(held_out)).all()
+
+
+def test_ridge_does_not_penalize_affine_intercept() -> None:
+    samples = [
+        GazeCalibrationSample(
+            yaw_radians=0.0,
+            pitch_radians=0.0,
+            head_yaw_radians=0.0,
+            head_pitch_radians=0.0,
+            target_x=2.0,
+            target_y=-3.0,
+        )
+        for _ in range(5)
+    ]
+
+    model = fit_affine_gaze_calibrator(samples, ridge_lambda=1_000_000.0)
+
+    np.testing.assert_allclose(
+        model.coefficients,
+        np.asarray(
+            (
+                (2.0, 0.0, 0.0, 0.0, 0.0),
+                (-3.0, 0.0, 0.0, 0.0, 0.0),
+            ),
+            dtype=np.float64,
+        ),
+        atol=1e-12,
+    )
+
+
 def test_evaluate_affine_gaze_calibrator_reports_held_out_error_separately() -> None:
     training_relation_x = (0.0, 1.0, 0.5, -0.25, 0.75)
     training_relation_y = (0.1, -0.3, 0.8, 0.2, -0.6)

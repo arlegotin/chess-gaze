@@ -99,6 +99,39 @@ def test_registry_file_records_unigaze_license_approval_metadata() -> None:
     )
 
 
+def test_registry_file_pins_approved_unigaze_face_geometry_asset() -> None:
+    registry_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "chess_gaze"
+        / "model_registry.json"
+    )
+    registry = load_model_registry(registry_path)
+
+    face_model = registry.by_id("unigaze-face-model-v1")
+
+    assert face_model.expected_relative_path == Path("unigaze/face_model.txt")
+    assert face_model.checksum_sha256 == (
+        "0c943d1d48627d97038b64f9a73816b9ab80a002ce81a8f04d532da2f4c337d7"
+    )
+    assert face_model.source_url == (
+        "https://raw.githubusercontent.com/ut-vision/UniGaze/"
+        "9c240fbe33f3d6146970a77b7c8fa06a7e60019e/unigaze/data/face_model.txt"
+    )
+    assert face_model.license == "MG-NC-RAI-2.0"
+    assert face_model.license_approved_by == "repo_owner"
+    assert face_model.license_approved_at == "2026-07-13"
+    assert face_model.input_contract == {
+        "file_shape": [50, 3],
+        "selected_rows": [20, 23, 26, 29, 15, 19],
+        "mediapipe_landmark_indices": [33, 133, 362, 263, 98, 327],
+    }
+    assert face_model.output_contract == {
+        "selected_face_model_points_shape": [6, 3],
+        "coordinate_order": "xyz",
+    }
+
+
 def test_model_manifest_defaults_to_independent_model_lists() -> None:
     manifest_a = ModelManifest()
     manifest_b = ModelManifest()
@@ -253,6 +286,28 @@ def test_validate_required_assets_resolves_matching_fixture_assets(
         mediapipe_path,
         unigaze_path,
     }
+
+
+def test_validate_required_assets_skips_unselected_registry_entries(
+    tmp_path: Path,
+) -> None:
+    registry_path = build_registry(tmp_path, unigaze_checksum=None)
+    models_root = tmp_path / "models"
+    mediapipe_path = models_root / "mediapipe" / "face_landmarker.task"
+    mediapipe_path.parent.mkdir(parents=True)
+    mediapipe_path.write_bytes(b"mediapipe")
+    registry = load_model_registry(registry_path)
+
+    resolved_assets = validate_required_assets(
+        registry,
+        models_root,
+        set(),
+        required_model_ids={"mediapipe-face-landmarker"},
+    )
+
+    assert [asset.model_id for asset in resolved_assets] == [
+        "mediapipe-face-landmarker"
+    ]
 
 
 def test_prefetch_model_asset_accepts_hf_token_without_analysis_dependency(

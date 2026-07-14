@@ -18,6 +18,9 @@ MODEL_REGISTRY_PATH = REPO_ROOT / "src" / "chess_gaze" / "model_registry.json"
 MODELS_ROOT = REPO_ROOT / "models"
 MEDIAPIPE_MODEL_ID = "mediapipe-face-landmarker"
 NAKAMURA_SHORT_VIDEO = Path("artifacts/input/nakamura_short.mp4")
+NAKAMURA_SHORT_VIDEO_SHA256 = (
+    "6524928897505e614a0eae419a1b7bd0e2a8dff25ffed22db2706d02bbf909bc"
+)
 NAKAMURA_SHORT_FRAME_INDICES = (0, 30, 60, 90, 120, 150, 179)
 CARLSEN_VIDEO = Path("artifacts/input/carlsen_1.mp4")
 CARLSEN_REPORTED_VISIBLE_FRAME_INDICES = (
@@ -54,13 +57,13 @@ SAMPLED_FRAME_INDICES = {
     NAKAMURA_SHORT_VIDEO: NAKAMURA_SHORT_FRAME_INDICES,
 }
 NAKAMURA_SHORT_EXPECTED_FACE_BOXES = {
-    "f000000000": (368.3, 678.9, 532.2, 871.1),
-    "f000000030": (348.9, 705.1, 513.4, 884.7),
-    "f000000060": (353.7, 720.1, 519.3, 893.4),
-    "f000000090": (363.7, 695.2, 527.9, 894.5),
-    "f000000120": (390.8, 650.9, 547.8, 852.3),
-    "f000000150": (388.0, 635.1, 541.8, 823.0),
-    "f000000179": (389.6, 685.2, 551.0, 869.4),
+    "f000000000": (352.6, 617.6, 523.2, 809.0),
+    "f000000030": (357.4, 619.2, 523.6, 811.5),
+    "f000000060": (380.0, 618.5, 533.4, 804.4),
+    "f000000090": (374.1, 620.7, 534.8, 812.8),
+    "f000000120": (374.3, 624.3, 532.5, 815.5),
+    "f000000150": (376.2, 625.4, 533.6, 815.1),
+    "f000000179": (377.2, 626.9, 535.0, 815.7),
 }
 
 pytestmark = pytest.mark.native_mediapipe
@@ -147,6 +150,7 @@ def test_mediapipe_face_observer_recovers_nakamura_short_visible_faces() -> None
     video_path = REPO_ROOT / NAKAMURA_SHORT_VIDEO
     if not video_path.is_file():
         pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
+    assert sha256_file(video_path) == NAKAMURA_SHORT_VIDEO_SHA256
 
     registry = load_model_registry(MODEL_REGISTRY_PATH)
     model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
@@ -194,6 +198,7 @@ def test_mediapipe_observer_keeps_nakamura_short_faces_bounded() -> None:
     video_path = REPO_ROOT / NAKAMURA_SHORT_VIDEO
     if not video_path.is_file():
         pytest.skip(f"BLOCKED: missing repair verification video: {video_path}")
+    assert sha256_file(video_path) == NAKAMURA_SHORT_VIDEO_SHA256
 
     registry = load_model_registry(MODEL_REGISTRY_PATH)
     model_entry = registry.by_id(MEDIAPIPE_MODEL_ID)

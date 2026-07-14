@@ -22,6 +22,10 @@ from chess_gaze.model_assets import (
     sha256_file,
 )
 from chess_gaze.pipeline import ObserverFrame
+from chess_gaze.unigaze_preprocessing import (
+    UNIGAZE_FACE_MODEL_ID,
+    load_unigaze_face_model_points,
+)
 from chess_gaze.video_decode import DecodedFrame, iter_decoded_frames
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,8 +53,10 @@ def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
     registry = load_model_registry(MODEL_REGISTRY_PATH)
     mediapipe_entry = registry.by_id(MEDIAPIPE_MODEL_ID)
     unigaze_entry = registry.by_id(UNIGAZE_MODEL_ID)
+    face_model_entry = registry.by_id(UNIGAZE_FACE_MODEL_ID)
     mediapipe_path = MODELS_ROOT / mediapipe_entry.expected_relative_path
     unigaze_path = MODELS_ROOT / unigaze_entry.expected_relative_path
+    face_model_path = MODELS_ROOT / face_model_entry.expected_relative_path
     if not mediapipe_path.is_file():
         pytest.skip(
             "BLOCKED: missing mandatory MediaPipe Face Landmarker task asset: "
@@ -60,10 +66,14 @@ def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
         pytest.skip(
             f"BLOCKED: missing mandatory UniGaze checkpoint asset: {unigaze_path}"
         )
+    if not face_model_path.is_file():
+        pytest.skip(f"BLOCKED: missing UniGaze face model: {face_model_path}")
     assert mediapipe_entry.checksum_sha256 is not None
     assert unigaze_entry.checksum_sha256 is not None
+    assert face_model_entry.checksum_sha256 is not None
     assert sha256_file(mediapipe_path) == mediapipe_entry.checksum_sha256
     assert sha256_file(unigaze_path) == unigaze_entry.checksum_sha256
+    assert sha256_file(face_model_path) == face_model_entry.checksum_sha256
 
     _disable_network_helpers(monkeypatch)
     calibration = default_calibration()
@@ -92,6 +102,7 @@ def test_default_model_observer_recommends_gaze_on_nakamura_short_frames(
         ),
         calibration=calibration,
         run_layout=run_layout,
+        unigaze_face_model_points=load_unigaze_face_model_points(face_model_path),
     )
 
     try:
@@ -170,7 +181,9 @@ def test_unigaze_predicts_from_real_video_face_evidence(
     assert sha256_file(unigaze_path) == unigaze_entry.checksum_sha256
 
     _disable_network_helpers(monkeypatch)
-    calibration = default_calibration()
+    calibration = default_calibration(
+        unigaze_preprocessing_profile="reference_face2x_imagenet"
+    )
     face_observer = MediaPipeFaceObserver(
         model_asset_path=mediapipe_path,
         calibration=calibration,
@@ -209,6 +222,10 @@ def test_unigaze_predicts_from_real_video_face_evidence(
                     frame.rgb,
                     selected_face.bounding_box_image_px,
                     input_size_px=calibration.unigaze_input_size_px,
+                    profile=calibration.unigaze_preprocessing_profile,
+                    crop_scale=calibration.unigaze_face_crop_scale,
+                    image_mean_rgb=calibration.unigaze_image_mean_rgb,
+                    image_std_rgb=calibration.unigaze_image_std_rgb,
                 )
                 assert normalized_crop.tensor.shape == (1, 3, 224, 224)
                 face_gaze = model.predict(normalized_crop.tensor)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import hashlib
+import math
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
+from typing import Any, cast
 
 import av
 import numpy as np
+from av.sidedata.sidedata import Type as SideDataType
 
 from chess_gaze.artifact_runs import frame_id
 from chess_gaze.errors import CliErrorCode
@@ -59,7 +63,25 @@ def inspect_video(path: Path) -> VideoInspection:
 
     with _open_video_container(path) as container:
         stream = _video_stream_or_raise(container, path)
-        frame_count_decoded = sum(1 for _ in container.decode(stream))
+        stream_rotation = _rotation_from_stream(stream)
+        rotation_degrees = stream_rotation
+
+        def inspected_frames() -> Iterator[av.VideoFrame]:
+            nonlocal rotation_degrees
+            for frame, resolved_rotation in _frames_with_rotation(
+                container.decode(stream), stream_rotation
+            ):
+                rotation_degrees = resolved_rotation
+                yield frame
+
+        (
+            frame_count_decoded,
+            pts_sequence_sha256,
+            pts_sequence_usable,
+        ) = _decoded_pts_identity(inspected_frames())
+        frame_width, frame_height = _oriented_dimensions(
+            stream.width, stream.height, rotation_degrees
+        )
 
         return VideoInspection(
             source_path=path,
@@ -67,20 +89,22 @@ def inspect_video(path: Path) -> VideoInspection:
             video_manifest=VideoManifest(
                 source_path=str(path),
                 source_sha256=source_sha256,
-                frame_width=stream.width,
-                frame_height=stream.height,
+                frame_width=frame_width,
+                frame_height=frame_height,
                 frame_count_decoded=frame_count_decoded,
+                pts_sequence_sha256=pts_sequence_sha256,
+                pts_sequence_usable=pts_sequence_usable,
             ),
             container_name=container.format.name,
             container_long_name=container.format.long_name,
             stream_index=stream.index,
             codec_name=stream.name or stream.codec_context.name,
             codec_profile=stream.profile,
-            frame_width=stream.width,
-            frame_height=stream.height,
+            frame_width=frame_width,
+            frame_height=frame_height,
             nominal_fps=_fraction_to_float(stream.average_rate),
             time_base=_fraction_to_string(stream.time_base),
-            rotation_degrees=_rotation_from_stream(stream),
+            rotation_degrees=rotation_degrees,
             pixel_format=stream.pix_fmt,
             color_range=_codec_value(stream.codec_context.color_range),
             color_space=_codec_value(stream.codec_context.colorspace),
@@ -94,12 +118,15 @@ def inspect_video(path: Path) -> VideoInspection:
 def iter_decoded_frames(path: Path) -> Iterator[DecodedFrame]:
     with _open_video_container(path) as container:
         stream = _video_stream_or_raise(container, path)
+        stream_rotation = _rotation_from_stream(stream)
 
-        for index, frame in enumerate(container.decode(stream)):
+        for index, (frame, rotation_degrees) in enumerate(
+            _frames_with_rotation(container.decode(stream), stream_rotation)
+        ):
             yield DecodedFrame(
                 frame_index=index,
                 frame_id=frame_id(index),
-                rgb=frame.to_ndarray(format="rgb24"),
+                rgb=_oriented_rgb(frame, rotation_degrees),
                 pts=frame.pts,
                 pts_seconds=_frame_pts_seconds(frame),
                 duration_seconds=_frame_duration_seconds(frame),
@@ -140,9 +167,56 @@ def _rotation_from_stream(stream: av.video.stream.VideoStream) -> int | None:
         return None
 
     try:
-        return int(raw_rotation)
+        return _right_angle_rotation(int(raw_rotation))
     except ValueError:
         return None
+
+
+def _rotation_from_frame(frame: av.VideoFrame) -> int | None:
+    side_data = cast(Any, frame.side_data)
+    if SideDataType.DISPLAYMATRIX not in side_data:
+        return None
+    return _right_angle_rotation(frame.rotation)
+
+
+def _frames_with_rotation(
+    frames: Iterable[av.VideoFrame], stream_rotation: int | None
+) -> Iterator[tuple[av.VideoFrame, int | None]]:
+    previous_rotation: int | None = None
+    for frame in frames:
+        frame_rotation = _rotation_from_frame(frame)
+        rotation = stream_rotation if frame_rotation is None else frame_rotation
+        numeric_rotation = rotation or 0
+        if previous_rotation is not None and numeric_rotation != previous_rotation:
+            raise VideoDecodeError(
+                CliErrorCode.UNSUPPORTED_VIDEO,
+                "Video display rotation changes during decode",
+            )
+        previous_rotation = numeric_rotation
+        yield frame, rotation
+
+
+def _right_angle_rotation(rotation_degrees: int) -> int:
+    normalized = rotation_degrees % 360
+    if normalized % 90:
+        raise VideoDecodeError(
+            CliErrorCode.UNSUPPORTED_VIDEO,
+            f"Unsupported video display rotation: {rotation_degrees} degrees",
+        )
+    return normalized
+
+
+def _oriented_dimensions(
+    width: int, height: int, rotation_degrees: int | None
+) -> tuple[int, int]:
+    return (height, width) if rotation_degrees in (90, 270) else (width, height)
+
+
+def _oriented_rgb(frame: av.VideoFrame, rotation_degrees: int | None) -> np.ndarray:
+    rgb = frame.to_ndarray(format="rgb24")
+    if not rotation_degrees:
+        return rgb
+    return np.ascontiguousarray(np.rot90(rgb, k=rotation_degrees // 90))
 
 
 def _frame_count_hint(frame_count: int) -> int | None:
@@ -169,8 +243,35 @@ def _codec_value(value: int | None) -> int | None:
     return int(value)
 
 
+def _decoded_pts_identity(
+    frames: Iterable[av.VideoFrame],
+) -> tuple[int, str, bool]:
+    digest = hashlib.sha256()
+    count = 0
+    usable = True
+    previous_seconds: float | None = None
+    for frame in frames:
+        count += 1
+        time_base = frame.time_base
+        time_base_text = (
+            "null"
+            if time_base is None
+            else f"{time_base.numerator}/{time_base.denominator}"
+        )
+        digest.update(f"{frame.pts}\t{time_base_text}\n".encode())
+        seconds = _frame_pts_seconds(frame)
+        if (
+            seconds is None
+            or not math.isfinite(seconds)
+            or (previous_seconds is not None and seconds <= previous_seconds)
+        ):
+            usable = False
+        previous_seconds = seconds
+    return count, digest.hexdigest(), usable and count > 0
+
+
 def _frame_pts_seconds(frame: av.VideoFrame) -> float | None:
-    if frame.pts is None or frame.time_base is None:
+    if frame.pts is None or frame.time_base is None or frame.time_base <= 0:
         return None
     return float(frame.pts * frame.time_base)
 

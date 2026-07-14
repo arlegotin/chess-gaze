@@ -997,6 +997,7 @@ def test_scene_summary_serializes_structured_breakdowns() -> None:
     payload = summary.model_dump()
 
     assert payload["schema_version"] == "gaze-scene-summary-v2"
+    assert summary.in_bounds_target_plane_hit_frames is None
     assert payload["invalid_sphere_hit_reasons"] == {"UNIGAZE_INVALID": 2}
     assert payload["sphere_hit_angle_bounds"]["theta_min_radians"] == -0.42
     assert payload["representative_scene_warning_frame_ids"] == ["frame-0002"]

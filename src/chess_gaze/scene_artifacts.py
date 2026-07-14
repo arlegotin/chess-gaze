@@ -75,6 +75,7 @@ from chess_gaze.target_plane import (
     target_plane_unit_vector,
     target_plane_vector,
 )
+from chess_gaze.unigaze_preprocessing import REFERENCE_UNIGAZE_PREPROCESSING_PROFILE
 from chess_gaze.viewer_dependencies import (
     THREE_CDN_PROVIDER,
     THREE_LICENSE,
@@ -600,6 +601,13 @@ def _build_summary(
             if scene_frame.target_plane_hit is not None
             and scene_frame.target_plane_hit.valid
         ),
+        in_bounds_target_plane_hit_frames=sum(
+            1
+            for scene_frame in scene_frames
+            if scene_frame.target_plane_hit is not None
+            and scene_frame.target_plane_hit.valid
+            and scene_frame.target_plane_hit.inside_bounds is True
+        ),
         invalid_sphere_hit_reasons=dict(sorted(invalid_sphere_hit_reasons.items())),
         sphere_hit_angle_bounds=_sphere_hit_angle_bounds(scene_frames),
         representative_scene_warning_frame_ids=_representative_warning_frame_ids(
@@ -896,7 +904,9 @@ def _load_run_manifest(path: Path) -> RunManifest:
 
 def _load_calibration(path: Path) -> CalibrationRecord:
     if not path.exists():
-        return default_calibration()
+        return default_calibration(
+            unigaze_preprocessing_profile=REFERENCE_UNIGAZE_PREPROCESSING_PROFILE
+        )
     return CalibrationRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
 
